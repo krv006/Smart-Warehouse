@@ -1,13 +1,51 @@
 from django.db.models import Sum, F, DecimalField, ExpressionWrapper
-from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter
-from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import extend_schema, extend_schema_view
+from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
 from apps.models import Product, Stock, Sale
 from apps.permissions import IsOperatorOrReadOnly, IsManagement
-from apps.serializers import ProductSerializer, StockSerializer, SaleSerializer
+from apps.serializers import (ProductSerializer, StockSerializer, SaleSerializer,
+                               LoginSerializer, RegisterOperatorSerializer)
+
+
+@extend_schema(
+    summary="Login — JWT token olish",
+    description=(
+        "Username va parol bilan kirish. Muvaffaqiyatli bo'lsa "
+        "`access` va `refresh` tokenlar qaytariladi.\n\n"
+        "`Authorization: Bearer <access_token>` sarlavhasida ishlating."
+    ),
+    tags=["Auth"],
+    request=LoginSerializer,
+    responses={200: LoginSerializer},
+    auth=[],
+)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def login(request):
+    serializer = LoginSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    return Response(serializer.data)
+
+
+@extend_schema(
+    summary="Yangi operator yaratish (faqat Management)",
+    description="Faqat `MANAGEMENT` roli yangi `OPERATOR` foydalanuvchi qo'sha oladi.",
+    tags=["Auth"],
+    request=RegisterOperatorSerializer,
+    responses={201: RegisterOperatorSerializer},
+)
+@api_view(['POST'])
+@permission_classes([IsManagement])
+def register_operator(request):
+    serializer = RegisterOperatorSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    serializer.save()
+    return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
 @extend_schema_view(

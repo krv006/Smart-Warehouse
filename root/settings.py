@@ -4,13 +4,12 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from root.drf_settings import *
+from root.jazzmin_settings import JAZZMIN_SETTINGS, JAZZMIN_UI_TWEAKS
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# .env faylidan o'zgaruvchilarni yuklash
 load_dotenv(BASE_DIR / '.env')
 
-# Read secrets/flags from the environment, with safe dev defaults.
 SECRET_KEY = os.environ.get(
     'SECRET_KEY',
     'django-insecure-r@x(9r$&er@-l1m_-#3r&%c-bs&0i*_yk7rtwvzzqno9&2qgg8',
@@ -20,21 +19,24 @@ DEBUG = os.environ.get('DEBUG', 'True') == 'True'
 
 ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
-
 INSTALLED_APPS = [
+    # Jazzmin — Django admin dan OLDIN bo'lishi shart
+    'jazzmin',
+
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    # todo my package
-    'apps.apps.AppsConfig',
-    # todo third party package
-    "rest_framework",
-    "django_filters",
-    "drf_spectacular",
 
+    # My apps
+    'apps.apps.AppsConfig',
+
+    # Third party
+    'rest_framework',
+    'django_filters',
+    'drf_spectacular',
 ]
 
 MIDDLEWARE = [
@@ -52,8 +54,7 @@ ROOT_URLCONF = 'root.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [BASE_DIR / 'templates']
-        ,
+        'DIRS': [BASE_DIR / 'templates'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -67,9 +68,6 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'root.wsgi.application'
 
-
-# TZ: SQL DB (MySQL/PostgreSQL). DB_ENGINE=postgres bo'lsa PostgreSQL,
-# aks holda mahalliy ishlash uchun sqlite.
 if os.environ.get('DB_ENGINE') == 'postgres':
     DATABASES = {
         'default': {
@@ -89,33 +87,20 @@ else:
         }
     }
 
-# TZ: 2 ta rol (Operator / Management) — maxsus foydalanuvchi modeli.
 AUTH_USER_MODEL = 'apps.User'
 
-
 AUTH_PASSWORD_VALIDATORS = [
-    {
-        'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
-    },
+    {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
 ]
 
-
-LANGUAGE_CODE = 'en-us'
-
-TIME_ZONE = 'UTC'
-
+LANGUAGE_CODE = 'uz'
+TIME_ZONE = 'Asia/Tashkent'
 USE_I18N = True
-
 USE_TZ = True
 
-
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+STATICFILES_DIRS = [BASE_DIR / 'static']

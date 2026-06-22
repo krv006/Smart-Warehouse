@@ -2,6 +2,8 @@ from datetime import date
 from decimal import Decimal
 
 from django.test import TestCase
+from django.urls import reverse
+from rest_framework.test import APIClient
 
 from apps.models import User, Product, Stock, Sale
 from apps.serializers import SaleSerializer
@@ -55,3 +57,45 @@ class RoleTests(TestCase):
         self.assertFalse(operator.is_management)
         self.assertTrue(manager.is_management)
         self.assertFalse(manager.is_operator)
+
+
+class AuthAPITests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.manager = User.objects.create_user(
+            'manager', password='pass1234', role=User.MANAGEMENT
+        )
+        self.operator = User.objects.create_user(
+            'operator', password='pass1234', role=User.OPERATOR
+        )
+
+    def test_login_returns_tokens(self):
+        res = self.client.post(reverse('login'),
+                               {'username': 'manager', 'password': 'pass1234'})
+        self.assertEqual(res.status_code, 200)
+        self.assertIn('access', res.data)
+        self.assertIn('refresh', res.data)
+        self.assertEqual(res.data['user']['role'], User.MANAGEMENT)
+
+    def test_login_wrong_password(self):
+        res = self.client.post(reverse('login'),
+                               {'username': 'manager', 'password': 'wrong'})
+        self.assertEqual(res.status_code, 400)
+
+    def test_management_can_create_operator(self):
+        self.client.force_authenticate(self.manager)
+        res = self.client.post(reverse('register-operator'), {
+            'username': 'newop',
+            'password': 'securepass123',
+        })
+        self.assertEqual(res.status_code, 201)
+        new_user = User.objects.get(username='newop')
+        self.assertEqual(new_user.role, User.OPERATOR)
+
+    def test_operator_cannot_create_operator(self):
+        self.client.force_authenticate(self.operator)
+        res = self.client.post(reverse('register-operator'), {
+            'username': 'newop2',
+            'password': 'securepass123',
+        })
+        self.assertEqual(res.status_code, 403)

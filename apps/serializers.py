@@ -1,10 +1,57 @@
+from django.contrib.auth import authenticate
 from django.db import transaction
 from django.db.models import F
 from drf_spectacular.utils import extend_schema_serializer, OpenApiExample
-from rest_framework.serializers import (ModelSerializer, ValidationError,
-                                         IntegerField, DecimalField)
+from rest_framework.serializers import (ModelSerializer, Serializer,
+                                        ValidationError, IntegerField,
+                                        DecimalField, CharField)
+from rest_framework_simplejwt.tokens import RefreshToken
 
-from apps.models import Product, Stock, Sale
+from apps.models import User, Product, Stock, Sale
+
+
+class LoginSerializer(Serializer):
+    username = CharField()
+    password = CharField(write_only=True, style={'input_type': 'password'})
+
+    def validate(self, attrs):
+        user = authenticate(username=attrs['username'], password=attrs['password'])
+        if not user:
+            raise ValidationError('Login yoki parol noto\'g\'ri.')
+        if not user.is_active:
+            raise ValidationError('Foydalanuvchi faol emas.')
+        attrs['user'] = user
+        return attrs
+
+    def to_representation(self, instance):
+        user = self.validated_data['user']
+        refresh = RefreshToken.for_user(user)
+        return {
+            'access':  str(refresh.access_token),
+            'refresh': str(refresh),
+            'user': {
+                'id':       user.id,
+                'username': user.username,
+                'role':     user.role,
+            },
+        }
+
+
+class RegisterOperatorSerializer(ModelSerializer):
+    password = CharField(write_only=True, min_length=8,
+                         style={'input_type': 'password'})
+
+    class Meta:
+        model = User
+        fields = ('id', 'username', 'password', 'first_name', 'last_name')
+        read_only_fields = ('id',)
+
+    def create(self, validated_data):
+        password = validated_data.pop('password')
+        user = User(**validated_data, role=User.OPERATOR)
+        user.set_password(password)
+        user.save()
+        return user
 
 
 @extend_schema_serializer(
