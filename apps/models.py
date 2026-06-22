@@ -1,5 +1,5 @@
-from django.db import models
-from django.db.models import Model, CharField, ForeignKey, PROTECT, TextField, DateTimeField, PositiveIntegerField
+from django.db.models import (Model, CharField, ForeignKey, PROTECT, TextField,
+                              DateTimeField, PositiveIntegerField)
 
 
 class Warehouse(Model):
