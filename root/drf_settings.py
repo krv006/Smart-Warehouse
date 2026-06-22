@@ -15,4 +15,28 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 25,
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+}
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "Sklad & Savdo API",
+    "DESCRIPTION": (
+        "Tovarlarni hisobga olish, ombor (sklad) boshqaruvi va sotuv "
+        "jarayonlarini nazorat qilish uchun REST API.\n\n"
+        "**Rollar:**\n"
+        "- `OPERATOR` — tovar kirimi, qoldiq va sotuvlarni kiritadi\n"
+        "- `MANAGEMENT` — hisobot, foyda va analitikani ko'radi"
+    ),
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
+    "CONTACT": {"email": "admin@warehouse.uz"},
+    "LICENSE": {"name": "Private"},
+    # Swagger UI sozlamalari
+    "SWAGGER_UI_SETTINGS": {
+        "persistAuthorization": True,
+        "displayRequestDuration": True,
+        "filter": True,
+    },
+    "COMPONENT_SPLIT_REQUEST": True,
+    "SORT_OPERATIONS": False,
 }

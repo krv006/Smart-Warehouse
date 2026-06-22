@@ -33,6 +33,7 @@ INSTALLED_APPS = [
     # todo third party package
     "rest_framework",
     "django_filters",
+    "drf_spectacular",
 
 ]
 

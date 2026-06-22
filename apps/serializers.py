@@ -1,11 +1,26 @@
 from django.db import transaction
 from django.db.models import F
+from drf_spectacular.utils import extend_schema_serializer, OpenApiExample
 from rest_framework.serializers import (ModelSerializer, ValidationError,
                                          IntegerField, DecimalField)
 
 from apps.models import Product, Stock, Sale
 
 
+@extend_schema_serializer(
+    examples=[
+        OpenApiExample(
+            "Laptop kirim namunasi",
+            value={
+                "name": "MacBook Pro",
+                "model": "M3 Pro 14\"",
+                "serial_number": "C02XK1JFJGH5",
+                "purchase_price": "12500000.00",
+            },
+            request_only=True,
+        )
+    ]
+)
 class ProductSerializer(ModelSerializer):
     quantity_in_stock = IntegerField(read_only=True)
 
@@ -39,6 +54,22 @@ class StockSerializer(ModelSerializer):
         return attrs
 
 
+@extend_schema_serializer(
+    examples=[
+        OpenApiExample(
+            "Sotuv namunasi",
+            value={
+                "product": 1,
+                "sold_price": "14000000.00",
+                "quantity": 1,
+                "sold_to": "Alibek Karimov",
+                "sold_date": "2024-06-22",
+                "comment": "Naqd to'lov",
+            },
+            request_only=True,
+        )
+    ]
+)
 class SaleSerializer(ModelSerializer):
     total_amount = DecimalField(max_digits=14, decimal_places=2, read_only=True)
     profit = DecimalField(max_digits=14, decimal_places=2, read_only=True)
