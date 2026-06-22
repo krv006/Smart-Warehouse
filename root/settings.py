@@ -1,12 +1,24 @@
+import os
 from pathlib import Path
+
+from dotenv import load_dotenv
+
 from root.drf_settings import *
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-SECRET_KEY = 'django-insecure-r@x(9r$&er@-l1m_-#3r&%c-bs&0i*_yk7rtwvzzqno9&2qgg8'
 
-DEBUG = True
+# .env faylidan o'zgaruvchilarni yuklash
+load_dotenv(BASE_DIR / '.env')
 
-ALLOWED_HOSTS = ['*']
+# Read secrets/flags from the environment, with safe dev defaults.
+SECRET_KEY = os.environ.get(
+    'SECRET_KEY',
+    'django-insecure-r@x(9r$&er@-l1m_-#3r&%c-bs&0i*_yk7rtwvzzqno9&2qgg8',
+)
+
+DEBUG = os.environ.get('DEBUG', 'True') == 'True'
+
+ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
 
 INSTALLED_APPS = [
@@ -20,6 +32,7 @@ INSTALLED_APPS = [
     'apps.apps.AppsConfig',
     # todo third party package
     "rest_framework",
+    "django_filters",
 
 ]
 
@@ -54,12 +67,29 @@ TEMPLATES = [
 WSGI_APPLICATION = 'root.wsgi.application'
 
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+# TZ: SQL DB (MySQL/PostgreSQL). DB_ENGINE=postgres bo'lsa PostgreSQL,
+# aks holda mahalliy ishlash uchun sqlite.
+if os.environ.get('DB_ENGINE') == 'postgres':
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': os.environ.get('DB_NAME', 'warehouse'),
+            'USER': os.environ.get('DB_USER', 'postgres'),
+            'PASSWORD': os.environ.get('DB_PASSWORD', ''),
+            'HOST': os.environ.get('DB_HOST', 'localhost'),
+            'PORT': os.environ.get('DB_PORT', '5432'),
+        }
     }
-}
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
+
+# TZ: 2 ta rol (Operator / Management) — maxsus foydalanuvchi modeli.
+AUTH_USER_MODEL = 'apps.User'
 
 
 AUTH_PASSWORD_VALIDATORS = [

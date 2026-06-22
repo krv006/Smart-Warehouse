@@ -1,61 +1,93 @@
-from django.db.models import (Model, CharField, ForeignKey, PROTECT, TextField,
-                              DateTimeField, PositiveIntegerField)
+from django.contrib.auth.models import AbstractUser
+from django.db.models import (Model, CharField, ForeignKey, PROTECT, CASCADE,
+                              TextField, DateTimeField, DateField,
+                              PositiveIntegerField, DecimalField, Sum, F)
 
 
-class Warehouse(Model):
-    name = CharField(max_length=255)
+class User(AbstractUser):
+    """Tizim foydalanuvchisi. TZ: 2 ta rol — Operator va Management."""
+    OPERATOR = 'OPERATOR'
+    MANAGEMENT = 'MANAGEMENT'
 
-    def __str__(self):
-        return self.name
-
-
-class Item(Model):
-    name = CharField(max_length=255)
-    sku = CharField(max_length=100, unique=True)
-    serial_number = CharField(max_length=255, blank=True, null=True)
-
-    warehouse = ForeignKey(
-        'apps.Warehouse',
-        on_delete=PROTECT,
-        related_name='items'
+    ROLES = (
+        (OPERATOR, 'Operator (Ishchi)'),
+        (MANAGEMENT, 'Management (Boshqaruv)'),
     )
 
-    description = TextField(blank=True, null=True)
+    role = CharField(max_length=20, choices=ROLES, default=OPERATOR)
 
+    @property
+    def is_management(self):
+        return self.role == self.MANAGEMENT or self.is_superuser
+
+    @property
+    def is_operator(self):
+        return self.role == self.OPERATOR or self.is_superuser
+
+
+class Product(Model):
+    """TZ: Products — id, name, model, serial_number, purchase_price, created_at."""
+    name = CharField(max_length=255)
+    model = CharField(max_length=255, blank=True, null=True)
+    serial_number = CharField(max_length=255, unique=True)
+    purchase_price = DecimalField(max_digits=14, decimal_places=2)
     created_at = DateTimeField(auto_now_add=True)
 
+    class Meta:
+        ordering = ('-created_at',)
+        verbose_name = 'Product'
+        verbose_name_plural = 'Products'
+
     def __str__(self):
-        return self.name
+        return f'{self.name} ({self.serial_number})'
+
+    @property
+    def quantity_in_stock(self):
+        """Barcha lokatsiyalardagi umumiy qoldiq."""
+        return self.stocks.aggregate(total=Sum('quantity'))['total'] or 0
 
 
-class StockMovement(Model):
-    IN = 'IN'
-    OUT = 'OUT'
+class Stock(Model):
+    """TZ: Stock — product_id, quantity, warehouse_location."""
+    product = ForeignKey(Product, on_delete=CASCADE, related_name='stocks')
+    quantity = PositiveIntegerField(default=0)
+    warehouse_location = CharField(max_length=255)
 
-    MOVEMENT_TYPES = (
-        (IN, 'Kirim'),
-        (OUT, 'Chiqim'),
-    )
+    class Meta:
+        ordering = ('product', 'warehouse_location')
+        verbose_name = 'Stock'
+        verbose_name_plural = 'Stocks'
+        unique_together = ('product', 'warehouse_location')
 
-    item = ForeignKey(
-        Item,
-        on_delete=PROTECT,
-        related_name='movements'
-    )
+    def __str__(self):
+        return f'{self.product.name} @ {self.warehouse_location}: {self.quantity}'
 
-    movement_type = CharField(
-        max_length=3,
-        choices=MOVEMENT_TYPES
-    )
 
+class Sale(Model):
+    """TZ: Sales — id, product_id, sold_price, sold_date, sold_to, quantity."""
+    product = ForeignKey(Product, on_delete=PROTECT, related_name='sales')
+    sold_price = DecimalField(max_digits=14, decimal_places=2,
+                              help_text='Birlik uchun sotuv narxi')
     quantity = PositiveIntegerField()
-    comment = TextField(
-        blank=True,
-        null=True
-    )
-    created_at = DateTimeField(
-        auto_now_add=True
-    )
+    sold_to = CharField(max_length=255, blank=True, null=True)
+    sold_date = DateField()
+    comment = TextField(blank=True, null=True)
+    created_at = DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ('-sold_date', '-created_at')
+        verbose_name = 'Sale'
+        verbose_name_plural = 'Sales'
 
     def __str__(self):
-        return f"{self.item.name} - {self.movement_type}"
+        return f'{self.product.name} x{self.quantity} -> {self.sold_to or "-"}'
+
+    @property
+    def total_amount(self):
+        """Umumiy sotuv summasi."""
+        return self.sold_price * self.quantity
+
+    @property
+    def profit(self):
+        """Foyda = (sotuv narxi - olish narxi) * miqdor."""
+        return (self.sold_price - self.product.purchase_price) * self.quantity
