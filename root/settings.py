@@ -20,7 +20,6 @@ DEBUG = os.environ.get('DEBUG', 'True') == 'True'
 ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
 INSTALLED_APPS = [
-    # Jazzmin — Django admin dan OLDIN bo'lishi shart
     'jazzmin',
 
     'django.contrib.admin',
@@ -30,10 +29,10 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
 
-    # My apps
+    # todo My apps
     'apps.apps.AppsConfig',
 
-    # Third party
+    # todo Third party
     'rest_framework',
     'django_filters',
     'drf_spectacular',
