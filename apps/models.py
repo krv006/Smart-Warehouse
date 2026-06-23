@@ -50,7 +50,7 @@ class Category(MPTTModel):
 class Product(Model):
     """TZ: Products — id, name, model, serial_number, purchase_price, created_at."""
     category = TreeForeignKey(
-        Category, on_delete=SET_NULL,
+        'apps.Category', SET_NULL,
         null=True, blank=True,
         related_name='products',
     )
@@ -76,7 +76,7 @@ class Product(Model):
 
 class Stock(Model):
     """TZ: Stock — product_id, quantity, warehouse_location."""
-    product = ForeignKey(Product, on_delete=CASCADE, related_name='stocks')
+    product = ForeignKey('apps.Product', CASCADE, related_name='stocks')
     quantity = PositiveIntegerField(default=0)
     warehouse_location = CharField(max_length=255)
 
@@ -92,7 +92,7 @@ class Stock(Model):
 
 class Sale(Model):
     """TZ: Sales — id, product_id, sold_price, sold_date, sold_to, quantity."""
-    product = ForeignKey(Product, on_delete=PROTECT, related_name='sales')
+    product = ForeignKey('apps.Product', on_delete=PROTECT, related_name='sales')
     sold_price = DecimalField(max_digits=14, decimal_places=2,
                               help_text='Birlik uchun sotuv narxi')
     quantity = PositiveIntegerField()
