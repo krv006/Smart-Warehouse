@@ -19,6 +19,12 @@ DEBUG = os.environ.get('DEBUG', 'True') == 'True'
 
 ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
+CORS_ALLOWED_ORIGINS = [
+    'http://localhost:5173',
+    'https://warehouse-eosin-six.vercel.app',
+]
+CORS_ALLOW_CREDENTIALS = True
+
 INSTALLED_APPS = [
     'jazzmin',
 
@@ -33,6 +39,7 @@ INSTALLED_APPS = [
     'apps.apps.AppsConfig',
 
     # todo Third party
+    'corsheaders',
     'rest_framework',
     'django_filters',
     'drf_spectacular',
@@ -41,6 +48,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
