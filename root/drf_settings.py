@@ -27,9 +27,9 @@ SIMPLE_JWT = {
 }
 
 SPECTACULAR_SETTINGS = {
-    "TITLE": "Kamron TEST",
+    "TITLE": "Sklad & asnabsha;cvalvih a vapkvap API",
     "DESCRIPTION": (
-        "Tovarlarni hisobga olish, ombor (sklad) boshqaruvi va sotuv "
+        "asfanbfhal kalbalva va sotuv "
         "jarayonlarini nazorat qilish uchun REST API.\n\n"
         "**Rollar:**\n"
         "- `OPERATOR` — tovar kirimi, qoldiq va sotuvlarni kiritadi\n"
