@@ -4,10 +4,11 @@ from django.db.models import F
 from drf_spectacular.utils import extend_schema_serializer, OpenApiExample
 from rest_framework.serializers import (ModelSerializer, Serializer,
                                         ValidationError, IntegerField,
-                                        DecimalField, CharField)
+                                        DecimalField, CharField,
+                                        SerializerMethodField)
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from apps.models import User, Product, Stock, Sale
+from apps.models import User, Product, Stock, Sale, Category
 
 
 class LoginSerializer(Serializer):
@@ -54,6 +55,17 @@ class RegisterOperatorSerializer(ModelSerializer):
         return user
 
 
+class CategorySerializer(ModelSerializer):
+    children = SerializerMethodField()
+
+    class Meta:
+        model = Category
+        fields = ('id', 'name', 'parent', 'children')
+
+    def get_children(self, obj):
+        return CategorySerializer(obj.children.all(), many=True).data
+
+
 @extend_schema_serializer(
     examples=[
         OpenApiExample(
@@ -74,7 +86,7 @@ class ProductSerializer(ModelSerializer):
     class Meta:
         model = Product
         fields = (
-            'id', 'name', 'model', 'serial_number', 'purchase_price',
+            'id', 'category', 'name', 'model', 'serial_number', 'purchase_price',
             'quantity_in_stock', 'created_at',
         )
         read_only_fields = ('created_at',)

@@ -1,8 +1,9 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 from django.utils.html import format_html
+from mptt.admin import DraggableMPTTAdmin
 
-from apps.models import User, Product, Stock, Sale
+from apps.models import User, Product, Stock, Sale, Category
 
 
 # ─────────────────────────────────────────────
@@ -46,6 +47,17 @@ class CustomUserAdmin(UserAdmin):
 
 
 # ─────────────────────────────────────────────
+#  KATEGORIYALAR
+# ─────────────────────────────────────────────
+@admin.register(Category)
+class CategoryAdmin(DraggableMPTTAdmin):
+    list_display = ('tree_actions', 'indented_title')
+    list_display_links = ('indented_title',)
+    search_fields = ('name',)
+    mptt_level_indent = 20
+
+
+# ─────────────────────────────────────────────
 #  MAHSULOTLAR
 # ─────────────────────────────────────────────
 class StockInline(admin.TabularInline):
@@ -57,10 +69,10 @@ class StockInline(admin.TabularInline):
 
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
-    list_display  = ('id', 'name', 'model', 'serial_number',
+    list_display  = ('id', 'name', 'model', 'serial_number', 'category',
                      'purchase_price_formatted', 'stock_badge', 'created_at')
     search_fields = ('name', 'model', 'serial_number')
-    list_filter   = ('created_at',)
+    list_filter   = ('created_at', 'category')
     ordering      = ('-created_at',)
     list_per_page = 25
     date_hierarchy = 'created_at'

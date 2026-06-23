@@ -1,7 +1,9 @@
 from django.contrib.auth.models import AbstractUser
 from django.db.models import (Model, CharField, ForeignKey, PROTECT, CASCADE,
                               TextField, DateTimeField, DateField,
-                              PositiveIntegerField, DecimalField, Sum, F)
+                              PositiveIntegerField, DecimalField, Sum, F,
+                              SET_NULL)
+from mptt.models import MPTTModel, TreeForeignKey
 
 
 class User(AbstractUser):
@@ -25,8 +27,33 @@ class User(AbstractUser):
         return self.role == self.OPERATOR or self.is_superuser
 
 
+class Category(MPTTModel):
+    """Daraxt ko'rinishidagi tovar kategoriyasi (MPTT)."""
+    name = CharField(max_length=255)
+    parent = TreeForeignKey(
+        'self', on_delete=CASCADE,
+        null=True, blank=True,
+        related_name='children',
+    )
+
+    class MPTTMeta:
+        order_insertion_by = ('name',)
+
+    class Meta:
+        verbose_name = 'Kategoriya'
+        verbose_name_plural = 'Kategoriyalar'
+
+    def __str__(self):
+        return self.name
+
+
 class Product(Model):
     """TZ: Products — id, name, model, serial_number, purchase_price, created_at."""
+    category = TreeForeignKey(
+        Category, on_delete=SET_NULL,
+        null=True, blank=True,
+        related_name='products',
+    )
     name = CharField(max_length=255)
     model = CharField(max_length=255, blank=True, null=True)
     serial_number = CharField(max_length=255, unique=True)

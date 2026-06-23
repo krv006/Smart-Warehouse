@@ -6,10 +6,11 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
-from apps.models import Product, Stock, Sale
+from apps.models import Product, Stock, Sale, Category
 from apps.permissions import IsOperatorOrReadOnly, IsManagement
 from apps.serializers import (ProductSerializer, StockSerializer, SaleSerializer,
-                               LoginSerializer, RegisterOperatorSerializer)
+                               LoginSerializer, RegisterOperatorSerializer,
+                               CategorySerializer)
 
 
 @extend_schema(
@@ -46,6 +47,31 @@ def register_operator(request):
     serializer.is_valid(raise_exception=True)
     serializer.save()
     return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+@extend_schema_view(
+    list=extend_schema(
+        summary="Kategoriyalar daraxti",
+        description="Faqat root (ota yo'q) kategoriyalar, ichida children rekursiv.",
+        tags=["Categories"],
+    ),
+    retrieve=extend_schema(summary="Kategoriya ma'lumoti", tags=["Categories"]),
+    create=extend_schema(summary="Yangi kategoriya (Operator)", tags=["Categories"]),
+    update=extend_schema(summary="Kategoriyani yangilash (Operator)", tags=["Categories"]),
+    partial_update=extend_schema(summary="Kategoriyani qisman yangilash (Operator)", tags=["Categories"]),
+    destroy=extend_schema(summary="Kategoriyani o'chirish (Operator)", tags=["Categories"]),
+)
+class CategoryViewSet(ModelViewSet):
+    serializer_class = CategorySerializer
+    permission_classes = (IsOperatorOrReadOnly,)
+    search_fields = ('name',)
+
+    def get_queryset(self):
+        if self.action == 'list':
+            return Category.objects.root_nodes().prefetch_related(
+                'children__children__children'
+            )
+        return Category.objects.all()
 
 
 @extend_schema_view(
