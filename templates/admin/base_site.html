@@ -1,0 +1,92 @@
+{% extends 'admin/base.html' %}
+
+{% block extrastyle %}
+{{ block.super }}
+<meta name="color-scheme" content="light only">
+<style>
+:root { color-scheme: light !important; }
+html, body { color-scheme: light !important; }
+body,
+body.dark-mode,
+.wrapper { background-color: #f4f6f9 !important; color: #212529 !important; }
+.content-wrapper { background-color: #f4f6f9 !important; color: #212529 !important; }
+.main-header.navbar,
+.navbar-white { background-color: #fff !important; border-bottom: 1px solid #dee2e6 !important; }
+.navbar-white .navbar-nav .nav-link,
+.navbar-light .navbar-nav .nav-link { color: #343a40 !important; }
+.main-sidebar { background-color: #343a40 !important; }
+
+/* ── Sidebar matnlari OQ ── */
+.main-sidebar .nav-link,
+.main-sidebar .nav-link p,
+.main-sidebar .nav-link span,
+.main-sidebar .nav-item > .nav-link,
+.main-sidebar .nav-item > .nav-link p,
+.sidebar .nav-link,
+.sidebar .nav-link p,
+.sidebar .nav-sidebar .nav-link p,
+.sidebar .nav-header,
+.sidebar .user-panel .info,
+.sidebar .user-panel .info a,
+.nav-sidebar .nav-link,
+.nav-sidebar .nav-link p,
+.nav-sidebar .nav-treeview .nav-link,
+.nav-sidebar .nav-treeview .nav-link p,
+.sidebar-dark-primary .nav-sidebar > .nav-item > .nav-link,
+.sidebar-dark-primary .nav-sidebar > .nav-item > .nav-link p { color: #fff !important; }
+
+.main-sidebar .nav-link:hover p,
+.main-sidebar .nav-link:hover,
+.nav-sidebar .nav-link:hover,
+.nav-sidebar .nav-link:hover p { color: #fff !important; opacity: 0.9; }
+
+.brand-link,
+.brand-link .brand-text { color: #fff !important; }
+
+.sidebar .user-panel .info a { color: #fff !important; }
+.card, .box { background-color: #fff !important; color: #212529 !important; border-color: #dee2e6 !important; }
+.card-header, .box-header { background-color: #fff !important; color: #212529 !important; border-color: #dee2e6 !important; }
+.card-body, .box-body, .card-footer, .box-footer { background-color: #fff !important; color: #212529 !important; }
+.table { background-color: #fff !important; color: #212529 !important; }
+.table thead th { background-color: #f8f9fa !important; color: #007bff !important; border-color: #dee2e6 !important; }
+.table td, .table tbody td { background-color: #fff !important; color: #212529 !important; border-color: #f0f0f0 !important; }
+.table tbody tr:hover td { background-color: #f0f4ff !important; }
+.form-control,
+input[type="text"], input[type="number"], input[type="email"],
+input[type="password"], input[type="date"], input[type="search"],
+select, textarea {
+    background-color: #fff !important;
+    color: #212529 !important;
+    border-color: #ced4da !important;
+}
+label, .col-form-label, p, .help, .helptext { color: #495057 !important; }
+.dropdown-menu { background-color: #fff !important; border-color: #dee2e6 !important; }
+.dropdown-item { color: #212529 !important; background-color: transparent !important; }
+.dropdown-item:hover { background-color: #f8f9fa !important; }
+#changelist-filter { background-color: #fff !important; color: #212529 !important; }
+#changelist-filter h2 { background-color: #f8f9fa !important; color: #6c757d !important; }
+#changelist-filter a { color: #495057 !important; }
+#changelist-filter li.selected a { color: #007bff !important; }
+.submit-row { background-color: #f8f9fa !important; border-color: #dee2e6 !important; }
+.breadcrumb { background-color: transparent !important; }
+.breadcrumb-item a { color: #007bff !important; }
+.select2-container--default .select2-selection--single { background-color: #fff !important; border-color: #ced4da !important; }
+.select2-container--default .select2-selection__rendered { color: #212529 !important; }
+.select2-dropdown { background-color: #fff !important; border-color: #ced4da !important; }
+.select2-results__option { color: #212529 !important; background-color: #fff !important; }
+.select2-results__option--highlighted { background-color: #007bff !important; color: #fff !important; }
+.inline-group { background-color: #fff !important; }
+.inline-group h2 { background-color: #f8f9fa !important; color: #212529 !important; }
+.messagelist li { color: #212529 !important; }
+</style>
+{% endblock %}
+
+{% block extrajs %}
+{{ block.super }}
+<script>
+(function() {
+    document.documentElement.setAttribute('data-bs-theme', 'light');
+    document.body && document.body.classList.remove('dark-mode');
+})();
+</script>
+{% endblock %}
