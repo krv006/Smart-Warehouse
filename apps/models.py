@@ -7,6 +7,7 @@ from mptt.models import MPTTModel, TreeForeignKey
 
 
 class TelegramSettings(Model):
+
     bot_token = CharField(max_length=200, verbose_name="Bot Token")
     chat_id = CharField(max_length=50, verbose_name="Guruh Chat ID")
     is_active = BooleanField(default=True, verbose_name="Faol")
