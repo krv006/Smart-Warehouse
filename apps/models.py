@@ -2,8 +2,27 @@ from django.contrib.auth.models import AbstractUser
 from django.db.models import (Model, CharField, ForeignKey, PROTECT, CASCADE,
                               TextField, DateTimeField, DateField,
                               PositiveIntegerField, DecimalField, Sum, F,
-                              SET_NULL)
+                              SET_NULL, BooleanField)
 from mptt.models import MPTTModel, TreeForeignKey
+
+
+class TelegramSettings(Model):
+    bot_token = CharField(max_length=200, verbose_name="Bot Token")
+    chat_id = CharField(max_length=50, verbose_name="Guruh Chat ID")
+    is_active = BooleanField(default=True, verbose_name="Faol")
+
+    class Meta:
+        verbose_name = "Telegram Sozlama"
+        verbose_name_plural = "Telegram Sozlamalar"
+
+    def __str__(self):
+        return f"Telegram Bot ({self.chat_id})"
+
+    def save(self, *args, **kwargs):
+        # Faqat bitta yozuv bo'lishi kerak (singleton)
+        if not self.pk and TelegramSettings.objects.exists():
+            TelegramSettings.objects.all().delete()
+        super().save(*args, **kwargs)
 
 
 class User(AbstractUser):

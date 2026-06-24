@@ -3,7 +3,30 @@ from django.contrib.auth.admin import UserAdmin
 from django.utils.html import format_html
 from mptt.admin import DraggableMPTTAdmin
 
-from apps.models import User, Product, Stock, Sale, Category
+from apps.models import User, Product, Stock, Sale, Category, TelegramSettings
+
+
+# ─────────────────────────────────────────────
+#  TELEGRAM SOZLAMALAR
+# ─────────────────────────────────────────────
+@admin.register(TelegramSettings)
+class TelegramSettingsAdmin(admin.ModelAdmin):
+    list_display  = ('bot_token_short', 'chat_id', 'is_active')
+    fieldsets = (
+        ('Telegram Bot', {
+            'fields': ('bot_token', 'chat_id', 'is_active'),
+            'description': 'Bu yerga Telegram bot tokenini va guruh chat ID sini kiriting. '
+                           'Har kuni soat 00:00 da backup avtomatik yuboriladi.',
+        }),
+    )
+
+    @admin.display(description='Bot Token')
+    def bot_token_short(self, obj):
+        token = obj.bot_token
+        return f"{token[:10]}...{token[-5:]}" if len(token) > 15 else token
+
+    def has_add_permission(self, request):
+        return not TelegramSettings.objects.exists()
 
 
 # ─────────────────────────────────────────────
