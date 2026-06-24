@@ -82,14 +82,24 @@ class CategorySerializer(ModelSerializer):
 )
 class ProductSerializer(ModelSerializer):
     quantity_in_stock = IntegerField(read_only=True)
+    category = CategorySerializer(read_only=True)
+    category_id = IntegerField(write_only=True, required=False, allow_null=True)
 
     class Meta:
         model = Product
         fields = (
-            'id', 'category', 'name', 'model', 'serial_number', 'purchase_price',
-            'quantity_in_stock', 'created_at',
+            'id', 'category', 'category_id', 'name', 'model', 'serial_number',
+            'purchase_price', 'quantity_in_stock', 'created_at',
         )
         read_only_fields = ('created_at',)
+
+
+class ProductOperatorSerializer(ProductSerializer):
+    class Meta(ProductSerializer.Meta):
+        fields = (
+            'id', 'category', 'category_id', 'name', 'model', 'serial_number',
+            'quantity_in_stock', 'created_at',
+        )
 
 
 class StockSerializer(ModelSerializer):

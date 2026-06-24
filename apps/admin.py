@@ -81,7 +81,7 @@ class ProductAdmin(admin.ModelAdmin):
 
     fieldsets = (
         ('Asosiy ma\'lumotlar', {
-            'fields': ('name', 'model', 'serial_number'),
+            'fields': ('category', 'name', 'model', 'serial_number'),
         }),
         ('Narx va sana', {
             'fields': ('purchase_price', 'created_at'),
@@ -91,8 +91,8 @@ class ProductAdmin(admin.ModelAdmin):
     @admin.display(description='Olish narxi', ordering='purchase_price')
     def purchase_price_formatted(self, obj):
         return format_html(
-            '<b style="color:#155724">{:,.0f} so\'m</b>',
-            obj.purchase_price
+            '<b style="color:#155724">{} so\'m</b>',
+            f'{obj.purchase_price:,.0f}'
         )
 
     @admin.display(description='Ombor qoldig\'i')
@@ -180,13 +180,13 @@ class SaleAdmin(admin.ModelAdmin):
 
     @admin.display(description='Sotuv narxi', ordering='sold_price')
     def sold_price_fmt(self, obj):
-        return format_html('{:,.0f} so\'m', obj.sold_price)
+        return format_html('{} so\'m', f'{obj.sold_price:,.0f}')
 
     @admin.display(description='Jami summa')
     def total_amount_fmt(self, obj):
         return format_html(
-            '<b style="color:#004085">{:,.0f} so\'m</b>',
-            obj.total_amount
+            '<b style="color:#004085">{} so\'m</b>',
+            f'{obj.total_amount:,.0f}'
         )
 
     @admin.display(description='Foyda')
@@ -195,8 +195,8 @@ class SaleAdmin(admin.ModelAdmin):
         color  = '#28a745' if profit >= 0 else '#dc3545'
         sign   = '+' if profit >= 0 else ''
         return format_html(
-            '<b style="color:{}">{}{:,.0f} so\'m</b>',
-            color, sign, profit
+            '<b style="color:{}">{} so\'m</b>',
+            color, f'{sign}{profit:,.0f}'
         )
 
     @admin.display(description='Jami summa')

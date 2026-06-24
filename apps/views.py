@@ -8,7 +8,8 @@ from rest_framework.viewsets import ModelViewSet
 
 from apps.models import Product, Stock, Sale, Category
 from apps.permissions import IsOperatorOrReadOnly, IsManagement
-from apps.serializers import (ProductSerializer, StockSerializer, SaleSerializer,
+from apps.serializers import (ProductSerializer, ProductOperatorSerializer,
+                               StockSerializer, SaleSerializer,
                                LoginSerializer, RegisterOperatorSerializer,
                                CategorySerializer)
 
@@ -88,10 +89,15 @@ class CategoryViewSet(ModelViewSet):
 )
 class ProductViewSet(ModelViewSet):
     queryset = Product.objects.all()
-    serializer_class = ProductSerializer
     permission_classes = (IsOperatorOrReadOnly,)
     search_fields = ('name', 'model', 'serial_number')
     ordering_fields = ('name', 'purchase_price', 'created_at')
+
+    def get_serializer_class(self):
+        user = self.request.user
+        if user.is_authenticated and user.is_management:
+            return ProductSerializer
+        return ProductOperatorSerializer
 
 
 @extend_schema_view(
