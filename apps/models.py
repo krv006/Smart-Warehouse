@@ -19,9 +19,12 @@ class TelegramSettings(Model):
         return f"Telegram Bot ({self.chat_id})"
 
     def save(self, *args, **kwargs):
-        # Faqat bitta yozuv bo'lishi kerak (singleton)
         if not self.pk and TelegramSettings.objects.exists():
             TelegramSettings.objects.all().delete()
+        # Guruh chat_id -100 bilan boshlanishi kerak
+        chat_id = str(self.chat_id).strip()
+        if not chat_id.startswith('-100'):
+            self.chat_id = f"-100{chat_id.lstrip('-')}"
         super().save(*args, **kwargs)
 
 
