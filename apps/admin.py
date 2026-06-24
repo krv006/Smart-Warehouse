@@ -92,7 +92,7 @@ class StockInline(admin.TabularInline):
 
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
-    list_display  = ('id', 'name', 'model', 'serial_number', 'category',
+    list_display  = ('id', 'name', 'model', 'serial_number', 'category', 'source',
                      'purchase_price_formatted', 'stock_badge', 'created_at')
     search_fields = ('name', 'model', 'serial_number')
     list_filter   = ('created_at', 'category')
@@ -104,7 +104,7 @@ class ProductAdmin(admin.ModelAdmin):
 
     fieldsets = (
         ('Asosiy ma\'lumotlar', {
-            'fields': ('category', 'name', 'model', 'serial_number'),
+            'fields': ('category', 'name', 'model', 'serial_number', 'source'),
         }),
         ('Narx va sana', {
             'fields': ('purchase_price', 'created_at'),
@@ -173,7 +173,7 @@ class StockAdmin(admin.ModelAdmin):
 @admin.register(Sale)
 class SaleAdmin(admin.ModelAdmin):
     list_display  = ('id', 'product_name', 'quantity', 'sold_price_fmt',
-                     'total_amount_fmt', 'profit_fmt', 'sold_to', 'sold_date')
+                     'total_amount_fmt', 'profit_fmt', 'sold_to', 'destination', 'sold_date')
     list_filter   = ('sold_date', 'product')
     search_fields = ('product__name', 'product__serial_number', 'sold_to')
     autocomplete_fields = ('product',)
@@ -185,7 +185,7 @@ class SaleAdmin(admin.ModelAdmin):
 
     fieldsets = (
         ('Sotuv ma\'lumotlari', {
-            'fields': ('product', 'quantity', 'sold_price', 'sold_to', 'sold_date'),
+            'fields': ('product', 'quantity', 'sold_price', 'sold_to', 'destination', 'sold_date'),
         }),
         ('Qo\'shimcha', {
             'fields': ('comment',),

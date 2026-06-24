@@ -21,10 +21,9 @@ class TelegramSettings(Model):
     def save(self, *args, **kwargs):
         if not self.pk and TelegramSettings.objects.exists():
             TelegramSettings.objects.all().delete()
-        # Guruh chat_id -100 bilan boshlanishi kerak
         chat_id = str(self.chat_id).strip()
-        if not chat_id.startswith('-100'):
-            self.chat_id = f"-100{chat_id.lstrip('-')}"
+        if not chat_id.startswith('-'):
+            self.chat_id = f"-{chat_id}"
         super().save(*args, **kwargs)
 
 
@@ -80,6 +79,8 @@ class Product(Model):
     model = CharField(max_length=255, blank=True, null=True)
     serial_number = CharField(max_length=255, unique=True)
     purchase_price = DecimalField(max_digits=14, decimal_places=2)
+    source = CharField(max_length=255, blank=True, null=True,
+                       help_text='Qayerdan keldi (yetkazuvchi/manzil)')
     created_at = DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -119,6 +120,8 @@ class Sale(Model):
                               help_text='Birlik uchun sotuv narxi')
     quantity = PositiveIntegerField()
     sold_to = CharField(max_length=255, blank=True, null=True)
+    destination = CharField(max_length=255, blank=True, null=True,
+                            help_text='Qayerga ketdi (shahar/manzil/yetkazish joyi)')
     sold_date = DateField()
     comment = TextField(blank=True, null=True)
     created_at = DateTimeField(auto_now_add=True)

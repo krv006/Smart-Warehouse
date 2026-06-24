@@ -89,7 +89,7 @@ class ProductSerializer(ModelSerializer):
         model = Product
         fields = (
             'id', 'category', 'category_id', 'name', 'model', 'serial_number',
-            'purchase_price', 'quantity_in_stock', 'created_at',
+            'source', 'purchase_price', 'quantity_in_stock', 'created_at',
         )
         read_only_fields = ('created_at',)
 
@@ -98,7 +98,7 @@ class ProductOperatorSerializer(ProductSerializer):
     class Meta(ProductSerializer.Meta):
         fields = (
             'id', 'category', 'category_id', 'name', 'model', 'serial_number',
-            'quantity_in_stock', 'created_at',
+            'source', 'quantity_in_stock', 'created_at',
         )
 
 
@@ -147,7 +147,7 @@ class SaleSerializer(ModelSerializer):
         model = Sale
         fields = (
             'id', 'product', 'sold_price', 'quantity', 'sold_to',
-            'sold_date', 'comment', 'total_amount', 'profit', 'created_at',
+            'destination', 'sold_date', 'comment', 'total_amount', 'profit', 'created_at',
         )
         read_only_fields = ('created_at',)
 
@@ -186,3 +186,5 @@ class SaleSerializer(ModelSerializer):
             stock.save(update_fields=['quantity'])
             remaining -= take
         return sale
+
+

@@ -1,5 +1,9 @@
+import io
 from django.db.models import Sum, F, DecimalField, ExpressionWrapper
+from django.http import HttpResponse
 from drf_spectacular.utils import extend_schema, extend_schema_view
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
@@ -144,8 +148,9 @@ class SaleViewSet(ModelViewSet):
     serializer_class = SaleSerializer
     permission_classes = (IsOperatorOrReadOnly,)
     filterset_fields = ('product', 'sold_date')
-    search_fields = ('product__name', 'sold_to')
+    search_fields = ('product__name', 'sold_to', 'destination')
     ordering_fields = ('sold_date', 'sold_price', 'quantity')
+
 
 
 @extend_schema(
@@ -209,3 +214,129 @@ def reports(request):
         'products_count':    Product.objects.count(),
         'by_product':        by_product,
     })
+
+
+# ─────────────────────────────────────────────
+#  EXCEL EXPORT YORDAMCHI
+# ─────────────────────────────────────────────
+def _make_response(wb, filename):
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    resp = HttpResponse(
+        buf.getvalue(),
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+    resp['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return resp
+
+
+def _header_row(ws, cols):
+    header_font = Font(bold=True, color='FFFFFF')
+    header_fill = PatternFill('solid', fgColor='1F4E79')
+    for col_num, title in enumerate(cols, start=1):
+        cell = ws.cell(row=1, column=col_num, value=title)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal='center')
+
+
+# ─────────────────────────────────────────────
+#  SOTUVLAR EXCEL
+# ─────────────────────────────────────────────
+@extend_schema(
+    summary="Sotuvlarni Excel yuklab olish",
+    tags=["Export"],
+    responses={200: None},
+)
+@api_view(['GET'])
+@permission_classes([IsManagement])
+def export_sales(request):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'Sotuvlar'
+
+    cols = ['#', 'Mahsulot', 'Miqdor', 'Sotuv narxi', 'Jami summa',
+            'Foyda', 'Xaridor', 'Qayerga ketdi', 'Sana', 'Izoh']
+    _header_row(ws, cols)
+
+    profit_expr = ExpressionWrapper(
+        (F('sold_price') - F('product__purchase_price')) * F('quantity'),
+        output_field=DecimalField(max_digits=18, decimal_places=2),
+    )
+    sales = (Sale.objects
+             .select_related('product')
+             .annotate(profit_val=profit_expr)
+             .order_by('-sold_date'))
+
+    for i, s in enumerate(sales, start=1):
+        ws.append([
+            i,
+            str(s.product),
+            s.quantity,
+            float(s.sold_price),
+            float(s.sold_price * s.quantity),
+            float(s.profit_val or 0),
+            s.sold_to or '',
+            s.destination or '',
+            s.sold_date.strftime('%Y-%m-%d'),
+            s.comment or '',
+        ])
+
+    for col in ws.columns:
+        ws.column_dimensions[col[0].column_letter].width = max(
+            len(str(col[0].value or '')), 12
+        )
+
+    return _make_response(wb, 'sotuvlar.xlsx')
+
+
+# ─────────────────────────────────────────────
+#  OMBOR QOLDIQLARI EXCEL
+# ─────────────────────────────────────────────
+@extend_schema(
+    summary="Ombor qoldiqlarini Excel yuklab olish",
+    tags=["Export"],
+    responses={200: None},
+)
+@api_view(['GET'])
+@permission_classes([IsManagement])
+def export_stock(request):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'Ombor qoldiqlari'
+
+    cols = ['#', 'Mahsulot', 'Kategoriya', 'Model', 'Seriya raqami',
+            'Qayerdan keldi', 'Lokatsiya', 'Miqdor', 'Olish narxi']
+    _header_row(ws, cols)
+
+    stocks = (Stock.objects
+              .select_related('product', 'product__category')
+              .order_by('product__name', 'warehouse_location'))
+
+    for i, st in enumerate(stocks, start=1):
+        p = st.product
+        ws.append([
+            i,
+            p.name,
+            str(p.category) if p.category else '',
+            p.model or '',
+            p.serial_number,
+            p.source or '',
+            st.warehouse_location,
+            st.quantity,
+            float(p.purchase_price),
+        ])
+
+        # Miqdor 0 bo'lsa — qizil rang
+        if st.quantity == 0:
+            from openpyxl.styles import PatternFill as PF
+            for cell in ws[ws.max_row]:
+                cell.fill = PF('solid', fgColor='FFCCCC')
+
+    for col in ws.columns:
+        ws.column_dimensions[col[0].column_letter].width = max(
+            len(str(col[0].value or '')), 12
+        )
+
+    return _make_response(wb, 'ombor_qoldiqlari.xlsx')

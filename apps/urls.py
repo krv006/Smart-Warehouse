@@ -3,7 +3,8 @@ from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
 
 from apps.views import (ProductViewSet, StockViewSet, SaleViewSet,
-                        CategoryViewSet, reports, login, register_operator)
+                        CategoryViewSet, reports, login, register_operator,
+                        export_sales, export_stock)
 
 router = DefaultRouter()
 router.register('categories', CategoryViewSet, basename='category')
@@ -19,6 +20,10 @@ urlpatterns = [
 
     # Hisobot
     path('reports/', reports, name='reports'),
+
+    # Excel export
+    path('export/sales/', export_sales, name='export-sales'),
+    path('export/stock/', export_stock, name='export-stock'),
 
     *router.urls,
 ]
