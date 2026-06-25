@@ -94,10 +94,8 @@ class Command(BaseCommand):
         if not os.path.exists(src):
             self.stderr.write(f"SQLite fayl topilmadi: {src}")
             return None, None
-
         db_name = os.path.basename(src)
         filename = f"backup_{date_str}.sqlite3"
         filepath = os.path.join(tmpdir, filename)
         shutil.copy2(src, filepath)
-
         return filepath, db_name
