@@ -105,3 +105,12 @@ install:
 .PHONY: static
 static:
 	$(MANAGE) collectstatic --noinput
+
+
+mig:
+	python manage.py makemigration
+	python manage.py migrate
+
+user:
+	python manage.py createsuperuser
+
