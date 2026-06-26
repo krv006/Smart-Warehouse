@@ -1,0 +1,19 @@
+[Unit]
+Description=Smart Project Celery Worker
+After=network.target redis.service
+
+[Service]
+User=root
+Group=www-data
+WorkingDirectory=/var/www/smart_project
+ExecStart=/var/www/smart_project/.venv/bin/celery \
+          -A root \
+          worker \
+          --loglevel=info \
+          --concurrency=2
+
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

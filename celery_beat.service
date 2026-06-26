@@ -1,0 +1,44 @@
+[Unit]
+Description=Smart Project Celery Beat Scheduler
+After=network.target redis.service
+
+[Service]
+User=root
+Group=www-data
+WorkingDirectory=/var/www/smart_project
+ExecStart=/var/www/smart_project/.venv/bin/celery \
+          -A root \
+          beat \
+          --loglevel=info \
+          --scheduler django_celery_beat.schedulers:DatabaseScheduler
+
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+
+
+# 1. Redis o'rnatish
+apt install -y redis-server
+systemctl enable redis-server
+systemctl start redis-server
+redis-cli ping          # → PONG
+
+# 2. Yangi kodni olish
+cd /var/www/smart_project
+git pull
+
+# 3. Paketlarni o'rnatish
+.venv/bin/pip install -r requirements.txt
+
+# 4. django-celery-beat migration
+.venv/bin/python manage.py migrate
+
+# 5. Servislarni restart
+systemctl restart smart_project_celery.service
+systemctl restart smart_project_celery_beat.service
+
+# 6. Holat tekshirish
+systemctl status smart_project_celery.service
+systemctl status smart_project_celery_beat.service
