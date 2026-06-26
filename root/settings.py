@@ -18,48 +18,47 @@ SECRET_KEY = os.environ.get(
 DEBUG = os.environ.get('DEBUG', 'True') == 'True'
 
 ALLOWED_HOSTS = ['*']
-# ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', '').split(',')
 
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
-
 CORS_ALLOW_HEADERS = [
-    'accept',
-    'authorization',
-    'content-type',
-    'origin',
-    'x-csrftoken',
-    'x-requested-with',
+    'accept', 'authorization', 'content-type',
+    'origin', 'x-csrftoken', 'x-requested-with',
 ]
-CORS_ALLOW_METHODS = [
-    'DELETE',
-    'GET',
-    'OPTIONS',
-    'PATCH',
-    'POST',
-    'PUT',
-]
+CORS_ALLOW_METHODS = ['DELETE', 'GET', 'OPTIONS', 'PATCH', 'POST', 'PUT']
 
-INSTALLED_APPS = [
+DJANGO_APPS = [
     'jazzmin',
-
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+]
 
-    # todo My apps
-    'apps.apps.AppsConfig',
-
-    # todo Third party
+THIRD_PARTY_APPS = [
     'corsheaders',
     'rest_framework',
+    'rest_framework_simplejwt',
     'django_filters',
     'drf_spectacular',
     'mptt',
 ]
+
+LOCAL_APPS = [
+    'apps.common',
+    'apps.users',
+    'apps.warehouse',
+    'apps.sales',
+    'apps.expenses',
+    'apps.cash',
+    'apps.clients',
+    'apps.reports',
+    'apps.notifications',
+]
+
+INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
@@ -110,7 +109,7 @@ else:
         }
     }
 
-AUTH_USER_MODEL = 'apps.User'
+AUTH_USER_MODEL = 'users.User'
 
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
@@ -127,3 +126,16 @@ USE_TZ = True
 STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_DIRS = [BASE_DIR / 'static']
+
+MEDIA_URL  = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
+
+# Fernet encryption key (generate: from cryptography.fernet import Fernet; Fernet.generate_key())
+FERNET_KEY = os.environ.get('FERNET_KEY', '')
+
+# ── Celery ──────────────────────────────────────────────────────────────────
+CELERY_BROKER_URL        = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
+CELERY_RESULT_BACKEND    = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
+CELERY_TIMEZONE          = 'Asia/Tashkent'
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_TIME_LIMIT   = 30 * 60

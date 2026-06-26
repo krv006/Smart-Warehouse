@@ -10,3 +10,6 @@ django-mptt>=0.16
 django-cors-headers>=4.0
 openpyxl>=3.1
 requests>=2.31
+cryptography>=42.0
+celery>=5.3
+redis>=5.0
