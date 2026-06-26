@@ -1,0 +1,380 @@
+"""
+Fake ma'lumotlar bilan bazani to'ldirish.
+
+Ishlatish:
+    python manage.py seed              # standart (barcha modullar)
+    python manage.py seed --clear      # avval tozalab keyin to'ldiradi
+    python manage.py seed --users 10   # 10 ta foydalanuvchi
+"""
+import random
+from decimal import Decimal
+
+from django.contrib.auth.hashers import make_password
+from django.core.management.base import BaseCommand
+from django.db import transaction
+from faker import Faker
+
+fake = Faker(['uz_UZ', 'ru_RU'])
+fake_en = Faker('en_US')
+
+PRODUCT_CATEGORIES = [
+    ('Server', ['Tower Server', 'Rack Server', 'Blade Server']),
+    ('Tarmoq uskunalari', ['Switch', 'Router', 'Firewall', 'Access Point']),
+    ('Saqlash qurilmalari', ['SSD', 'HDD', 'NAS', 'SAN']),
+    ('Kompyuter', ['Desktop', 'All-in-One', 'Mini PC']),
+    ('Monitor', ['24 dyuym', '27 dyuym', '32 dyuym', '4K Monitor']),
+    ('Noutbuk', ['Business', 'Gaming', 'Ultrabook']),
+    ('Printer', ['Lazerli', 'Inkjet', 'MFP']),
+    ('UPS', ['600VA', '1000VA', '2000VA', '3000VA']),
+]
+
+BRANDS = ['HP', 'Dell', 'Lenovo', 'Cisco', 'Huawei', 'Samsung', 'LG',
+          'Epson', 'Canon', 'Acer', 'Asus', 'MSI', 'APC', 'Schneider']
+
+UZBEK_CITIES = [
+    'Toshkent', 'Samarqand', 'Namangan', 'Andijon', "Farg'ona",
+    'Buxoro', 'Nukus', 'Qarshi', 'Jizzax', 'Termiz',
+]
+SOURCES = [
+    'Xitoy, Guangzhou', 'Rossiya, Moskva', 'UAE, Dubai',
+    'Germaniya, Frankfurt', 'Turkiya, Istanbul', 'Koreya, Seul',
+    'AKSH, New York', 'Singapur', 'Malayziya', 'Polsha, Varshava',
+]
+COMPANIES = [
+    'Texnopark LLC', 'Uzinfocom', 'IT Solutions', 'DataCenter Uz',
+    'Smart Systems', 'TechnoHub', 'Digital Future', 'NetPro',
+    'InfoSystems', 'CyberSoft',
+]
+WAREHOUSE_LOCATIONS = [
+    f'{r}-{s}-{n}' for r in 'ABCD' for s in range(1, 5) for n in range(1, 6)
+]
+
+EXPENSE_TYPES_DATA = [
+    ('office',        'Ofis rasxod'),
+    ('import',        'Import rasxod'),
+    ('declaration',   'Deklaratsiya rasxod'),
+    ('certificate',   'Sertifikat rasxod'),
+    ('transport',     'Transport rasxod'),
+    ('business_trip', 'Komandirovka rasxod'),
+    ('salary',        'Oylik rasxod'),
+    ('other',         'ITG / boshqa rasxod'),
+]
+EXPENSE_SUBTYPES_DATA = {
+    'office':        ['Ijara', 'Kommunal', 'Internet', 'Ofis jihozlari', 'Tozalash'],
+    'import':        ["Boj to'lovi", "Sug'urta", 'Agentlik xizmati'],
+    'declaration':   ['Deklaratsiya rasmiylashtirish', 'Broker xizmati'],
+    'certificate':   ['Sertifikatlash', 'Laboratoriya tekshiruvi'],
+    'transport':     ["Yoqilg'i", "Ta'mirlash", 'Shahar ichi', 'Shahar tashqarisi'],
+    'business_trip': ['Mehmonxona', 'Aviabilet', 'Kunlik xarajat'],
+    'salary':        ['Asosiy oylik', 'Mukofot', 'Bonus'],
+    'other':         [],
+}
+
+
+def ok(msg):
+    return f'[OK]  {msg}'
+
+
+class Command(BaseCommand):
+    help = "Fake ma'lumotlar bilan bazani to'ldiradi"
+
+    def add_arguments(self, parser):
+        parser.add_argument('--clear',    action='store_true', help='Avval bazani tozala')
+        parser.add_argument('--users',    type=int, default=8,  help='Foydalanuvchilar soni')
+        parser.add_argument('--products', type=int, default=40, help='Mahsulotlar soni')
+        parser.add_argument('--sales',    type=int, default=60, help='Sotuvlar soni')
+        parser.add_argument('--expenses', type=int, default=50, help='Rasxodlar soni')
+        parser.add_argument('--clients',  type=int, default=15, help='Mijozlar soni')
+        parser.add_argument('--payments', type=int, default=40, help="To'lovlar soni")
+
+    @transaction.atomic
+    def handle(self, *args, **options):
+        if options['clear']:
+            self._clear()
+
+        self.stdout.write('>>> Seed boshlandi...\n')
+
+        users     = self._seed_users(options['users'])
+        cats      = self._seed_categories()
+        products  = self._seed_products(options['products'], cats)
+        self._seed_stocks(products)
+        exp_types = self._seed_expense_types()
+        sales     = self._seed_sales(options['sales'], products)
+        self._seed_expenses(options['expenses'], exp_types, users)
+        clients   = self._seed_clients(options['clients'])
+        self._seed_payments(options['payments'], sales, clients)
+        self._seed_telegram_settings()
+
+        self.stdout.write(self.style.SUCCESS('\n>>> Seed muvaffaqiyatli yakunlandi!'))
+
+    # ── Clear ─────────────────────────────────────────────────────────────────
+    def _clear(self):
+        from apps.cash.models import Payment
+        from apps.clients.models import Client
+        from apps.expenses.models import Expense, ExpenseSubType, ExpenseType
+        from apps.notifications.models import TelegramSettings
+        from apps.sales.models import Sale
+        from apps.users.models import User
+        from apps.warehouse.models import Category, Product, Stock
+
+        self.stdout.write('>>> Baza tozalanmoqda...')
+        Payment.objects.all().delete()
+        Sale.objects.all().delete()
+        Stock.objects.all().delete()
+        Product.objects.all().delete()
+        Category.objects.all().delete()
+        Expense.objects.all().delete()
+        ExpenseSubType.objects.all().delete()
+        ExpenseType.objects.all().delete()
+        Client.objects.all().delete()
+        TelegramSettings.objects.all().delete()
+        User.objects.filter(is_superuser=False).delete()
+        self.stdout.write(self.style.WARNING('>>> Tozalandi.\n'))
+
+    # ── Users ─────────────────────────────────────────────────────────────────
+    def _seed_users(self, count):
+        from apps.users.models import User
+        roles = [User.OPERATOR, User.OPERATOR, User.OPERATOR,
+                 User.ACCOUNTANT, User.ACCOUNTANT, User.MANAGEMENT]
+        users = []
+        fixed = [
+            ('operator1',   'op1pass',  User.OPERATOR,   False),
+            ('accountant1', 'acc1pass', User.ACCOUNTANT, False),
+            ('manager1',    'mgr1pass', User.MANAGEMENT, True),
+        ]
+        for username, pwd, role, can_view in fixed:
+            u, _ = User.objects.get_or_create(
+                username=username,
+                defaults=dict(
+                    first_name=fake.first_name(),
+                    last_name=fake.last_name(),
+                    email=f'{username}@warehouse.uz',
+                    password=make_password(pwd),
+                    role=role,
+                    phone=fake_en.numerify('+99890#######'),
+                    can_view_clients=can_view,
+                )
+            )
+            users.append(u)
+
+        for _ in range(count):
+            role     = random.choice(roles)
+            username = fake_en.unique.user_name()[:20]
+            u = User.objects.create(
+                username=username,
+                first_name=fake.first_name(),
+                last_name=fake.last_name(),
+                email=f'{username}@warehouse.uz',
+                password=make_password('test1234'),
+                role=role,
+                phone=fake_en.numerify('+99890#######'),
+            )
+            users.append(u)
+
+        self.stdout.write(ok(f'{len(users)} ta foydalanuvchi yaratildi'))
+        return users
+
+    # ── Categories ────────────────────────────────────────────────────────────
+    def _seed_categories(self):
+        from apps.warehouse.models import Category
+        cats = []
+        for parent_name, children in PRODUCT_CATEGORIES:
+            parent, _ = Category.objects.get_or_create(name=parent_name)
+            cats.append(parent)
+            for child_name in children:
+                child, _ = Category.objects.get_or_create(
+                    name=child_name, parent=parent
+                )
+                cats.append(child)
+        self.stdout.write(ok(f'{len(cats)} ta kategoriya yaratildi'))
+        return cats
+
+    # ── Products ──────────────────────────────────────────────────────────────
+    def _seed_products(self, count, cats):
+        from apps.warehouse.models import Category, Product
+        leaf_cats = list(Category.objects.filter(children__isnull=True))
+        products  = []
+        used_serials = set()
+        for _ in range(count):
+            brand  = random.choice(BRANDS)
+            model  = f'{brand}-{fake_en.bothify("??###").upper()}'
+            serial = f'SN-{fake_en.bothify("####-????").upper()}'
+            while serial in used_serials:
+                serial = f'SN-{fake_en.bothify("####-????").upper()}'
+            used_serials.add(serial)
+
+            purchase = Decimal(str(random.randint(500_000, 45_000_000)))
+            p = Product.objects.create(
+                category=random.choice(leaf_cats),
+                name=f'{brand} {model}',
+                model=model,
+                serial_number=serial,
+                purchase_price=purchase,
+                source=random.choice(SOURCES),
+            )
+            products.append(p)
+        self.stdout.write(ok(f'{len(products)} ta mahsulot yaratildi'))
+        return products
+
+    # ── Stocks ────────────────────────────────────────────────────────────────
+    def _seed_stocks(self, products):
+        from apps.warehouse.models import Stock
+        count = 0
+        for product in products:
+            locations = random.sample(WAREHOUSE_LOCATIONS, random.randint(1, 3))
+            for loc in locations:
+                Stock.objects.get_or_create(
+                    product=product,
+                    warehouse_location=loc,
+                    defaults={'quantity': random.randint(2, 30)},
+                )
+                count += 1
+        self.stdout.write(ok(f'{count} ta ombor qoldig\'i yaratildi'))
+
+    # ── Expense Types ─────────────────────────────────────────────────────────
+    def _seed_expense_types(self):
+        from apps.expenses.models import ExpenseSubType, ExpenseType
+        types = {}
+        for code, name in EXPENSE_TYPES_DATA:
+            et, _ = ExpenseType.objects.get_or_create(code=code, defaults={'name': name})
+            for sub_name in EXPENSE_SUBTYPES_DATA.get(code, []):
+                ExpenseSubType.objects.get_or_create(expense_type=et, name=sub_name)
+            types[code] = et
+        self.stdout.write(ok(f'{len(types)} ta rasxod toifasi yaratildi'))
+        return types
+
+    # ── Sales ─────────────────────────────────────────────────────────────────
+    def _seed_sales(self, count, products):
+        from apps.sales.models import Sale
+        sales = []
+        for _ in range(count):
+            product   = random.choice(products)
+            stock_qty = product.quantity_in_stock
+            if stock_qty < 1:
+                continue
+            qty        = random.randint(1, min(3, stock_qty))
+            margin     = Decimal(str(round(random.uniform(1.1, 1.5), 2)))
+            sold_price = (product.purchase_price * margin).quantize(Decimal('1000'))
+            sold_date  = fake_en.date_between(start_date='-180d', end_date='today')
+
+            remaining = qty
+            for st in product.stocks.filter(quantity__gt=0).order_by('id'):
+                if remaining <= 0:
+                    break
+                take = min(st.quantity, remaining)
+                st.quantity -= take
+                st.save(update_fields=['quantity'])
+                remaining -= take
+
+            if remaining > 0:
+                continue
+
+            s = Sale.objects.create(
+                product=product,
+                quantity=qty,
+                sold_price=sold_price,
+                sold_to=random.choice(COMPANIES),
+                destination=random.choice(UZBEK_CITIES),
+                sold_date=sold_date,
+                comment=fake.sentence() if random.random() < 0.3 else None,
+            )
+            sales.append(s)
+        self.stdout.write(ok(f'{len(sales)} ta sotuv yaratildi'))
+        return sales
+
+    # ── Expenses ──────────────────────────────────────────────────────────────
+    def _seed_expenses(self, count, exp_types, users):
+        from apps.expenses.models import Expense, ExpenseSubType
+        accountants = [u for u in users if u.is_accountant or u.is_management]
+        if not accountants:
+            accountants = users
+
+        for _ in range(count):
+            code     = random.choice(list(exp_types.keys()))
+            et       = exp_types[code]
+            sub      = (ExpenseSubType.objects
+                        .filter(expense_type=et)
+                        .order_by('?').first())
+            is_other = code == 'other'
+            currency = random.choice(['UZS', 'UZS', 'UZS', 'USD'])
+            amount   = (Decimal(str(random.randint(50_000, 5_000_000)))
+                        if currency == 'UZS'
+                        else Decimal(str(random.randint(50, 2000))))
+
+            Expense.objects.create(
+                expense_type=et,
+                sub_type=sub,
+                amount=amount,
+                currency=currency,
+                date=fake_en.date_between(start_date='-180d', end_date='today'),
+                responsible=random.choice(accountants),
+                comment=fake.sentence() if is_other or random.random() < 0.2 else None,
+            )
+        self.stdout.write(ok(f'{count} ta rasxod yaratildi'))
+
+    # ── Clients ───────────────────────────────────────────────────────────────
+    def _seed_clients(self, count):
+        from apps.clients.encryption import encrypt
+        from apps.clients.models import Client
+        clients = []
+        for _ in range(count):
+            company = random.choice(COMPANIES) + f' {fake_en.company_suffix()}'
+            c = Client.objects.create(
+                full_name=encrypt(fake.name()),
+                company_name=company,
+                inn=encrypt(fake_en.numerify('#########')),
+                phone=encrypt(fake_en.numerify('+99890#######')),
+                email=fake_en.company_email(),
+                address=f'{random.choice(UZBEK_CITIES)}, {fake.street_address()}',
+                is_active=random.random() > 0.1,
+            )
+            clients.append(c)
+        self.stdout.write(ok(f'{len(clients)} ta mijoz yaratildi'))
+        return clients
+
+    # ── Payments ──────────────────────────────────────────────────────────────
+    def _seed_payments(self, count, sales, clients):
+        from apps.cash.models import Payment
+        if not sales:
+            return
+        made = 0
+        for sale in random.sample(sales, min(count, len(sales))):
+            total      = sale.sold_price * sale.quantity
+            commission = (total * Payment.COMMISSION_RATE).quantize(Decimal('0.01'))
+            r          = random.random()
+            if r < 0.35:
+                paid, status = total, Payment.PAID
+            elif r < 0.6:
+                paid   = (total * Decimal(str(round(random.uniform(0.1, 0.9), 2)))).quantize(Decimal('0.01'))
+                status = Payment.PARTIAL
+            elif r < 0.8:
+                paid, status = Decimal('0'), Payment.OVERDUE
+            else:
+                paid, status = Decimal('0'), Payment.PENDING
+
+            Payment.objects.create(
+                sale=sale,
+                client=random.choice(clients) if clients else None,
+                total_amount=total,
+                commission=commission,
+                paid_amount=paid,
+                currency='UZS',
+                due_date=fake_en.date_between(start_date='-30d', end_date='+60d'),
+                status=status,
+                comment=fake.sentence() if random.random() < 0.25 else None,
+            )
+            made += 1
+        self.stdout.write(ok(f"{made} ta to'lov yaratildi"))
+
+    # ── Telegram Settings ─────────────────────────────────────────────────────
+    def _seed_telegram_settings(self):
+        from apps.notifications.models import TelegramSettings
+        TelegramSettings.objects.get_or_create(
+            pk=1,
+            defaults={
+                'bot_token': '1234567890:AAFake_Token_For_Development_Only',
+                'chat_id':   '-1001234567890',
+                'is_active': False,
+            }
+        )
+        self.stdout.write(ok('TelegramSettings yaratildi (is_active=False)'))
