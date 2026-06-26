@@ -120,3 +120,24 @@ mig:
 user:
 	python manage.py createsuperuser
 
+# ──────────────────────────────────────────────────────────────────────────────
+#  Migration fayllarni tozalash (0001_initial.py larni ochiradi, __init__.py qoldiradi)
+# ──────────────────────────────────────────────────────────────────────────────
+
+.PHONY: mig_del
+ifeq ($(OS),Windows_NT)
+mig_del:
+	@echo ">>> Migration fayllar ochirilmoqda (Windows)..."
+	@for /d %%a in (apps\*) do \
+		if exist "%%a\migrations" \
+			for %%f in ("%%a\migrations\0*.py") do \
+				del /q "%%f"
+	@echo ">>> Bajarildi!"
+else
+mig_del:
+	@echo ">>> Migration fayllar ochirilmoqda (Linux)..."
+	find apps -path "*/migrations/0*.py" -delete
+	find apps -path "*/migrations/__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+	@echo ">>> Bajarildi!"
+endif
+
