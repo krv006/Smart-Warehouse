@@ -1,4 +1,10 @@
-PYTHON = .venv/Scripts/python.exe
+# Windows: .venv/Scripts/python.exe  |  Linux/Mac: .venv/bin/python
+ifeq ($(OS),Windows_NT)
+    PYTHON = .venv/Scripts/python.exe
+else
+    PYTHON = .venv/bin/python
+endif
+
 MANAGE = $(PYTHON) manage.py
 
 # ──────────────────────────────────────────────────────────────────────────────
