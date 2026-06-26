@@ -44,6 +44,7 @@ THIRD_PARTY_APPS = [
     'django_filters',
     'drf_spectacular',
     'mptt',
+    'django_celery_beat',
 ]
 
 LOCAL_APPS = [
