@@ -13,3 +13,4 @@ requests>=2.31
 cryptography>=42.0
 celery>=5.3
 redis>=5.0
+faker>=25.0
