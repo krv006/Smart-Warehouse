@@ -17,6 +17,10 @@ from apps.users.serializers import LoginSerializer, RegisterOperatorSerializer, 
 def login(request):
     serializer = LoginSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
+
+    from apps.notifications.models import Notification
+    Notification.sync_missing_price_for_user(serializer.validated_data['user'])
+
     return Response(serializer.data)
 
 

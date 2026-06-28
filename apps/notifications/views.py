@@ -31,5 +31,5 @@ class NotificationViewSet(ReadOnlyModelViewSet):
     @extend_schema(summary="Hammasini o'qilgan deb belgilash", tags=["Notifications"])
     @action(detail=False, methods=['post'])
     def mark_all_read(self, request):
-        self.get_queryset().filter(is_read=False).update(is_read=True)
-        return Response({'status': 'ok'})
+        updated = self.get_queryset().filter(is_read=False).update(is_read=True)
+        return Response({'status': 'ok', 'marked_read': updated})

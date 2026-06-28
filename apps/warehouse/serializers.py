@@ -29,6 +29,13 @@ class ProductSerializer(ModelSerializer):
     def get_category_name(self, obj):
         return str(obj.category) if obj.category else None
 
+    def update(self, instance, validated_data):
+        product = super().update(instance, validated_data)
+        if product.purchase_price is not None:
+            from apps.notifications.models import Notification
+            Notification.resolve_price_notifications(product)
+        return product
+
 
 class ProductOperatorSerializer(ModelSerializer):
     """Operator uchun — purchase_price yashirin va kiritib bo'lmaydi."""
@@ -46,29 +53,9 @@ class ProductOperatorSerializer(ModelSerializer):
 
     def create(self, validated_data):
         product = super().create(validated_data)
-        if product.purchase_price is None:
-            self._notify_management_missing_price(product)
-        return product
-
-    @staticmethod
-    def _notify_management_missing_price(product):
-        from django.contrib.auth import get_user_model
         from apps.notifications.models import Notification
-
-        User = get_user_model()
-        category = str(product.category) if product.category else '—'
-        message = (
-            f'"{product.name}" ({product.serial_number}) mahsuloti narxsiz qo\'shildi.\n'
-            f'Kategoriya: {category}\n'
-            f'Model: {product.model or "—"}\n'
-            f'Manba: {product.source or "—"}\n'
-            'Iltimos, kelish narxini kiriting.'
-        )
-        managers = User.objects.filter(role=User.MANAGEMENT, is_active=True)
-        Notification.objects.bulk_create([
-            Notification(recipient=manager, title='Narxsiz mahsulot qo\'shildi', message=message)
-            for manager in managers
-        ])
+        Notification.notify_missing_price(product)
+        return product
 
 
 class StockSerializer(ModelSerializer):
