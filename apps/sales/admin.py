@@ -26,15 +26,17 @@ class SaleAdmin(admin.ModelAdmin):
 
     @admin.display(description='Sotuv narxi', ordering='sold_price')
     def sold_price_fmt(self, obj):
-        return format_html('{:,.0f} so\'m', obj.sold_price)
+        return format_html('{} so\'m', f'{obj.sold_price:,.0f}')
 
     @admin.display(description='Jami')
     def total_fmt(self, obj):
-        return format_html('<b style="color:#004085">{:,.0f} so\'m</b>', obj.total_amount)
+        return format_html('<b style="color:#004085">{} so\'m</b>', f'{obj.total_amount:,.0f}')
 
     @admin.display(description='Foyda')
     def profit_fmt(self, obj):
-        p     = obj.profit
+        p = obj.profit
+        if p is None:
+            return format_html('<span style="color:#6c757d">narx kiritilmagan</span>')
         color = '#28a745' if p >= 0 else '#dc3545'
         sign  = '+' if p >= 0 else ''
-        return format_html('<b style="color:{}">{}{:,.0f} so\'m</b>', color, sign, p)
+        return format_html('<b style="color:{}">{}{} so\'m</b>', color, sign, f'{p:,.0f}')

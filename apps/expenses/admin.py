@@ -37,4 +37,4 @@ class ExpenseAdmin(admin.ModelAdmin):
 
     @admin.display(description='Summa', ordering='amount')
     def amount_fmt(self, obj):
-        return format_html('<b>{:,.0f} {}</b>', obj.amount, obj.currency)
+        return format_html('<b>{} {}</b>', f'{obj.amount:,.0f}', obj.currency)

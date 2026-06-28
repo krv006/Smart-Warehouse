@@ -25,7 +25,7 @@ class PaymentAdmin(admin.ModelAdmin):
 
     @admin.display(description='Toʻlangan', ordering='paid_amount')
     def paid_amount_fmt(self, obj):
-        return format_html('<b>{:,.0f}</b>', obj.paid_amount)
+        return format_html('<b>{}</b>', f'{obj.paid_amount:,.0f}')
 
     @admin.display(description='Status', ordering='status')
     def status_badge(self, obj):

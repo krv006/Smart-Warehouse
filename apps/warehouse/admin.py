@@ -40,7 +40,9 @@ class ProductAdmin(admin.ModelAdmin):
 
     @admin.display(description='Narxi', ordering='purchase_price')
     def purchase_price_fmt(self, obj):
-        return format_html('<b style="color:#155724">{:,.0f} so\'m</b>', obj.purchase_price)
+        if obj.purchase_price is None:
+            return format_html('<b style="color:#dc3545">narx kiritilmagan</b>')
+        return format_html('<b style="color:#155724">{} so\'m</b>', f'{obj.purchase_price:,.0f}')
 
     @admin.display(description='Qoldiq')
     def stock_badge(self, obj):
