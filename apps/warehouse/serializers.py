@@ -15,35 +15,20 @@ class CategorySerializer(ModelSerializer):
         return CategorySerializer(obj.children.all(), many=True).data
 
 
-class _ProductStockCreateMixin:
-    """Mahsulot yaratilganda ixtiyoriy quantity/warehouse_location bilan
-    birga Stock yozuvini ham avtomatik yaratadi (operator va management
-    uchun bir xil ishlaydi)."""
-    quantity           = IntegerField(write_only=True, required=False, min_value=1)
-    warehouse_location = CharField(write_only=True, required=False,
-                                   allow_blank=True, max_length=255)
-
-    def validate(self, attrs):
-        attrs = super().validate(attrs)
-        if attrs.get('quantity') and not attrs.get('warehouse_location'):
-            raise ValidationError({
-                'warehouse_location': 'Miqdor kiritilganda lokatsiya (warehouse_location) ham kiritilishi shart.'
-            })
-        return attrs
-
-    def create(self, validated_data):
-        quantity = validated_data.pop('quantity', None)
-        location = validated_data.pop('warehouse_location', None)
-        product  = super().create(validated_data)
-        if quantity:
-            Stock.objects.create(product=product, quantity=quantity,
-                                 warehouse_location=location)
-        return product
+def _validate_stock_fields(attrs):
+    if attrs.get('quantity') and not attrs.get('warehouse_location'):
+        raise ValidationError({
+            'warehouse_location': 'Miqdor kiritilganda lokatsiya (warehouse_location) ham kiritilishi shart.'
+        })
+    return attrs
 
 
-class ProductSerializer(_ProductStockCreateMixin, ModelSerializer):
-    quantity_in_stock = IntegerField(read_only=True)
-    category_name     = SerializerMethodField()
+class ProductSerializer(ModelSerializer):
+    quantity_in_stock  = IntegerField(read_only=True)
+    category_name      = SerializerMethodField()
+    quantity            = IntegerField(write_only=True, required=False, min_value=1)
+    warehouse_location  = CharField(write_only=True, required=False,
+                                    allow_blank=True, max_length=255)
 
     class Meta:
         model  = Product
@@ -55,6 +40,19 @@ class ProductSerializer(_ProductStockCreateMixin, ModelSerializer):
     def get_category_name(self, obj):
         return str(obj.category) if obj.category else None
 
+    def validate(self, attrs):
+        return _validate_stock_fields(attrs)
+
+    def create(self, validated_data):
+        quantity = validated_data.get('quantity')
+        location = validated_data.get('warehouse_location')
+        validated_data.pop('quantity', None)
+        validated_data.pop('warehouse_location', None)
+        product = super().create(validated_data)
+        if quantity:
+            Stock.objects.create(product=product, quantity=quantity, warehouse_location=location)
+        return product
+
     def update(self, instance, validated_data):
         validated_data.pop('quantity', None)
         validated_data.pop('warehouse_location', None)
@@ -65,10 +63,13 @@ class ProductSerializer(_ProductStockCreateMixin, ModelSerializer):
         return product
 
 
-class ProductOperatorSerializer(_ProductStockCreateMixin, ModelSerializer):
+class ProductOperatorSerializer(ModelSerializer):
     """Operator uchun — purchase_price yashirin va kiritib bo'lmaydi."""
-    quantity_in_stock = IntegerField(read_only=True)
-    category_name     = SerializerMethodField()
+    quantity_in_stock  = IntegerField(read_only=True)
+    category_name      = SerializerMethodField()
+    quantity            = IntegerField(write_only=True, required=False, min_value=1)
+    warehouse_location  = CharField(write_only=True, required=False,
+                                    allow_blank=True, max_length=255)
 
     class Meta:
         model  = Product
@@ -80,13 +81,22 @@ class ProductOperatorSerializer(_ProductStockCreateMixin, ModelSerializer):
     def get_category_name(self, obj):
         return str(obj.category) if obj.category else None
 
+    def validate(self, attrs):
+        return _validate_stock_fields(attrs)
+
     def update(self, instance, validated_data):
         validated_data.pop('quantity', None)
         validated_data.pop('warehouse_location', None)
         return super().update(instance, validated_data)
 
     def create(self, validated_data):
+        quantity = validated_data.get('quantity')
+        location = validated_data.get('warehouse_location')
+        validated_data.pop('quantity', None)
+        validated_data.pop('warehouse_location', None)
         product = super().create(validated_data)
+        if quantity:
+            Stock.objects.create(product=product, quantity=quantity, warehouse_location=location)
         from apps.notifications.models import Notification
         Notification.notify_missing_price(product)
         return product
