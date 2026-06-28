@@ -72,14 +72,19 @@ class ProductOperatorSerializer(ModelSerializer):
 
 
 class StockSerializer(ModelSerializer):
-    product_name = SerializerMethodField()
+    product_name  = SerializerMethodField()
+    product_model = SerializerMethodField()
 
     class Meta:
         model  = Stock
-        fields = ('id', 'product', 'product_name', 'quantity', 'warehouse_location')
+        fields = ('id', 'product', 'product_name', 'product_model',
+                  'quantity', 'warehouse_location')
 
     def get_product_name(self, obj):
         return str(obj.product)
+
+    def get_product_model(self, obj):
+        return obj.product.model
 
     def validate(self, attrs):
         product  = attrs.get('product',  getattr(self.instance, 'product',  None))
