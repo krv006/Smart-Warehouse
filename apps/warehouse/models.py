@@ -28,7 +28,8 @@ class Product(TimeStampedModel):
     name          = CharField(max_length=255)
     model         = CharField(max_length=255, blank=True, null=True)
     serial_number = CharField(max_length=255, unique=True)
-    purchase_price = DecimalField(max_digits=14, decimal_places=2)
+    purchase_price = DecimalField(max_digits=14, decimal_places=2, null=True, blank=True,
+                                  help_text='Operator tomonidan kiritilmaydi — Management belgilaydi')
     source        = CharField(max_length=255, blank=True, null=True,
                               help_text='Qayerdan keldi (yetkazuvchi/manzil)')
 

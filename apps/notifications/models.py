@@ -1,6 +1,25 @@
-from django.db.models import CharField, TextField, BooleanField
+from django.conf import settings
+from django.db.models import CharField, TextField, BooleanField, ForeignKey, CASCADE
 
 from apps.common.models import TimeStampedModel
+
+
+class Notification(TimeStampedModel):
+    """Saytdagi (in-app) bildirishnoma — bevosita foydalanuvchiga biriktirilgan."""
+    recipient = ForeignKey(settings.AUTH_USER_MODEL, on_delete=CASCADE,
+                           related_name='notifications')
+    title     = CharField(max_length=255)
+    message   = TextField()
+    is_read   = BooleanField(default=False)
+
+    class Meta:
+        db_table = 'notifications_notification'
+        ordering = ('-created_at',)
+        verbose_name = 'Bildirishnoma'
+        verbose_name_plural = 'Bildirishnomalar'
+
+    def __str__(self):
+        return f'{self.title} → {self.recipient}'
 
 
 class TelegramSettings(TimeStampedModel):

@@ -77,7 +77,7 @@ def export_stock(queryset) -> HttpResponse:
             stock.product.serial_number,
             stock.quantity,
             stock.warehouse_location,
-            float(stock.product.purchase_price),
+            float(stock.product.purchase_price) if stock.product.purchase_price is not None else '',
         ])
     today = date.today().isoformat()
     return _response(wb, f'ombor_{today}.xlsx')

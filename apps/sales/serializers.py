@@ -9,7 +9,7 @@ from apps.warehouse.models import Stock
 
 class SaleSerializer(ModelSerializer):
     total_amount = DecimalField(max_digits=14, decimal_places=2, read_only=True)
-    profit       = DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    profit       = DecimalField(max_digits=14, decimal_places=2, read_only=True, allow_null=True)
     product_name = SerializerMethodField()
 
     class Meta:

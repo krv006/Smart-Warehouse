@@ -30,4 +30,6 @@ class Sale(TimeStampedModel):
 
     @property
     def profit(self):
+        if self.product.purchase_price is None:
+            return None
         return (self.sold_price - self.product.purchase_price) * self.quantity

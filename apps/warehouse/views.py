@@ -41,7 +41,10 @@ class ProductViewSet(ModelViewSet):
     permission_classes = (IsOperatorOrReadOnly,)
     search_fields      = ('name', 'model', 'serial_number', 'source')
     ordering_fields    = ('name', 'purchase_price', 'created_at')
-    filterset_fields   = ('category',)
+    filterset_fields   = {
+        'category':       ['exact'],
+        'purchase_price': ['isnull'],
+    }
 
     def get_serializer_class(self):
         user = self.request.user
