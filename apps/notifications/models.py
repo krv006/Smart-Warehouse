@@ -73,7 +73,34 @@ class Notification(TimeStampedModel):
     @classmethod
     def resolve_price_notifications(cls, product):
         """Mahsulotga narx kiritilganda, unga oid o'qilmagan bildirishnomalarni yopadi."""
-        cls.objects.filter(product=product, is_read=False).update(is_read=True)
+        cls.objects.filter(product=product, is_read=False,
+                           title="Summasi kiritilmagan!").update(is_read=True)
+
+    @classmethod
+    def notify_low_stock(cls, product):
+        """Mahsulot qoldig'i min_quantity dan pasayganda Management userlariga bildirishnoma."""
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        title   = "Qoldiq kam!"
+        message = (
+            f'"{product.name}" ({product.serial_number}) mahsuloti qoldig\'i '
+            f'minimal chegaradan ({product.min_quantity} dona) pastga tushdi. '
+            f'Hozirgi qoldiq: {product.quantity_in_stock} dona.'
+        )
+        managers = User.objects.filter(role=User.MANAGEMENT, is_active=True)
+        for manager in managers:
+            exists = cls.objects.filter(
+                recipient=manager, product=product, is_read=False, title=title
+            ).exists()
+            if not exists:
+                cls.objects.create(recipient=manager, product=product,
+                                   title=title, message=message)
+
+    @classmethod
+    def resolve_low_stock_notifications(cls, product):
+        """Mahsulot qoldig'i min_quantity dan yuqoriga chiqsa, bildirishnomalarni yopadi."""
+        cls.objects.filter(product=product, is_read=False,
+                           title="Qoldiq kam!").update(is_read=True)
 
 
 class TelegramSettings(TimeStampedModel):

@@ -1,4 +1,4 @@
-from django.db.models import (ForeignKey, PROTECT, DecimalField,
+from django.db.models import (ForeignKey, PROTECT, SET_NULL, DecimalField,
                               PositiveIntegerField, CharField, TextField, DateField)
 from apps.common.models import TimeStampedModel
 from apps.warehouse.models import Product
@@ -6,6 +6,8 @@ from apps.warehouse.models import Product
 
 class Sale(TimeStampedModel):
     product     = ForeignKey(Product, on_delete=PROTECT, related_name='sales')
+    client      = ForeignKey('clients.Client', on_delete=SET_NULL,
+                             null=True, blank=True, related_name='sales')
     quantity    = PositiveIntegerField()
     sold_price  = DecimalField(max_digits=14, decimal_places=2,
                                help_text='Birlik uchun sotuv narxi')

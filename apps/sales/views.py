@@ -23,9 +23,9 @@ from apps.sales.serializers import SaleSerializer
     destroy=extend_schema(summary="Sotuv o'chirish", tags=["Sales"]),
 )
 class SaleViewSet(ModelViewSet):
-    queryset           = Sale.objects.select_related('product', 'product__category')
+    queryset           = Sale.objects.select_related('product', 'product__category', 'client')
     serializer_class   = SaleSerializer
     permission_classes = (IsOperatorOrReadOnly,)
-    filterset_fields   = ('product', 'sold_date')
-    search_fields      = ('product__name', 'sold_to', 'destination')
+    filterset_fields   = ('product', 'sold_date', 'client')
+    search_fields      = ('product__name', 'sold_to', 'destination', 'client__company_name')
     ordering_fields    = ('sold_date', 'sold_price', 'quantity')

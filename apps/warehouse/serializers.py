@@ -25,6 +25,9 @@ def _validate_stock_fields(attrs):
 
 class ProductSerializer(ModelSerializer):
     quantity_in_stock  = IntegerField(read_only=True)
+    reserved_quantity  = IntegerField(read_only=True)
+    available_quantity = IntegerField(read_only=True)
+    stock_status       = SerializerMethodField()
     category_name      = SerializerMethodField()
     quantity            = IntegerField(write_only=True, required=False, min_value=1)
     warehouse_location  = CharField(write_only=True, required=False,
@@ -33,9 +36,14 @@ class ProductSerializer(ModelSerializer):
     class Meta:
         model  = Product
         fields = ('id', 'category', 'category_name', 'name', 'model',
-                  'serial_number', 'purchase_price', 'source',
-                  'quantity_in_stock', 'quantity', 'warehouse_location', 'created_at')
+                  'serial_number', 'purchase_price', 'selling_price', 'source',
+                  'min_quantity', 'quantity_in_stock', 'reserved_quantity',
+                  'available_quantity', 'stock_status',
+                  'quantity', 'warehouse_location', 'created_at')
         read_only_fields = ('created_at',)
+
+    def get_stock_status(self, obj):
+        return obj.stock_status
 
     def get_category_name(self, obj):
         return str(obj.category) if obj.category else None
@@ -57,15 +65,23 @@ class ProductSerializer(ModelSerializer):
         validated_data.pop('quantity', None)
         validated_data.pop('warehouse_location', None)
         product = super().update(instance, validated_data)
+        from apps.notifications.models import Notification
         if product.purchase_price is not None:
-            from apps.notifications.models import Notification
             Notification.resolve_price_notifications(product)
+        # low_stock check after min_quantity may have changed
+        if product.quantity_in_stock <= product.min_quantity and product.quantity_in_stock > 0:
+            Notification.notify_low_stock(product)
+        elif product.quantity_in_stock > product.min_quantity:
+            Notification.resolve_low_stock_notifications(product)
         return product
 
 
 class ProductOperatorSerializer(ModelSerializer):
-    """Operator uchun — purchase_price yashirin va kiritib bo'lmaydi."""
+    """Operator uchun — purchase_price/selling_price yashirin va kiritib bo'lmaydi."""
     quantity_in_stock  = IntegerField(read_only=True)
+    reserved_quantity  = IntegerField(read_only=True)
+    available_quantity = IntegerField(read_only=True)
+    stock_status       = SerializerMethodField()
     category_name      = SerializerMethodField()
     quantity            = IntegerField(write_only=True, required=False, min_value=1)
     warehouse_location  = CharField(write_only=True, required=False,
@@ -74,9 +90,13 @@ class ProductOperatorSerializer(ModelSerializer):
     class Meta:
         model  = Product
         fields = ('id', 'category', 'category_name', 'name', 'model',
-                  'serial_number', 'source', 'quantity_in_stock',
+                  'serial_number', 'source', 'min_quantity', 'quantity_in_stock',
+                  'reserved_quantity', 'available_quantity', 'stock_status',
                   'quantity', 'warehouse_location', 'created_at')
         read_only_fields = ('created_at',)
+
+    def get_stock_status(self, obj):
+        return obj.stock_status
 
     def get_category_name(self, obj):
         return str(obj.category) if obj.category else None
@@ -103,19 +123,43 @@ class ProductOperatorSerializer(ModelSerializer):
 
 
 class StockSerializer(ModelSerializer):
-    product_name  = SerializerMethodField()
-    product_model = SerializerMethodField()
+    product_name      = SerializerMethodField()
+    product_model     = SerializerMethodField()
+    min_quantity      = SerializerMethodField()
+    stock_status      = SerializerMethodField()
 
     class Meta:
         model  = Stock
         fields = ('id', 'product', 'product_name', 'product_model',
-                  'quantity', 'warehouse_location')
+                  'quantity', 'reserved_quantity', 'warehouse_location',
+                  'min_quantity', 'stock_status')
 
     def get_product_name(self, obj):
         return str(obj.product)
 
     def get_product_model(self, obj):
         return obj.product.model
+
+    def get_min_quantity(self, obj):
+        return obj.product.min_quantity
+
+    def get_stock_status(self, obj):
+        return obj.product.stock_status
+
+    def update(self, instance, validated_data):
+        stock = super().update(instance, validated_data)
+        from apps.notifications.models import Notification
+        from apps.orders.models import allocate_pending_orders
+        product = stock.product
+        # Yangi kirim bo'lsa pending orderlarga bron ajrat
+        allocate_pending_orders(product)
+        # Low stock notification
+        avail = product.available_quantity
+        if avail <= 0 or avail <= product.min_quantity:
+            Notification.notify_low_stock(product)
+        else:
+            Notification.resolve_low_stock_notifications(product)
+        return stock
 
     def validate(self, attrs):
         product  = attrs.get('product',  getattr(self.instance, 'product',  None))

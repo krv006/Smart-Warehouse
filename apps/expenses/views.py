@@ -1,4 +1,8 @@
-from drf_spectacular.utils import extend_schema, extend_schema_view
+from django.db.models import Sum, Q
+
+from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter
+from rest_framework.decorators import action
+from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 from rest_framework.permissions import IsAuthenticated
 
@@ -52,11 +56,58 @@ class ExpenseSubTypeViewSet(ModelViewSet):
     destroy=extend_schema(summary="Rasxod o'chirish", tags=["Expenses"]),
 )
 class ExpenseViewSet(ModelViewSet):
-    queryset           = Expense.objects.select_related(
-        'expense_type', 'sub_type', 'responsible'
-    )
     serializer_class   = ExpenseSerializer
     permission_classes = (IsAccountantOrReadOnly,)
-    filterset_fields   = ('expense_type', 'sub_type', 'currency', 'date', 'responsible')
+    filterset_fields   = {
+        'expense_type': ['exact'],
+        'sub_type':     ['exact'],
+        'currency':     ['exact'],
+        'responsible':  ['exact'],
+    }
     search_fields      = ('expense_type__name', 'sub_type__name', 'comment')
     ordering_fields    = ('date', 'amount')
+
+    def get_queryset(self):
+        qs = Expense.objects.select_related('expense_type', 'sub_type', 'responsible')
+        p  = self.request.query_params
+        if p.get('date_from'):
+            qs = qs.filter(date__gte=p['date_from'])
+        if p.get('date_to'):
+            qs = qs.filter(date__lte=p['date_to'])
+        return qs
+
+    @extend_schema(
+        summary="Rasxodlar xulosasi (statistika)",
+        parameters=[
+            OpenApiParameter('date_from', str, description='YYYY-MM-DD'),
+            OpenApiParameter('date_to',   str, description='YYYY-MM-DD'),
+            OpenApiParameter('currency',  str, description='UZS yoki USD'),
+        ],
+        tags=["Expenses"],
+    )
+    @action(detail=False, methods=['get'], url_path='summary',
+            permission_classes=[IsAccountantOrManagement])
+    def summary(self, request):
+        qs = self.get_queryset()
+
+        total_uzs = qs.filter(currency=Expense.UZS).aggregate(t=Sum('amount'))['t'] or 0
+        total_usd = qs.filter(currency=Expense.USD).aggregate(t=Sum('amount'))['t'] or 0
+
+        by_type = []
+        for et in ExpenseType.objects.all():
+            t_uzs = qs.filter(expense_type=et, currency=Expense.UZS).aggregate(t=Sum('amount'))['t'] or 0
+            t_usd = qs.filter(expense_type=et, currency=Expense.USD).aggregate(t=Sum('amount'))['t'] or 0
+            if t_uzs or t_usd:
+                by_type.append({
+                    'expense_type': et.id,
+                    'name':         et.name,
+                    'total_uzs':    str(t_uzs),
+                    'total_usd':    str(t_usd),
+                })
+
+        return Response({
+            'total_uzs': str(total_uzs),
+            'total_usd': str(total_usd),
+            'by_type':   by_type,
+            'count':     qs.count(),
+        })

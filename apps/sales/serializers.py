@@ -8,19 +8,23 @@ from apps.warehouse.models import Stock
 
 
 class SaleSerializer(ModelSerializer):
-    total_amount = DecimalField(max_digits=14, decimal_places=2, read_only=True)
-    profit       = DecimalField(max_digits=14, decimal_places=2, read_only=True, allow_null=True)
-    product_name = SerializerMethodField()
+    total_amount  = DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    profit        = DecimalField(max_digits=14, decimal_places=2, read_only=True, allow_null=True)
+    product_name  = SerializerMethodField()
+    client_name   = SerializerMethodField()
 
     class Meta:
         model  = Sale
-        fields = ('id', 'product', 'product_name', 'quantity', 'sold_price',
-                  'total_amount', 'profit', 'sold_to', 'destination',
-                  'sold_date', 'comment', 'created_at')
+        fields = ('id', 'product', 'product_name', 'client', 'client_name',
+                  'quantity', 'sold_price', 'total_amount', 'profit',
+                  'sold_to', 'destination', 'sold_date', 'comment', 'created_at')
         read_only_fields = ('created_at',)
 
     def get_product_name(self, obj):
         return str(obj.product)
+
+    def get_client_name(self, obj):
+        return str(obj.client) if obj.client else None
 
     def validate_quantity(self, value):
         if value <= 0:
@@ -30,12 +34,15 @@ class SaleSerializer(ModelSerializer):
     def validate(self, attrs):
         product   = attrs.get('product', getattr(self.instance, 'product', None))
         quantity  = attrs.get('quantity', getattr(self.instance, 'quantity', 0))
-        available = product.quantity_in_stock if product else 0
+        # Bron qilinmagan (available) qoldiqqa qarab tekshirish
+        available = product.available_quantity if product else 0
         if quantity > available:
+            reserved = product.reserved_quantity if product else 0
             raise ValidationError({
                 'quantity': (
-                    f'"{product.name}" uchun omborda yetarli qoldiq yo\'q. '
-                    f'Mavjud: {available}, so\'ralgan: {quantity}.'
+                    f'"{product.name}" uchun sotish mumkin bo\'lgan qoldiq yetarli emas. '
+                    f'Jami: {product.quantity_in_stock}, bron: {reserved}, '
+                    f'mavjud: {available}, so\'ralgan: {quantity}.'
                 )
             })
         return attrs

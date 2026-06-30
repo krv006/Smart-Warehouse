@@ -1,8 +1,10 @@
-from drf_spectacular.utils import extend_schema, extend_schema_view
+from django.utils.dateparse import parse_date
+
+from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter
 from rest_framework.viewsets import ModelViewSet
 
 from apps.common.permissions import IsOperatorOrReadOnly, IsManagement
-from apps.warehouse.models import Category, Product, Stock
+from apps.warehouse.models import Category, Product, Stock, STATUS_IN_STOCK, STATUS_LOW_STOCK, STATUS_OUT
 from apps.warehouse.serializers import (CategorySerializer, ProductSerializer,
                                         ProductOperatorSerializer, StockSerializer)
 
@@ -44,6 +46,7 @@ class ProductViewSet(ModelViewSet):
     filterset_fields   = {
         'category':       ['exact'],
         'purchase_price': ['isnull'],
+        'selling_price':  ['isnull'],
     }
 
     def get_serializer_class(self):
@@ -65,8 +68,35 @@ class ProductViewSet(ModelViewSet):
     destroy=extend_schema(summary="Qoldiq o'chirish", tags=["Warehouse"]),
 )
 class StockViewSet(ModelViewSet):
-    queryset           = Stock.objects.select_related('product', 'product__category')
     serializer_class   = StockSerializer
     permission_classes = (IsOperatorOrReadOnly,)
     filterset_fields   = ('product', 'warehouse_location')
     search_fields      = ('product__name', 'product__serial_number', 'warehouse_location')
+
+    def get_queryset(self):
+        qs = Stock.objects.select_related('product', 'product__category')
+        params = self.request.query_params
+
+        category = params.get('category')
+        if category:
+            qs = qs.filter(product__category_id=category)
+
+        date_from = params.get('date_from')
+        date_to   = params.get('date_to')
+        if date_from:
+            qs = qs.filter(created_at__date__gte=parse_date(date_from))
+        if date_to:
+            qs = qs.filter(created_at__date__lte=parse_date(date_to))
+
+        status = params.get('status')
+        if status == STATUS_OUT:
+            qs = qs.filter(quantity=0)
+        elif status == STATUS_LOW_STOCK:
+            # quantity > 0 and quantity <= product.min_quantity
+            from django.db.models import F
+            qs = qs.filter(quantity__gt=0, quantity__lte=F('product__min_quantity'))
+        elif status == STATUS_IN_STOCK:
+            from django.db.models import F
+            qs = qs.filter(quantity__gt=F('product__min_quantity'))
+
+        return qs

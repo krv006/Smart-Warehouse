@@ -23,7 +23,8 @@ class StockInline(admin.TabularInline):
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
     list_display    = ('id', 'name', 'model', 'serial_number', 'category',
-                       'source', 'purchase_price_fmt', 'stock_badge', 'created_at')
+                       'source', 'purchase_price_fmt', 'selling_price_fmt',
+                       'min_quantity', 'stock_badge', 'created_at')
     search_fields   = ('name', 'model', 'serial_number', 'source')
     list_filter     = ('created_at', 'category')
     ordering        = ('-created_at',)
@@ -34,7 +35,8 @@ class ProductAdmin(admin.ModelAdmin):
 
     fieldsets = (
         ('Asosiy', {'fields': ('category', 'name', 'model', 'serial_number', 'source')}),
-        ('Narx',   {'fields': ('purchase_price',)}),
+        ('Narx',   {'fields': ('purchase_price', 'selling_price')}),
+        ('Qoldiq', {'fields': ('min_quantity',)}),
         ('Vaqt',   {'fields': ('created_at', 'updated_at'), 'classes': ('collapse',)}),
     )
 
@@ -43,6 +45,12 @@ class ProductAdmin(admin.ModelAdmin):
         if obj.purchase_price is None:
             return format_html('<b style="color:#dc3545">narx kiritilmagan</b>')
         return format_html('<b style="color:#155724">{} so\'m</b>', f'{obj.purchase_price:,.0f}')
+
+    @admin.display(description='Sotuv narxi', ordering='selling_price')
+    def selling_price_fmt(self, obj):
+        if obj.selling_price is None:
+            return format_html('<span style="color:#6c757d">—</span>')
+        return format_html('<b style="color:#0d6efd">{} so\'m</b>', f'{obj.selling_price:,.0f}')
 
     @admin.display(description='Qoldiq')
     def stock_badge(self, obj):

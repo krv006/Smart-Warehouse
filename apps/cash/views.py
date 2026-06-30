@@ -53,9 +53,8 @@ class PaymentViewSet(ModelViewSet):
         qs     = self.get_queryset()
         today  = timezone.now().date()
 
-        overdue_qs = qs.filter(status=Payment.OVERDUE)
-        overdue_qs | qs.filter(
-            status__in=(Payment.PENDING, Payment.PARTIAL),
+        overdue_qs = qs.filter(
+            status__in=(Payment.PENDING, Payment.PARTIAL, Payment.OVERDUE),
             due_date__lt=today,
         )
 
