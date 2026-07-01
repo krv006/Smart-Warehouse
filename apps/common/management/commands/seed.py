@@ -86,6 +86,7 @@ class Command(BaseCommand):
         parser.add_argument('--expenses', type=int, default=50, help='Rasxodlar soni')
         parser.add_argument('--clients',  type=int, default=15, help='Mijozlar soni')
         parser.add_argument('--payments', type=int, default=40, help="To'lovlar soni")
+        parser.add_argument('--orders',   type=int, default=20, help='Buyurtmalar soni')
 
     @transaction.atomic
     def handle(self, *args, **options):
@@ -99,10 +100,12 @@ class Command(BaseCommand):
         products  = self._seed_products(options['products'], cats)
         self._seed_stocks(products)
         exp_types = self._seed_expense_types()
-        sales     = self._seed_sales(options['sales'], products)
-        self._seed_expenses(options['expenses'], exp_types, users)
         clients   = self._seed_clients(options['clients'])
+        sales     = self._seed_sales(options['sales'], products, clients)
+        self._seed_expenses(options['expenses'], exp_types, users)
         self._seed_payments(options['payments'], sales, clients)
+        self._seed_orders(options['orders'], products, clients)
+        self._seed_notifications(products, users)
         self._seed_telegram_settings()
 
         self.stdout.write(self.style.SUCCESS('\n>>> Seed muvaffaqiyatli yakunlandi!'))
@@ -112,14 +115,17 @@ class Command(BaseCommand):
         from apps.cash.models import Payment
         from apps.clients.models import Client
         from apps.expenses.models import Expense, ExpenseSubType, ExpenseType
-        from apps.notifications.models import TelegramSettings
+        from apps.notifications.models import Notification, TelegramSettings
+        from apps.orders.models import Order
         from apps.sales.models import Sale
         from apps.users.models import User
         from apps.warehouse.models import Category, Product, Stock
 
         self.stdout.write('>>> Baza tozalanmoqda...')
+        Order.objects.all().delete()
         Payment.objects.all().delete()
         Sale.objects.all().delete()
+        Notification.objects.all().delete()
         Stock.objects.all().delete()
         Product.objects.all().delete()
         Category.objects.all().delete()
@@ -195,7 +201,8 @@ class Command(BaseCommand):
         leaf_cats = list(Category.objects.filter(children__isnull=True))
         products  = []
         used_serials = set()
-        for _ in range(count):
+
+        for i in range(count):
             brand  = random.choice(BRANDS)
             model  = f'{brand}-{fake_en.bothify("??###").upper()}'
             serial = f'SN-{fake_en.bothify("####-????").upper()}'
@@ -204,16 +211,27 @@ class Command(BaseCommand):
             used_serials.add(serial)
 
             purchase = Decimal(str(random.randint(500_000, 45_000_000)))
+            # ~20% mahsulot narxsiz (operator qo'shgan kabi)
+            has_price    = random.random() > 0.20
+            has_selling  = has_price and random.random() > 0.15
+            margin       = Decimal(str(round(random.uniform(1.15, 1.6), 2)))
+            selling      = (purchase * margin).quantize(Decimal('1000')) if has_selling else None
+            min_qty      = random.choice([3, 5, 5, 5, 10, 10, 15, 20])
+
             p = Product.objects.create(
                 category=random.choice(leaf_cats),
                 name=f'{brand} {model}',
                 model=model,
                 serial_number=serial,
-                purchase_price=purchase,
+                purchase_price=purchase if has_price else None,
+                selling_price=selling,
                 source=random.choice(SOURCES),
+                min_quantity=min_qty,
             )
             products.append(p)
-        self.stdout.write(ok(f'{len(products)} ta mahsulot yaratildi'))
+
+        self.stdout.write(ok(f'{len(products)} ta mahsulot yaratildi '
+                             f'({sum(1 for p in products if p.purchase_price is None)} ta narxsiz)'))
         return products
 
     # ── Stocks ────────────────────────────────────────────────────────────────
@@ -226,7 +244,10 @@ class Command(BaseCommand):
                 Stock.objects.get_or_create(
                     product=product,
                     warehouse_location=loc,
-                    defaults={'quantity': random.randint(2, 30)},
+                    defaults={
+                        'quantity':          random.randint(2, 30),
+                        'reserved_quantity': 0,
+                    },
                 )
                 count += 1
         self.stdout.write(ok(f'{count} ta ombor qoldig\'i yaratildi'))
@@ -243,25 +264,58 @@ class Command(BaseCommand):
         self.stdout.write(ok(f'{len(types)} ta rasxod toifasi yaratildi'))
         return types
 
+    # ── Clients ───────────────────────────────────────────────────────────────
+    def _seed_clients(self, count):
+        from apps.clients.encryption import encrypt
+        from apps.clients.models import Client
+        clients = []
+        for _ in range(count):
+            company = random.choice(COMPANIES) + f' {fake_en.company_suffix()}'
+            c = Client.objects.create(
+                full_name=encrypt(fake.name()),
+                company_name=company,
+                inn=encrypt(fake_en.numerify('#########')),
+                phone=encrypt(fake_en.numerify('+99890#######')),
+                email=fake_en.company_email(),
+                address=f'{random.choice(UZBEK_CITIES)}, {fake.street_address()}',
+                is_active=random.random() > 0.1,
+            )
+            clients.append(c)
+        self.stdout.write(ok(f'{len(clients)} ta mijoz yaratildi'))
+        return clients
+
     # ── Sales ─────────────────────────────────────────────────────────────────
-    def _seed_sales(self, count, products):
+    def _seed_sales(self, count, products, clients):
         from apps.sales.models import Sale
         sales = []
         for _ in range(count):
             product   = random.choice(products)
-            stock_qty = product.quantity_in_stock
-            if stock_qty < 1:
+            # available_quantity ga qarab (bron hisobga olinadi)
+            avail_qty = product.available_quantity
+            if avail_qty < 1:
                 continue
-            qty        = random.randint(1, min(3, stock_qty))
-            margin     = Decimal(str(round(random.uniform(1.1, 1.5), 2)))
-            sold_price = (product.purchase_price * margin).quantize(Decimal('1000'))
-            sold_date  = fake_en.date_between(start_date='-180d', end_date='today')
+            qty = random.randint(1, min(3, avail_qty))
 
+            # Narx yo'q bo'lsa sold_price bazaviy qiymat ishlat
+            if product.selling_price:
+                base_price = product.selling_price
+            elif product.purchase_price:
+                margin     = Decimal(str(round(random.uniform(1.1, 1.5), 2)))
+                base_price = (product.purchase_price * margin).quantize(Decimal('1000'))
+            else:
+                base_price = Decimal(str(random.randint(500_000, 10_000_000)))
+
+            sold_date = fake_en.date_between(start_date='-180d', end_date='today')
+
+            # FIFO — faqat bron bo'lmagan qoldiqdan ayir
             remaining = qty
             for st in product.stocks.filter(quantity__gt=0).order_by('id'):
                 if remaining <= 0:
                     break
-                take = min(st.quantity, remaining)
+                free = st.quantity - st.reserved_quantity
+                if free <= 0:
+                    continue
+                take = min(free, remaining)
                 st.quantity -= take
                 st.save(update_fields=['quantity'])
                 remaining -= take
@@ -271,14 +325,16 @@ class Command(BaseCommand):
 
             s = Sale.objects.create(
                 product=product,
+                client=random.choice(clients) if clients and random.random() > 0.3 else None,
                 quantity=qty,
-                sold_price=sold_price,
+                sold_price=base_price,
                 sold_to=random.choice(COMPANIES),
                 destination=random.choice(UZBEK_CITIES),
                 sold_date=sold_date,
                 comment=fake.sentence() if random.random() < 0.3 else None,
             )
             sales.append(s)
+
         self.stdout.write(ok(f'{len(sales)} ta sotuv yaratildi'))
         return sales
 
@@ -312,26 +368,6 @@ class Command(BaseCommand):
             )
         self.stdout.write(ok(f'{count} ta rasxod yaratildi'))
 
-    # ── Clients ───────────────────────────────────────────────────────────────
-    def _seed_clients(self, count):
-        from apps.clients.encryption import encrypt
-        from apps.clients.models import Client
-        clients = []
-        for _ in range(count):
-            company = random.choice(COMPANIES) + f' {fake_en.company_suffix()}'
-            c = Client.objects.create(
-                full_name=encrypt(fake.name()),
-                company_name=company,
-                inn=encrypt(fake_en.numerify('#########')),
-                phone=encrypt(fake_en.numerify('+99890#######')),
-                email=fake_en.company_email(),
-                address=f'{random.choice(UZBEK_CITIES)}, {fake.street_address()}',
-                is_active=random.random() > 0.1,
-            )
-            clients.append(c)
-        self.stdout.write(ok(f'{len(clients)} ta mijoz yaratildi'))
-        return clients
-
     # ── Payments ──────────────────────────────────────────────────────────────
     def _seed_payments(self, count, sales, clients):
         from apps.cash.models import Payment
@@ -354,7 +390,7 @@ class Command(BaseCommand):
 
             Payment.objects.create(
                 sale=sale,
-                client=random.choice(clients) if clients else None,
+                client=sale.client or (random.choice(clients) if clients else None),
                 total_amount=total,
                 commission=commission,
                 paid_amount=paid,
@@ -365,6 +401,114 @@ class Command(BaseCommand):
             )
             made += 1
         self.stdout.write(ok(f"{made} ta to'lov yaratildi"))
+
+    # ── Orders (Bron) ─────────────────────────────────────────────────────────
+    def _seed_orders(self, count, products, clients):
+        from apps.orders.models import Order
+        from apps.warehouse.models import Stock
+        from django.db.models import F
+
+        made = 0
+        for _ in range(count):
+            product = random.choice(products)
+            qty     = random.randint(2, 15)
+            client  = random.choice(clients) if clients else None
+
+            order = Order.objects.create(
+                product=product,
+                client=client,
+                quantity=qty,
+                due_date=fake_en.date_between(start_date='+3d', end_date='+90d'),
+                comment=fake.sentence() if random.random() < 0.3 else None,
+            )
+
+            # Mavjud qoldiqdan bron ajrat
+            still_needed = qty
+            stocks = (Stock.objects
+                      .filter(product=product, quantity__gt=0)
+                      .order_by('id'))
+            for st in stocks:
+                if still_needed <= 0:
+                    break
+                available = st.quantity - st.reserved_quantity
+                if available <= 0:
+                    continue
+                take = min(available, still_needed)
+                st.reserved_quantity = F('reserved_quantity') + take
+                st.save(update_fields=['reserved_quantity'])
+                still_needed -= take
+
+            reserved = qty - still_needed
+            order.reserved_qty = reserved
+            if reserved >= qty:
+                order.status = Order.RESERVED
+            elif reserved > 0:
+                order.status = Order.PARTIAL
+            else:
+                order.status = Order.PENDING
+            order.save(update_fields=['reserved_qty', 'status'])
+            made += 1
+
+        # Ba'zi orderlarni fulfilled va cancelled qilamiz
+        all_orders = list(Order.objects.all())
+        for order in random.sample(all_orders, min(3, len(all_orders))):
+            order.status = Order.FULFILLED
+            order.save(update_fields=['status'])
+        for order in random.sample(all_orders, min(2, len(all_orders))):
+            if order.status != Order.FULFILLED:
+                order.status = Order.CANCELLED
+                order.save(update_fields=['status'])
+
+        self.stdout.write(ok(f'{made} ta buyurtma/bron yaratildi'))
+
+    # ── Notifications ─────────────────────────────────────────────────────────
+    def _seed_notifications(self, products, users):
+        from apps.notifications.models import Notification
+        from apps.users.models import User
+
+        managers = [u for u in users if u.is_management]
+        if not managers:
+            return
+
+        # Narxsiz mahsulotlar uchun bildirishnoma
+        unpriced = [p for p in products if p.purchase_price is None]
+        count = 0
+        for product in unpriced:
+            for manager in managers:
+                Notification.objects.get_or_create(
+                    recipient=manager,
+                    product=product,
+                    is_read=False,
+                    defaults={
+                        'title':   'Summasi kiritilmagan!',
+                        'message': (
+                            f'"{product.name}" ({product.serial_number}) mahsuloti uchun '
+                            f'summasini (kelish narxini) kiritmagansiz! Iltimos, kiriting.'
+                        ),
+                    }
+                )
+                count += 1
+
+        # Qoldiq kam bo'lgan mahsulotlar uchun bildirishnoma
+        for product in products:
+            if product.available_quantity <= product.min_quantity and product.available_quantity > 0:
+                for manager in managers:
+                    Notification.objects.get_or_create(
+                        recipient=manager,
+                        product=product,
+                        title='Qoldiq kam!',
+                        is_read=False,
+                        defaults={
+                            'message': (
+                                f'"{product.name}" ({product.serial_number}) qoldig\'i '
+                                f'minimal chegaradan ({product.min_quantity} dona) pastga tushdi. '
+                                f'Hozirgi qoldiq: {product.available_quantity} dona.'
+                            ),
+                        }
+                    )
+                    count += 1
+
+        self.stdout.write(ok(f'{count} ta bildirishnoma yaratildi'))
 
     # ── Telegram Settings ─────────────────────────────────────────────────────
     def _seed_telegram_settings(self):
