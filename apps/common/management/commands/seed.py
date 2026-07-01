@@ -79,7 +79,8 @@ class Command(BaseCommand):
     help = "Fake ma'lumotlar bilan bazani to'ldiradi"
 
     def add_arguments(self, parser):
-        parser.add_argument('--clear',    action='store_true', help='Avval bazani tozala')
+        parser.add_argument('--clear',      action='store_true', help='Avval bazani tozala')
+        parser.add_argument('--only-types', action='store_true', help='Faqat rasxod toifalari (boshqa narsaga tegmaydi)')
         parser.add_argument('--users',    type=int, default=8,  help='Foydalanuvchilar soni')
         parser.add_argument('--products', type=int, default=40, help='Mahsulotlar soni')
         parser.add_argument('--sales',    type=int, default=60, help='Sotuvlar soni')
@@ -90,6 +91,13 @@ class Command(BaseCommand):
 
     @transaction.atomic
     def handle(self, *args, **options):
+        # Faqat rasxod toifalari rejimi
+        if options['only_types']:
+            self.stdout.write('>>> Faqat rasxod toifalari seed...\n')
+            self._seed_expense_types()
+            self.stdout.write(self.style.SUCCESS('>>> Toifalar yaratildi!'))
+            return
+
         if options['clear']:
             self._clear()
 
