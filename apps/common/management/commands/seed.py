@@ -88,6 +88,7 @@ class Command(BaseCommand):
         parser.add_argument('--clients',  type=int, default=15, help='Mijozlar soni')
         parser.add_argument('--payments', type=int, default=40, help="To'lovlar soni")
         parser.add_argument('--orders',   type=int, default=20, help='Buyurtmalar soni')
+        parser.add_argument('--zakazlar', type=int, default=15, help='Zakazlar soni')
 
     @transaction.atomic
     def handle(self, *args, **options):
@@ -113,6 +114,7 @@ class Command(BaseCommand):
         self._seed_expenses(options['expenses'], exp_types, users)
         self._seed_payments(options['payments'], sales, clients)
         self._seed_orders(options['orders'], products, clients)
+        self._seed_zakazlar(options['zakazlar'], products, users)
         self._seed_notifications(products, users)
         self._seed_telegram_settings()
 
@@ -124,12 +126,13 @@ class Command(BaseCommand):
         from apps.clients.models import Client
         from apps.expenses.models import Expense, ExpenseSubType, ExpenseType
         from apps.notifications.models import Notification, TelegramSettings
-        from apps.orders.models import Order
+        from apps.orders.models import Order, Zakaz
         from apps.sales.models import Sale
         from apps.users.models import User
         from apps.warehouse.models import Category, Product, Stock
 
         self.stdout.write('>>> Baza tozalanmoqda...')
+        Zakaz.objects.all().delete()
         Order.objects.all().delete()
         Payment.objects.all().delete()
         Sale.objects.all().delete()
@@ -468,6 +471,64 @@ class Command(BaseCommand):
                 order.save(update_fields=['status'])
 
         self.stdout.write(ok(f'{made} ta buyurtma/bron yaratildi'))
+
+    # ── Zakazlar (Etkazuvchidan buyurtma) ────────────────────────────────────────
+    def _seed_zakazlar(self, count, products, users):
+        from apps.orders.models import Zakaz
+        from apps.warehouse.models import Stock
+        from django.db.models import F
+
+        operators = [u for u in users if u.is_operator] or users
+        managers  = [u for u in users if u.is_management]
+
+        # status taqsimoti: new / confirmed / ordered / received / cancelled
+        status_weights = [
+            (Zakaz.NEW,       0.25),
+            (Zakaz.CONFIRMED, 0.15),
+            (Zakaz.ORDERED,   0.20),
+            (Zakaz.RECEIVED,  0.30),
+            (Zakaz.CANCELLED, 0.10),
+        ]
+        statuses = [s for s, w in status_weights for _ in range(int(w * 100))]
+
+        made = 0
+        for _ in range(count):
+            product  = random.choice(products)
+            qty      = random.randint(5, 50)
+            status   = random.choice(statuses)
+            supplier = f'{random.choice(SOURCES)} — {fake_en.company()}'
+
+            zakaz = Zakaz.objects.create(
+                product=product,
+                quantity=qty,
+                supplier=supplier,
+                status=Zakaz.NEW,  # avval NEW, keyin real holatga o'tkazamiz
+                expected_date=fake_en.date_between(start_date='+2d', end_date='+45d'),
+                created_by=random.choice(operators),
+                comment=fake.sentence() if random.random() < 0.3 else None,
+            )
+
+            if status == Zakaz.RECEIVED:
+                received_qty = qty if random.random() > 0.15 else random.randint(1, qty - 1)
+                loc = random.choice(WAREHOUSE_LOCATIONS)
+                zakaz.received_qty       = received_qty
+                zakaz.warehouse_location = loc
+                zakaz.status             = Zakaz.RECEIVED
+                zakaz.save(update_fields=['received_qty', 'warehouse_location', 'status'])
+
+                stock, _ = Stock.objects.get_or_create(
+                    product=product, warehouse_location=loc,
+                    defaults={'quantity': 0, 'reserved_quantity': 0},
+                )
+                stock.quantity = F('quantity') + received_qty
+                stock.save(update_fields=['quantity'])
+            else:
+                zakaz.status = status
+                zakaz.save(update_fields=['status'])
+
+            made += 1
+
+        self.stdout.write(ok(f'{made} ta zakaz yaratildi'))
 
     # ── Notifications ─────────────────────────────────────────────────────────
     def _seed_notifications(self, products, users):
