@@ -1,6 +1,6 @@
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.serializers import (ModelSerializer, SerializerMethodField,
-                                        ReadOnlyField, ValidationError)
+                                        ReadOnlyField, ValidationError, CharField)
 
 from apps.orders.models import Order, Zakaz
 
@@ -51,9 +51,11 @@ class OrderSerializer(ModelSerializer):
 # ── Zakaz (Etkazuvchidan buyurtma) ────────────────────────────────────────────
 
 class ZakazSerializer(ModelSerializer):
-    product_name    = SerializerMethodField()
-    created_by_name = SerializerMethodField()
-    status_display  = SerializerMethodField()
+    product_name       = SerializerMethodField()
+    created_by_name    = SerializerMethodField()
+    status_display     = SerializerMethodField()
+    warehouse_location = CharField(required=False, allow_null=True,
+                                   allow_blank=True, max_length=255)
 
     class Meta:
         model  = Zakaz
@@ -65,7 +67,7 @@ class ZakazSerializer(ModelSerializer):
             'created_by', 'created_by_name',
             'comment', 'created_at',
         )
-        read_only_fields = ('created_by', 'received_qty', 'created_at')
+        read_only_fields = ('created_by', 'created_at')
 
     def get_product_name(self, obj):
         return str(obj.product)
