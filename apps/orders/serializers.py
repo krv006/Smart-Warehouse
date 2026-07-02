@@ -35,19 +35,9 @@ class OrderSerializer(ModelSerializer):
     def get_client_name(self, obj):
         return str(obj.client) if obj.client else None
 
-    def validate(self, attrs):
-        # Yangi order yaratishda (not update) available_quantity tekshirish
-        if self.instance is None:
-            product = attrs.get('product')
-            if product and product.available_quantity <= 0:
-                raise ValidationError({
-                    'product': (
-                        f'"{product.name}" mahsuloti to\'liq bron qilingan yoki '
-                        f'omborda qolmagan (mavjud: 0 dona). '
-                        f'Mahsulot kelishi uchun Zakaz bering.'
-                    )
-                })
-        return attrs
+    # Eslatma: buyurtma (Order) HAR DOIM yaratiladi.
+    # Qoldiq yetmasa yoki umuman yo'q bo'lsa — backorder (pending) bo'lib
+    # qoladi va undan Zakaz beriladi. Shuning uchun available tekshiruvi yo'q.
 
     def create(self, validated_data):
         order = super().create(validated_data)
@@ -85,17 +75,8 @@ class OrderBulkCreateSerializer(Serializer):
     def validate_items(self, value):
         if not value:
             raise ValidationError('Kamida bitta mahsulot kiritilishi kerak.')
-        # Har bir mahsulotning available_quantity sini tekshirish
-        errors = []
-        for idx, item in enumerate(value):
-            product = item['product']
-            if product.available_quantity <= 0:
-                errors.append(
-                    f'"{product.name}" — to\'liq bron qilingan yoki omborda yo\'q '
-                    f'(mavjud: 0). Zakaz bering.'
-                )
-        if errors:
-            raise ValidationError(errors)
+        # Buyurtma HAR DOIM yaratiladi — qoldiq yetmasa backorder (pending)
+        # bo'lib qoladi va undan Zakaz beriladi. Shuning uchun bloklamaymiz.
         return value
 
     def create(self, validated_data):
