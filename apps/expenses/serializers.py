@@ -28,7 +28,8 @@ class ExpenseSerializer(ModelSerializer):
                   'sub_type', 'sub_type_name', 'amount', 'currency',
                   'date', 'responsible', 'responsible_name',
                   'comment', 'attachment', 'created_at')
-        read_only_fields = ('created_at',)
+        # responsible avtomatik — rasxodni qo'shgan foydalanuvchi
+        read_only_fields = ('created_at', 'responsible')
 
     def get_expense_type_name(self, obj):
         return str(obj.expense_type)
@@ -37,7 +38,11 @@ class ExpenseSerializer(ModelSerializer):
         return str(obj.sub_type) if obj.sub_type else None
 
     def get_responsible_name(self, obj):
-        return str(obj.responsible) if obj.responsible else None
+        user = obj.responsible
+        if not user:
+            return None
+        full = user.get_full_name()
+        return f'{full} ({user.username})' if full else user.username
 
     def validate(self, attrs):
         expense_type = attrs.get('expense_type',
@@ -48,3 +53,10 @@ class ExpenseSerializer(ModelSerializer):
                 {'comment': '"Boshqa" toifasida izoh (comment) majburiy.'}
             )
         return attrs
+
+    def create(self, validated_data):
+        # Mas'ul — rasxodni qo'shayotgan foydalanuvchi
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            validated_data['responsible'] = request.user
+        return super().create(validated_data)
