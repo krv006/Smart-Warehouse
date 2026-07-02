@@ -8,7 +8,8 @@ from rest_framework.viewsets import GenericViewSet
 
 from apps.common.permissions import IsOperatorOrReadOnly
 from apps.orders.models import Order, Zakaz, allocate_pending_orders
-from apps.orders.serializers import OrderSerializer, ZakazSerializer
+from apps.orders.serializers import (OrderSerializer, ZakazSerializer,
+                                     OrderBulkCreateSerializer)
 
 
 # ── Order (Bron) ──────────────────────────────────────────────────────────────
@@ -53,6 +54,37 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
                           'client__company_name', 'comment')
     ordering_fields    = ('due_date', 'created_at', 'status')
     http_method_names  = ('get', 'post', 'patch', 'head', 'options')
+
+    @extend_schema(
+        summary="Bir vaqtda bir nechta mahsulot buyurtmasi (bulk)",
+        description=(
+            "Bitta client/due_date ostida bir nechta mahsulot buyurtma qilinadi. "
+            "Har biri alohida Order yozuvi bo'ladi, har biriga bron ajratiladi.\n\n"
+            "```json\n"
+            "{\n"
+            '  "client": "<uuid>",\n'
+            '  "due_date": "2026-08-01",\n'
+            '  "items": [\n'
+            '    { "product": 12, "quantity": 4, "unit_price": "3900000" },\n'
+            '    { "product": 7,  "quantity": 2, "unit_price": "1200000" }\n'
+            "  ]\n"
+            "}\n"
+            "```"
+        ),
+        request=OrderBulkCreateSerializer,
+        tags=["Orders / Bron"],
+    )
+    @action(detail=False, methods=['post'])
+    def bulk(self, request):
+        serializer = OrderBulkCreateSerializer(
+            data=request.data, context={'request': request}
+        )
+        serializer.is_valid(raise_exception=True)
+        orders = serializer.save()
+        return Response(
+            OrderBulkCreateSerializer().to_representation(orders),
+            status=201,
+        )
 
     @extend_schema(
         summary="Buyurtmani yetkazildi deb belgilash",

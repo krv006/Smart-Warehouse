@@ -2,7 +2,7 @@ from django.conf import settings
 from django.db import transaction
 from django.db.models import (
     CharField, ForeignKey, PROTECT, SET_NULL,
-    PositiveIntegerField, DateField, TextField,
+    PositiveIntegerField, DecimalField, DateField, TextField,
 )
 from django.db.models import F
 
@@ -42,6 +42,8 @@ class Order(TimeStampedModel):
     product      = ForeignKey('warehouse.Product', on_delete=PROTECT,
                               related_name='orders')
     quantity     = PositiveIntegerField(help_text='Buyurtma qilingan miqdor')
+    unit_price   = DecimalField(max_digits=14, decimal_places=2, null=True, blank=True,
+                                help_text='Birlik narxi (sotuv narxi)')
     reserved_qty = PositiveIntegerField(default=0,
                                         help_text='Hozirda bron qilingan miqdor')
     due_date     = DateField(null=True, blank=True,
@@ -63,6 +65,23 @@ class Order(TimeStampedModel):
     def backorder_qty(self):
         """Hali bronlanmagan, kelishi kutilayotgan miqdor."""
         return max(0, self.quantity - self.reserved_qty)
+
+    @property
+    def total(self):
+        """Jami summa (unit_price * quantity)."""
+        if self.unit_price is None:
+            return None
+        return self.unit_price * self.quantity
+
+    @property
+    def has_active_zakaz(self):
+        """
+        Shu mahsulot uchun faol (yakunlanmagan) zakaz bormi?
+        True bo'lsa — frontend "Zakaz berish" tugmasini yashiradi.
+        """
+        return self.product.zakazlar.filter(
+            status__in=(Zakaz.NEW, Zakaz.CONFIRMED, Zakaz.ORDERED)
+        ).exists()
 
     @transaction.atomic
     def reserve(self):

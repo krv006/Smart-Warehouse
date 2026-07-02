@@ -1,23 +1,30 @@
 from rest_framework.exceptions import PermissionDenied
-from rest_framework.serializers import (ModelSerializer, SerializerMethodField,
-                                        ReadOnlyField, ValidationError, CharField)
+from rest_framework.serializers import (ModelSerializer, Serializer,
+                                        SerializerMethodField, ReadOnlyField,
+                                        ValidationError, CharField, DateField,
+                                        PrimaryKeyRelatedField)
 
+from apps.clients.models import Client
 from apps.orders.models import Order, Zakaz
 
 
 # ── Order (Bron) ──────────────────────────────────────────────────────────────
 
 class OrderSerializer(ModelSerializer):
-    product_name  = SerializerMethodField()
-    client_name   = SerializerMethodField()
-    backorder_qty = ReadOnlyField()
+    product_name    = SerializerMethodField()
+    client_name     = SerializerMethodField()
+    backorder_qty   = ReadOnlyField()
+    total           = ReadOnlyField()
+    has_active_zakaz = ReadOnlyField()
 
     class Meta:
         model  = Order
         fields = (
             'id', 'client', 'client_name',
             'product', 'product_name',
-            'quantity', 'reserved_qty', 'backorder_qty',
+            'quantity', 'unit_price', 'total',
+            'reserved_qty', 'backorder_qty',
+            'has_active_zakaz',
             'due_date', 'status', 'comment', 'created_at',
         )
         read_only_fields = ('reserved_qty', 'status', 'created_at')
@@ -46,6 +53,73 @@ class OrderSerializer(ModelSerializer):
         order = super().create(validated_data)
         order.reserve()
         return order
+
+
+class OrderItemSerializer(ModelSerializer):
+    """Bulk buyurtma ichidagi bitta mahsulot qatori."""
+    class Meta:
+        model  = Order
+        fields = ('product', 'quantity', 'unit_price', 'comment')
+
+
+class OrderBulkCreateSerializer(Serializer):
+    """
+    Bir vaqtda bir nechta mahsulot buyurtmasi.
+    Har bir mahsulot alohida Order yozuvi bo'ladi (bitta client/due_date ostida).
+
+    Namuna:
+    {
+      "client": "<uuid>",
+      "due_date": "2026-08-01",
+      "items": [
+        { "product": 12, "quantity": 4, "unit_price": "3900000" },
+        { "product": 7,  "quantity": 2, "unit_price": "1200000" }
+      ]
+    }
+    """
+    client   = PrimaryKeyRelatedField(queryset=Client.objects.all(),
+                                      required=False, allow_null=True)
+    due_date = DateField(required=False, allow_null=True)
+    items    = OrderItemSerializer(many=True)
+
+    def validate_items(self, value):
+        if not value:
+            raise ValidationError('Kamida bitta mahsulot kiritilishi kerak.')
+        # Har bir mahsulotning available_quantity sini tekshirish
+        errors = []
+        for idx, item in enumerate(value):
+            product = item['product']
+            if product.available_quantity <= 0:
+                errors.append(
+                    f'"{product.name}" — to\'liq bron qilingan yoki omborda yo\'q '
+                    f'(mavjud: 0). Zakaz bering.'
+                )
+        if errors:
+            raise ValidationError(errors)
+        return value
+
+    def create(self, validated_data):
+        client   = validated_data.get('client')
+        due_date = validated_data.get('due_date')
+        items    = validated_data['items']
+
+        created = []
+        for item in items:
+            order = Order.objects.create(
+                client=client,
+                due_date=due_date,
+                product=item['product'],
+                quantity=item['quantity'],
+                unit_price=item.get('unit_price'),
+                comment=item.get('comment'),
+            )
+            order.reserve()
+            created.append(order)
+        return created
+
+    def to_representation(self, instance):
+        # instance — yaratilgan Order ro'yxati
+        return {'orders': OrderSerializer(instance, many=True).data}
 
 
 # ── Zakaz (Etkazuvchidan buyurtma) ────────────────────────────────────────────

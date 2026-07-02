@@ -442,10 +442,14 @@ class Command(BaseCommand):
             qty     = random.randint(2, 15)
             client  = random.choice(clients) if clients else None
 
+            # Narx — selling_price bo'lsa o'sha, aks holda tasodifiy
+            unit_price = product.selling_price or Decimal(str(random.randint(500_000, 20_000_000)))
+
             order = Order.objects.create(
                 product=product,
                 client=client,
                 quantity=qty,
+                unit_price=unit_price,
                 due_date=fake_en.date_between(start_date='+3d', end_date='+90d'),
                 comment=fake.sentence() if random.random() < 0.3 else None,
             )
