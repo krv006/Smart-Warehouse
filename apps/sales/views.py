@@ -1,9 +1,11 @@
 from drf_spectacular.utils import extend_schema, extend_schema_view
+from rest_framework.decorators import action
+from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
 from apps.common.permissions import IsOperatorOrReadOnly
 from apps.sales.models import Sale
-from apps.sales.serializers import SaleSerializer
+from apps.sales.serializers import SaleSerializer, SaleBulkCreateSerializer
 
 
 @extend_schema_view(
@@ -29,3 +31,36 @@ class SaleViewSet(ModelViewSet):
     filterset_fields   = ('product', 'sold_date', 'client')
     search_fields      = ('product__name', 'sold_to', 'destination', 'client__company_name')
     ordering_fields    = ('sold_date', 'sold_price', 'quantity')
+
+    @extend_schema(
+        summary="Bir vaqtda bir nechta mahsulot savdosi (bulk)",
+        description=(
+            "Bitta client/sana/manzil ostida bir nechta mahsulot sotiladi. "
+            "Har biri alohida Sale yozuvi bo'ladi, ombordan FIFO tartibida ayiriladi.\n\n"
+            "```json\n"
+            "{\n"
+            '  "client": "<uuid>",\n'
+            '  "sold_to": "Aliyev Vohid",\n'
+            '  "destination": "Toshkent",\n'
+            '  "sold_date": "2026-07-02",\n'
+            '  "items": [\n'
+            '    { "product": 12, "quantity": 4, "sold_price": "3900000" },\n'
+            '    { "product": 7,  "quantity": 2, "sold_price": "1200000" }\n'
+            "  ]\n"
+            "}\n"
+            "```"
+        ),
+        request=SaleBulkCreateSerializer,
+        tags=["Sales"],
+    )
+    @action(detail=False, methods=['post'])
+    def bulk(self, request):
+        serializer = SaleBulkCreateSerializer(
+            data=request.data, context={'request': request}
+        )
+        serializer.is_valid(raise_exception=True)
+        sales = serializer.save()
+        return Response(
+            SaleBulkCreateSerializer().to_representation(sales),
+            status=201,
+        )

@@ -1,10 +1,29 @@
 from django.db import transaction
 from django.db.models import F
-from rest_framework.serializers import (ModelSerializer, ValidationError,
-                                        DecimalField, SerializerMethodField)
+from rest_framework.serializers import (ModelSerializer, Serializer,
+                                        ValidationError, DecimalField,
+                                        SerializerMethodField, DateField,
+                                        CharField, PrimaryKeyRelatedField)
 
+from apps.clients.models import Client
 from apps.sales.models import Sale
-from apps.warehouse.models import Stock
+from apps.warehouse.models import Stock, Product
+
+
+def _deplete_stock(product, quantity):
+    """Mahsulot qoldig'ini FIFO (id bo'yicha) tartibida kamaytiradi."""
+    remaining = quantity
+    stocks = (product.stocks
+              .select_for_update()
+              .filter(quantity__gt=0)
+              .order_by('id'))
+    for stock in stocks:
+        if remaining <= 0:
+            break
+        take = min(stock.quantity, remaining)
+        stock.quantity = F('quantity') - take
+        stock.save(update_fields=['quantity'])
+        remaining -= take
 
 
 class SaleSerializer(ModelSerializer):
@@ -49,17 +68,86 @@ class SaleSerializer(ModelSerializer):
 
     @transaction.atomic
     def create(self, validated_data):
-        sale      = super().create(validated_data)
-        remaining = sale.quantity
-        stocks    = (sale.product.stocks
-                     .select_for_update()
-                     .filter(quantity__gt=0)
-                     .order_by('id'))
-        for stock in stocks:
-            if remaining <= 0:
-                break
-            take = min(stock.quantity, remaining)
-            stock.quantity = F('quantity') - take
-            stock.save(update_fields=['quantity'])
-            remaining -= take
+        sale = super().create(validated_data)
+        _deplete_stock(sale.product, sale.quantity)
         return sale
+
+
+class SaleItemSerializer(Serializer):
+    """Bulk savdo ichidagi bitta mahsulot qatori."""
+    product    = PrimaryKeyRelatedField(queryset=Product.objects.all())
+    quantity   = DecimalField(max_digits=12, decimal_places=0, min_value=1)
+    sold_price = DecimalField(max_digits=14, decimal_places=2)
+    comment    = CharField(required=False, allow_blank=True, allow_null=True)
+
+
+class SaleBulkCreateSerializer(Serializer):
+    """
+    Bir vaqtda bir nechta mahsulot savdosi.
+    Har bir mahsulot alohida Sale yozuvi bo'ladi (bitta client/sana/manzil ostida).
+
+    Namuna:
+    {
+      "client": "<uuid>",
+      "sold_to": "Aliyev Vohid",
+      "destination": "Toshkent",
+      "sold_date": "2026-07-02",
+      "items": [
+        { "product": 12, "quantity": 4, "sold_price": "3900000" },
+        { "product": 7,  "quantity": 2, "sold_price": "1200000" }
+      ]
+    }
+    """
+    client      = PrimaryKeyRelatedField(queryset=Client.objects.all(),
+                                         required=False, allow_null=True)
+    sold_to     = CharField(required=False, allow_blank=True, allow_null=True)
+    destination = CharField(required=False, allow_blank=True, allow_null=True)
+    sold_date   = DateField()
+    items       = SaleItemSerializer(many=True)
+
+    def validate_items(self, value):
+        if not value:
+            raise ValidationError('Kamida bitta mahsulot kiritilishi kerak.')
+        # Har bir qatorda available_quantity ni tekshirish.
+        # Bitta mahsulot bir necha marta kelsa — yig'indini hisobga olamiz.
+        needed = {}
+        for item in value:
+            needed[item['product']] = needed.get(item['product'], 0) + int(item['quantity'])
+        errors = []
+        for product, qty in needed.items():
+            available = product.available_quantity
+            if qty > available:
+                errors.append(
+                    f'"{product.name}" — sotish mumkin bo\'lgan qoldiq yetarli emas '
+                    f'(mavjud: {available}, so\'ralgan: {qty}).'
+                )
+        if errors:
+            raise ValidationError(errors)
+        return value
+
+    @transaction.atomic
+    def create(self, validated_data):
+        client      = validated_data.get('client')
+        sold_to     = validated_data.get('sold_to')
+        destination = validated_data.get('destination')
+        sold_date   = validated_data['sold_date']
+        items       = validated_data['items']
+
+        created = []
+        for item in items:
+            sale = Sale.objects.create(
+                product=item['product'],
+                client=client,
+                quantity=int(item['quantity']),
+                sold_price=item['sold_price'],
+                sold_to=sold_to,
+                destination=destination,
+                sold_date=sold_date,
+                comment=item.get('comment'),
+            )
+            _deplete_stock(sale.product, sale.quantity)
+            created.append(sale)
+        return created
+
+    def to_representation(self, instance):
+        return {'sales': SaleSerializer(instance, many=True).data}
