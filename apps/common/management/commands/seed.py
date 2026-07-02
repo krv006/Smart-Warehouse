@@ -356,18 +356,12 @@ class Command(BaseCommand):
         if not accountants:
             accountants = users
 
-        for _ in range(count):
-            code     = random.choice(list(exp_types.keys()))
-            et       = exp_types[code]
-            sub      = (ExpenseSubType.objects
-                        .filter(expense_type=et)
-                        .order_by('?').first())
-            is_other = code == 'other'
+        def make_expense(et, sub):
+            is_other = et.code == 'other'
             currency = random.choice(['UZS', 'UZS', 'UZS', 'USD'])
             amount   = (Decimal(str(random.randint(50_000, 5_000_000)))
                         if currency == 'UZS'
                         else Decimal(str(random.randint(50, 2000))))
-
             Expense.objects.create(
                 expense_type=et,
                 sub_type=sub,
@@ -377,7 +371,30 @@ class Command(BaseCommand):
                 responsible=random.choice(accountants),
                 comment=fake.sentence() if is_other or random.random() < 0.2 else None,
             )
-        self.stdout.write(ok(f'{count} ta rasxod yaratildi'))
+
+        made = 0
+        # 1) Har bir toifa VA har bir tip (subtype) uchun kamida bittadan yozuv
+        for et in exp_types.values():
+            subs = list(ExpenseSubType.objects.filter(expense_type=et))
+            if subs:
+                for sub in subs:
+                    make_expense(et, sub)
+                    made += 1
+            else:
+                # "other" — subtype yo'q, lekin toifa bo'sh qolmasin
+                make_expense(et, None)
+                made += 1
+
+        # 2) Qolganini tasodifiy to'ldirish (jami `count` ga yetguncha)
+        while made < count:
+            et  = random.choice(list(exp_types.values()))
+            sub = (ExpenseSubType.objects
+                   .filter(expense_type=et)
+                   .order_by('?').first())
+            make_expense(et, sub)
+            made += 1
+
+        self.stdout.write(ok(f'{made} ta rasxod yaratildi (barcha toifa/tip qamrovda)'))
 
     # ── Payments ──────────────────────────────────────────────────────────────
     def _seed_payments(self, count, sales, clients):
