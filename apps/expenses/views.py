@@ -1,9 +1,11 @@
-from django.db.models import Sum, Q
+from django.db.models import Sum
 
 from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter
 from rest_framework.decorators import action
+from rest_framework.mixins import (CreateModelMixin, ListModelMixin,
+                                   RetrieveModelMixin)
 from rest_framework.response import Response
-from rest_framework.viewsets import ModelViewSet
+from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet, GenericViewSet
 from rest_framework.permissions import IsAuthenticated
 
 from apps.common.permissions import IsAccountantOrManagement, IsAccountantOrReadOnly
@@ -15,12 +17,9 @@ from apps.expenses.serializers import (ExpenseTypeSerializer,
 @extend_schema_view(
     list=extend_schema(summary="Rasxod toifalari", tags=["Expenses"]),
     retrieve=extend_schema(summary="Toifa", tags=["Expenses"]),
-    create=extend_schema(summary="Yangi toifa (Superuser)", tags=["Expenses"]),
-    update=extend_schema(summary="Toifa yangilash", tags=["Expenses"]),
-    partial_update=extend_schema(summary="Toifa qisman yangilash", tags=["Expenses"]),
-    destroy=extend_schema(summary="Toifa o'chirish", tags=["Expenses"]),
 )
-class ExpenseTypeViewSet(ModelViewSet):
+class ExpenseTypeViewSet(ReadOnlyModelViewSet):
+    """Toifalar faqat o'qiladi — Django admin orqali boshqariladi."""
     queryset           = ExpenseType.objects.prefetch_related('sub_types')
     serializer_class   = ExpenseTypeSerializer
     permission_classes = (IsAuthenticated,)
@@ -31,11 +30,10 @@ class ExpenseTypeViewSet(ModelViewSet):
     list=extend_schema(summary="Rasxod turlari", tags=["Expenses"]),
     retrieve=extend_schema(summary="Tur", tags=["Expenses"]),
     create=extend_schema(summary="Yangi tur (Accountant)", tags=["Expenses"]),
-    update=extend_schema(summary="Tur yangilash", tags=["Expenses"]),
-    partial_update=extend_schema(summary="Tur qisman yangilash", tags=["Expenses"]),
-    destroy=extend_schema(summary="Tur o'chirish", tags=["Expenses"]),
 )
-class ExpenseSubTypeViewSet(ModelViewSet):
+class ExpenseSubTypeViewSet(CreateModelMixin, ListModelMixin,
+                            RetrieveModelMixin, GenericViewSet):
+    """Sub-tiplar: ro'yxat, ko'rish va yaratish. Tahrirlash/o'chirish admin orqali."""
     queryset           = ExpenseSubType.objects.select_related('expense_type')
     serializer_class   = ExpenseSubTypeSerializer
     permission_classes = (IsAccountantOrReadOnly,)

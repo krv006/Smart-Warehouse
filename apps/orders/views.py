@@ -1,10 +1,12 @@
 from drf_spectacular.utils import extend_schema, extend_schema_view
 from rest_framework.decorators import action
+from rest_framework.mixins import (CreateModelMixin, ListModelMixin,
+                                   RetrieveModelMixin, UpdateModelMixin)
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from rest_framework.viewsets import ModelViewSet
+from rest_framework.viewsets import GenericViewSet
 
-from apps.common.permissions import IsOperatorOrReadOnly, IsManagement
+from apps.common.permissions import IsOperatorOrReadOnly
 from apps.orders.models import Order
 from apps.orders.serializers import OrderSerializer
 
@@ -25,11 +27,17 @@ from apps.orders.serializers import OrderSerializer
         ),
         tags=["Orders / Bron"],
     ),
-    update=extend_schema(summary="Buyurtma yangilash", tags=["Orders / Bron"]),
-    partial_update=extend_schema(summary="Buyurtma qisman yangilash", tags=["Orders / Bron"]),
-    destroy=extend_schema(summary="Buyurtma o'chirish (bron bo'shatiladi)", tags=["Orders / Bron"]),
+    partial_update=extend_schema(
+        summary="Buyurtma yangilash (faqat due_date, comment)",
+        tags=["Orders / Bron"],
+    ),
 )
-class OrderViewSet(ModelViewSet):
+class OrderViewSet(CreateModelMixin, ListModelMixin,
+                   RetrieveModelMixin, UpdateModelMixin, GenericViewSet):
+    """
+    Buyurtmalar. O'chirish yo'q — o'rniga /cancel/ action ishlatiladi.
+    To'liq PUT ham yo'q — faqat PATCH (due_date, comment).
+    """
     queryset           = Order.objects.select_related('product', 'client')
     serializer_class   = OrderSerializer
     permission_classes = (IsOperatorOrReadOnly,)
@@ -37,10 +45,7 @@ class OrderViewSet(ModelViewSet):
     search_fields      = ('product__name', 'product__serial_number',
                           'client__company_name', 'comment')
     ordering_fields    = ('due_date', 'created_at', 'status')
-
-    def perform_destroy(self, instance):
-        instance.release()
-        instance.delete()
+    http_method_names  = ('get', 'post', 'patch', 'head', 'options')
 
     @extend_schema(
         summary="Buyurtmani yetkazildi deb belgilash",
