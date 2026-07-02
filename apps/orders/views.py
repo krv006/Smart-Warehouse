@@ -9,7 +9,8 @@ from rest_framework.viewsets import GenericViewSet
 from apps.common.permissions import IsOperatorOrReadOnly
 from apps.orders.models import Order, Zakaz, allocate_pending_orders
 from apps.orders.serializers import (OrderSerializer, ZakazSerializer,
-                                     OrderBulkCreateSerializer)
+                                     OrderBulkCreateSerializer,
+                                     ZakazBulkCreateSerializer)
 
 
 # ── Order (Bron) ──────────────────────────────────────────────────────────────
@@ -187,3 +188,35 @@ class ZakazViewSet(CreateModelMixin, ListModelMixin,
                           'supplier', 'comment')
     ordering_fields    = ('expected_date', 'created_at', 'status')
     http_method_names  = ('get', 'post', 'patch', 'head', 'options')
+
+    @extend_schema(
+        summary="Bir vaqtda bir nechta mahsulot uchun zakaz (bulk)",
+        description=(
+            "Bir nechta mahsulotni birdan zakaz qilish (masalan buyurtmada "
+            "yetishmagan bir necha mahsulot uchun). Har biri alohida Zakaz "
+            "(status=new). Faol zakazi bor mahsulot rad etiladi.\n\n"
+            "```json\n"
+            "{\n"
+            '  "supplier": "Xitoy, Guangzhou",\n'
+            '  "expected_date": "2026-08-15",\n'
+            '  "items": [\n'
+            '    { "product": 12, "quantity": 7 },\n'
+            '    { "product": 7,  "quantity": 5 }\n'
+            "  ]\n"
+            "}\n"
+            "```"
+        ),
+        request=ZakazBulkCreateSerializer,
+        tags=["Zakaz"],
+    )
+    @action(detail=False, methods=['post'])
+    def bulk(self, request):
+        serializer = ZakazBulkCreateSerializer(
+            data=request.data, context={'request': request}
+        )
+        serializer.is_valid(raise_exception=True)
+        zakazlar = serializer.save()
+        return Response(
+            ZakazBulkCreateSerializer().to_representation(zakazlar),
+            status=201,
+        )

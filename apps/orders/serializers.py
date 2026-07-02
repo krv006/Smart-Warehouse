@@ -2,7 +2,7 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.serializers import (ModelSerializer, Serializer,
                                         SerializerMethodField, ReadOnlyField,
                                         ValidationError, CharField, DateField,
-                                        PrimaryKeyRelatedField)
+                                        IntegerField, PrimaryKeyRelatedField)
 
 from apps.clients.models import Client
 from apps.orders.models import Order, Zakaz
@@ -163,3 +163,73 @@ class ZakazSerializer(ModelSerializer):
             zakaz.receive()
 
         return zakaz
+
+
+class ZakazItemSerializer(Serializer):
+    """Bulk zakaz ichidagi bitta mahsulot qatori."""
+    product       = PrimaryKeyRelatedField(queryset=Product.objects.all())
+    quantity      = IntegerField(min_value=1)
+    supplier      = CharField(required=False, allow_blank=True, allow_null=True)
+    expected_date = DateField(required=False, allow_null=True)
+    comment       = CharField(required=False, allow_blank=True, allow_null=True)
+
+
+class ZakazBulkCreateSerializer(Serializer):
+    """
+    Bir vaqtda bir nechta mahsulot uchun zakaz.
+    Har biri alohida Zakaz yozuvi bo'ladi (status="new").
+
+    Namuna:
+    {
+      "supplier": "Xitoy, Guangzhou",
+      "expected_date": "2026-08-15",
+      "items": [
+        { "product": 12, "quantity": 7 },
+        { "product": 7,  "quantity": 5, "supplier": "UAE, Dubai" }
+      ]
+    }
+    """
+    supplier      = CharField(required=False, allow_blank=True, allow_null=True)
+    expected_date = DateField(required=False, allow_null=True)
+    items         = ZakazItemSerializer(many=True)
+
+    def validate_items(self, value):
+        if not value:
+            raise ValidationError('Kamida bitta mahsulot kiritilishi kerak.')
+        # Faol zakaz bor mahsulotга takror zakaz bermaslik
+        errors = []
+        for item in value:
+            product = item['product']
+            has_active = product.zakazlar.filter(
+                status__in=(Zakaz.NEW, Zakaz.CONFIRMED, Zakaz.ORDERED)
+            ).exists()
+            if has_active:
+                errors.append(
+                    f'"{product.name}" — bu mahsulot uchun faol zakaz allaqachon mavjud.'
+                )
+        if errors:
+            raise ValidationError(errors)
+        return value
+
+    def create(self, validated_data):
+        common_supplier = validated_data.get('supplier')
+        common_expected = validated_data.get('expected_date')
+        items           = validated_data['items']
+        user            = self.context['request'].user
+
+        created = []
+        for item in items:
+            zakaz = Zakaz.objects.create(
+                product=item['product'],
+                quantity=item['quantity'],
+                supplier=item.get('supplier') or common_supplier,
+                expected_date=item.get('expected_date') or common_expected,
+                comment=item.get('comment'),
+                status=Zakaz.NEW,
+                created_by=user if user.is_authenticated else None,
+            )
+            created.append(zakaz)
+        return created
+
+    def to_representation(self, instance):
+        return {'zakazlar': ZakazSerializer(instance, many=True).data}
