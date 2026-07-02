@@ -1,6 +1,10 @@
 from rest_framework.routers import DefaultRouter
-from apps.orders.views import OrderViewSet
+
+from apps.orders.views import OrderViewSet, ZakazViewSet
 
 router = DefaultRouter()
-router.register('', OrderViewSet, basename='order')
+# Zakaz avval ro'yxatdan o'tishi kerak — URL conflict oldini olish uchun
+router.register('zakaz',  ZakazViewSet,  basename='zakaz')
+router.register('',       OrderViewSet,  basename='order')
+
 urlpatterns = router.urls
