@@ -92,14 +92,52 @@ const showZakazButton = order.backorder_qty > 0 && !order.has_active_zakaz;
 | `> 0` | `false` | ✅ **"Zakaz berish"** ko'rinadi |
 | `> 0` | `true` | ❌ yashirin (zakaz allaqachon berilgan) |
 
-**Zakaz berish** bosilganda:
+### ⭐ Tavsiya etilgan usul — buyurtмадаги tugma
+"Zakaz berish" bosilganда **shu action** chaqiriladi:
+```json
+POST /api/v1/orders/{id}/create-zakaz/
+{ "supplier": "Xitoy, Guangzhou", "expected_date": "2026-08-01" }   // ixtiyoriy
+```
+- Backend `backorder_qty` (yetishmagan miqdor) ga **haqiqiy Zakaz** yaratadi
+- Zakaz **Zakazlar ro'yxatiga** (`GET /orders/zakaz/`) tushadi — **buyurtмада qolmaydi**
+- `supplier`/`expected_date` berilmasa — bo'sh; `expected_date` bo'lmasa buyurtма `due_date` olinadi
+- So'ng `has_active_zakaz` → `true`, tugma yo'qoladi (takror oldini oladi)
+
+> **Muhim:** buyurtмада "Zakaz berilgan" degan matn saqlamang — zakaz Zakazlar
+> bo'limiga o'tishi kerak. `has_active_zakaz` orqali tugmani yashiring, xolos.
+
+### Muqobil — mustaqil zakaz (buyurtмасiz)
+Buyurtмага bog'lamay to'g'ridan-to'g'ri ham berish mumkin:
 ```json
 POST /api/v1/orders/zakaz/
 { "product": 12, "quantity": 7, "supplier": "..." }
 ```
-So'ng `has_active_zakaz` → `true` bo'ladi va tugma yo'qoladi (takroriy zakaz oldini oladi).
 
 Zakaz `received`/`cancelled` bo'lsa — `has_active_zakaz` yana `false` bo'ladi.
+
+---
+
+## 2.1. Bir nechta mahsulotга birdan zakaz (bulk)
+
+Buyurtмада bir necha mahsulot yetishmasa — hammasiga **bitta so'rovda** zakaz:
+```json
+POST /api/v1/orders/zakaz/bulk/
+{
+  "supplier": "Xitoy, Guangzhou",
+  "expected_date": "2026-08-15",
+  "items": [
+    { "product": 12, "quantity": 7 },
+    { "product": 7,  "quantity": 5, "supplier": "UAE, Dubai" }
+  ]
+}
+```
+Javob (201):
+```json
+{ "zakazlar": [ { "id": 40, "status": "new", ... }, { "id": 41, "status": "new", ... } ] }
+```
+- Har biri alohida Zakaz (status=new) — Zakazlar ro'yxatida ko'rinadi
+- Faol zakazi bor mahsulot **rad etiladi** (takror oldini oladi)
+- `supplier`/`expected_date` umumiy, qatorda alohida ko'rsatsa — o'sha ustun turadi
 
 ---
 
@@ -189,23 +227,42 @@ ombor↓   ▼                 ┌────┴────┐
 
 ---
 
-## 5. O'zgarishlar (shu tuzatishda)
+## 5. Zakaz endpointlari (jamlanma)
 
-| Fayl | O'zgarish |
-|------|-----------|
-| `apps/orders/serializers.py` | `OrderSerializer.validate` — `available<=0` hard blok **olib tashlandi** |
-| `apps/orders/serializers.py` | `OrderBulkCreateSerializer.validate_items` — bitta mahsulot tugasa butun so'rovni rad etish **olib tashlandi** |
+| Endpoint | Tavsif |
+|----------|--------|
+| `POST /orders/{id}/create-zakaz/` | ⭐ Buyurtмадаги backorderга zakaz (Zakazlar ro'yxatiga tushadi) |
+| `POST /orders/zakaz/` | Bitta mustaqil zakaz |
+| `POST /orders/zakaz/bulk/` | Bir nechta mahsulotга birdan zakaz |
+| `GET /orders/zakaz/` | Barcha zakazlar ro'yxati (2-rasmdagi bo'lim) |
+| `PATCH /orders/zakaz/{id}/` | Status yangilash (faqat Manager) |
 
-Natija: buyurtma (bitta yoki bulk) qoldiq yetmasa ham yaratiladi, backorder →
-"Zakaz berish" tugmasi → zakaz. Savdo esa oldingidek qoldiqqa qarab bloklanadi.
+> Buyurtma va Zakaz **alohida bo'limlar**. "Zakaz berish" har doim Zakaz
+> yozuvi yaratadi va u Zakazlar ro'yxatida ko'rinadi — buyurtмада emas.
 
 ---
 
-## 6. Frontend uchun qisqa qoidalar
+## 6. O'zgarishlar (shu tuzatishlarда)
+
+| Fayl | O'zgarish |
+|------|-----------|
+| `OrderSerializer.validate` | `available<=0` hard blok olib tashlandi (backorder → zakaz) |
+| `OrderBulkCreateSerializer` | Bitta mahsulot tugasa butun so'rovni rad etish olib tashlandi |
+| `OrderViewSet.create_zakaz` | Buyurtмадан zakaz — Zakazlar ro'yxatiga tushadi |
+| `ZakazBulkCreateSerializer` | Bir nechta mahsulotга birdan zakaz |
+
+---
+
+## 7. Frontend uchun qisqa qoidalar
 
 ```js
-// BUYURTMA qatori
+// BUYURTMA qatori — "Zakaz berish" tugmasi
 const showZakaz = order.backorder_qty > 0 && !order.has_active_zakaz;
+
+// Tugma bosilganda — zakaz Zakazlar bo'limiga o'tadi
+await api.post(`/orders/${order.id}/create-zakaz/`);
+// buyurtмада "Zakaz berilgan" MATN saqlamang — has_active_zakaz true bo'lib
+// tugma o'zi yo'qoladi, zakaz esa Zakazlar ro'yxatida ko'rinadi
 
 // SAVDO xatosi (bulk yoki bitta)
 try {
