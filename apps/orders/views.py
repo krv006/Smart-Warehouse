@@ -135,6 +135,41 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
         allocate_pending_orders(order.product)
         return Response(OrderSerializer(order).data)
 
+    @extend_schema(
+        summary="Buyurtмадаги yetishmagan miqdorga zakaz berish",
+        description=(
+            "Buyurtмадаги `backorder_qty` (yetishmagan miqdor) uchun **haqiqiy "
+            "Zakaz yozuvi** yaratadi. Zakaz Zakazlar ro'yxatida (`/orders/zakaz/`) "
+            "ko'rinadi — buyurtмада emas.\n\n"
+            "Ixtiyoriy body: `{ \"supplier\": \"...\", \"expected_date\": \"2026-08-01\" }`"
+        ),
+        request=None,
+        tags=["Orders / Bron"],
+    )
+    @action(detail=True, methods=['post'], url_path='create-zakaz',
+            permission_classes=[IsAuthenticated])
+    def create_zakaz(self, request, pk=None):
+        order = self.get_object()
+        if order.backorder_qty <= 0:
+            return Response(
+                {'detail': 'Bu buyurtмада zakaz kerak bo\'lgan (yetishmagan) miqdor yo\'q.'},
+                status=400,
+            )
+        if order.has_active_zakaz:
+            return Response(
+                {'detail': 'Bu mahsulot uchun faol zakaz allaqachon mavjud.'},
+                status=400,
+            )
+        zakaz = Zakaz.objects.create(
+            product=order.product,
+            quantity=order.backorder_qty,
+            supplier=request.data.get('supplier'),
+            expected_date=request.data.get('expected_date') or order.due_date,
+            status=Zakaz.NEW,
+            created_by=request.user if request.user.is_authenticated else None,
+        )
+        return Response(ZakazSerializer(zakaz).data, status=201)
+
 
 # ── Zakaz (Etkazuvchidan buyurtma) ────────────────────────────────────────────
 
