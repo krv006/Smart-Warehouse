@@ -6,6 +6,7 @@ from rest_framework.serializers import (ModelSerializer, Serializer,
 
 from apps.clients.models import Client
 from apps.orders.models import Order, Zakaz
+from apps.warehouse.models import Product
 
 
 # ── Order (Bron) ──────────────────────────────────────────────────────────────
