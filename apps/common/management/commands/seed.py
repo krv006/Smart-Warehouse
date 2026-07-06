@@ -6,12 +6,14 @@ Ishlatish:
     python manage.py seed --clear      # avval tozalab keyin to'ldiradi
     python manage.py seed --users 10   # 10 ta foydalanuvchi
 """
+import json
 import random
 from decimal import Decimal
 
 from django.contrib.auth.hashers import make_password
 from django.core.management.base import BaseCommand
 from django.db import transaction
+from django.utils import timezone
 from faker import Faker
 
 fake = Faker(['uz_UZ', 'ru_RU'])
@@ -48,6 +50,28 @@ COMPANIES = [
 WAREHOUSE_LOCATIONS = [
     f'{r}-{s}-{n}' for r in 'ABCD' for s in range(1, 5) for n in range(1, 6)
 ]
+
+EDIT_ASOSLAR = [
+    'Mijoz miqdorni o\'zgartirdi (tel. orqali kelishildi)',
+    'Yetkazish muddati mijoz iltimosiga ko\'ra surildi',
+    'Shartnomaga qo\'shimcha kelishuv imzolandi',
+    'Narx qayta kelishildi',
+    'Mijoz manzili aniqlashtirildi',
+]
+QABUL_ASOSLAR = [
+    'Qabul dalolatnomasi №{n}',
+    'Kirim orderi №{n}',
+    'TTN (yuk xati) №{n}',
+]
+
+
+def _contract_number():
+    """Tasodifiy shartnoma raqami: SH-2026/NNN."""
+    return f'SH-2026/{random.randint(1, 999):03d}'
+
+
+def _faktura_number():
+    return f'F-2026/{random.randint(100, 9999)}'
 
 EXPENSE_TYPES_DATA = [
     ('office',        'Ofis rasxod'),
@@ -113,7 +137,7 @@ class Command(BaseCommand):
         sales     = self._seed_sales(options['sales'], products, clients)
         self._seed_expenses(options['expenses'], exp_types, users)
         self._seed_payments(options['payments'], sales, clients)
-        self._seed_orders(options['orders'], products, clients)
+        self._seed_orders(options['orders'], products, clients, users)
         self._seed_zakazlar(options['zakazlar'], products, users)
         self._seed_notifications(products, users)
         self._seed_telegram_settings()
@@ -431,27 +455,57 @@ class Command(BaseCommand):
         self.stdout.write(ok(f"{made} ta to'lov yaratildi"))
 
     # ── Orders (Bron) ─────────────────────────────────────────────────────────
-    def _seed_orders(self, count, products, clients):
-        from apps.orders.models import Order
+    def _seed_orders(self, count, products, clients, users):
+        from apps.orders.models import Order, OrderHistory
         from apps.warehouse.models import Stock
         from django.db.models import F
 
+        operators = [u for u in users if u.is_operator] or users
+
         made = 0
+        edited = 0
+        auto_zakaz = 0
         for _ in range(count):
             product = random.choice(products)
             qty     = random.randint(2, 15)
             client  = random.choice(clients) if clients else None
+            creator = random.choice(operators)
 
             # Narx — selling_price bo'lsa o'sha, aks holda tasodifiy
             unit_price = product.selling_price or Decimal(str(random.randint(500_000, 20_000_000)))
+
+            # Shartnoma — har buyurtmada MAJBURIY
+            contract_number = _contract_number()
+            contract_date   = fake_en.date_between(start_date='-60d', end_date='today')
+
+            # Oldindan to'lov: ~40% yo'q, ~40% qisman, ~20% to'liq
+            total = unit_price * qty
+            r = random.random()
+            if r < 0.4:
+                prepaid = Decimal('0')
+            elif r < 0.8:
+                prepaid = (total * Decimal(str(round(random.uniform(0.2, 0.7), 2)))
+                           ).quantize(Decimal('1000'))
+            else:
+                prepaid = total
 
             order = Order.objects.create(
                 product=product,
                 client=client,
                 quantity=qty,
                 unit_price=unit_price,
+                prepaid_amount=prepaid,
+                contract_number=contract_number,
+                contract_date=contract_date,
                 due_date=fake_en.date_between(start_date='+3d', end_date='+90d'),
                 comment=fake.sentence() if random.random() < 0.3 else None,
+            )
+
+            # Tarix: yaratildi
+            OrderHistory.objects.create(
+                order=order, changed_by=creator, action=OrderHistory.CREATED,
+                contract_number=contract_number,
+                asos=f'Buyurtma yaratildi — shartnoma №{contract_number}.',
             )
 
             # Mavjud qoldiqdan bron ajrat
@@ -479,28 +533,65 @@ class Command(BaseCommand):
             else:
                 order.status = Order.PENDING
             order.save(update_fields=['reserved_qty', 'status'])
+
+            # 2-etap: yetishmagan miqdorga AVTO-ZAKAZ (~60% holatda)
+            if order.backorder_qty > 0 and random.random() < 0.6:
+                z = order.create_backorder_zakaz(user=creator)
+                if z:
+                    auto_zakaz += 1
+
+            # ~35% buyurtma tahrirlangan (asos + tarix bilan)
+            if random.random() < 0.35:
+                old_due = order.due_date
+                new_due = fake_en.date_between(start_date='+5d', end_date='+120d')
+                order.due_date = new_due
+                order.save(update_fields=['due_date'])
+                OrderHistory.objects.create(
+                    order=order, changed_by=random.choice(operators),
+                    action=OrderHistory.EDITED,
+                    contract_number=contract_number,
+                    asos=random.choice(EDIT_ASOSLAR),
+                    changes=json.dumps(
+                        {'due_date': {'old': str(old_due), 'new': str(new_due)}},
+                        ensure_ascii=False),
+                )
+                edited += 1
+
             made += 1
 
-        # Ba'zi orderlarni fulfilled va cancelled qilamiz
+        # Ba'zi orderlarni fulfilled va cancelled qilamiz (tarix bilan)
         all_orders = list(Order.objects.all())
         for order in random.sample(all_orders, min(3, len(all_orders))):
             order.status = Order.FULFILLED
             order.save(update_fields=['status'])
+            OrderHistory.objects.create(
+                order=order, changed_by=random.choice(operators),
+                action=OrderHistory.FULFILLED,
+                contract_number=order.contract_number,
+                asos='Buyurtma yetkazildi.',
+            )
         for order in random.sample(all_orders, min(2, len(all_orders))):
             if order.status != Order.FULFILLED:
                 order.status = Order.CANCELLED
                 order.save(update_fields=['status'])
+                OrderHistory.objects.create(
+                    order=order, changed_by=random.choice(operators),
+                    action=OrderHistory.CANCELLED,
+                    contract_number=order.contract_number,
+                    asos='Mijoz buyurtmani bekor qildi.',
+                )
 
-        self.stdout.write(ok(f'{made} ta buyurtma/bron yaratildi'))
+        self.stdout.write(ok(f'{made} ta buyurtma/bron yaratildi '
+                             f'({edited} ta tahrirlangan, {auto_zakaz} ta avto-zakaz)'))
 
     # ── Zakazlar (Etkazuvchidan buyurtma) ────────────────────────────────────────
     def _seed_zakazlar(self, count, products, users):
-        from apps.orders.models import Zakaz
+        from apps.orders.models import Zakaz, ZakazHistory
         from apps.warehouse.models import Stock
         from django.db.models import F
 
         operators = [u for u in users if u.is_operator] or users
-        managers  = [u for u in users if u.is_management]
+        managers  = [u for u in users if u.is_management] or users
 
         # status taqsimoti: new / confirmed / ordered / received / cancelled
         status_weights = [
@@ -512,12 +603,23 @@ class Command(BaseCommand):
         ]
         statuses = [s for s, w in status_weights for _ in range(int(w * 100))]
 
+        # Faol zakazi bor mahsulotlarga takror zakaz bermaymiz (biznes qoida —
+        # avto-zakazlar _seed_orders da allaqachon ochilgan bo'lishi mumkin)
+        busy_ids = set(
+            Zakaz.objects
+            .filter(status__in=(Zakaz.NEW, Zakaz.CONFIRMED, Zakaz.ORDERED))
+            .values_list('product_id', flat=True)
+        )
+        free_products = [p for p in products if p.id not in busy_ids] or products
+
         made = 0
         for _ in range(count):
-            product  = random.choice(products)
+            product  = random.choice(free_products)
             qty      = random.randint(5, 50)
             status   = random.choice(statuses)
             supplier = f'{random.choice(SOURCES)} — {fake_en.company()}'
+            creator  = random.choice(operators)
+            manager  = random.choice(managers)
 
             zakaz = Zakaz.objects.create(
                 product=product,
@@ -525,17 +627,79 @@ class Command(BaseCommand):
                 supplier=supplier,
                 status=Zakaz.NEW,  # avval NEW, keyin real holatga o'tkazamiz
                 expected_date=fake_en.date_between(start_date='+2d', end_date='+45d'),
-                created_by=random.choice(operators),
+                created_by=creator,
                 comment=fake.sentence() if random.random() < 0.3 else None,
             )
+            ZakazHistory.objects.create(
+                zakaz=zakaz, changed_by=creator, action=ZakazHistory.CREATED,
+                new_status=Zakaz.NEW, asos='Zakaz yaratildi.',
+            )
+
+            if status == Zakaz.NEW:
+                made += 1
+                continue
+
+            if status == Zakaz.CANCELLED:
+                zakaz.status = Zakaz.CANCELLED
+                zakaz.save(update_fields=['status'])
+                ZakazHistory.objects.create(
+                    zakaz=zakaz, changed_by=manager,
+                    action=ZakazHistory.STATUS_CHANGED,
+                    old_status=Zakaz.NEW, new_status=Zakaz.CANCELLED,
+                    asos='Etkazuvchi bilan kelishilmadi — bekor qilindi.',
+                )
+                made += 1
+                continue
+
+            # confirmed / ordered / received — avval TASDIQLASH bosqichi:
+            # shartnoma MAJBURIY, sana avtomatik o'sha kun, confirmed_at yoziladi
+            contract_number = _contract_number()
+            contract_date   = fake_en.date_between(start_date='-30d', end_date='today')
+            zakaz.contract_number = contract_number
+            zakaz.contract_date   = contract_date
+            zakaz.confirmed_at    = timezone.now()
+            zakaz.status          = Zakaz.CONFIRMED
+            zakaz.save(update_fields=['contract_number', 'contract_date',
+                                      'confirmed_at', 'status'])
+            ZakazHistory.objects.create(
+                zakaz=zakaz, changed_by=manager,
+                action=ZakazHistory.STATUS_CHANGED,
+                old_status=Zakaz.NEW, new_status=Zakaz.CONFIRMED,
+                contract_number=contract_number, contract_date=contract_date,
+                asos=f'Tasdiqlandi — shartnoma №{contract_number}.',
+            )
+
+            if status in (Zakaz.ORDERED, Zakaz.RECEIVED):
+                zakaz.status = Zakaz.ORDERED
+                zakaz.save(update_fields=['status'])
+                ZakazHistory.objects.create(
+                    zakaz=zakaz, changed_by=manager,
+                    action=ZakazHistory.STATUS_CHANGED,
+                    old_status=Zakaz.CONFIRMED, new_status=Zakaz.ORDERED,
+                    contract_number=contract_number, contract_date=contract_date,
+                    asos='Etkazuvchiga yuborildi.',
+                )
 
             if status == Zakaz.RECEIVED:
                 received_qty = qty if random.random() > 0.15 else random.randint(1, qty - 1)
-                loc = random.choice(WAREHOUSE_LOCATIONS)
+                loc     = random.choice(WAREHOUSE_LOCATIONS)
+                asos    = random.choice(QABUL_ASOSLAR).format(n=random.randint(10, 999))
+                faktura = _faktura_number()
+
                 zakaz.received_qty       = received_qty
                 zakaz.warehouse_location = loc
+                zakaz.asos               = asos
+                zakaz.faktura            = faktura
                 zakaz.status             = Zakaz.RECEIVED
-                zakaz.save(update_fields=['received_qty', 'warehouse_location', 'status'])
+                zakaz.save(update_fields=['received_qty', 'warehouse_location',
+                                          'asos', 'faktura', 'status'])
+                ZakazHistory.objects.create(
+                    zakaz=zakaz, changed_by=manager,
+                    action=ZakazHistory.RECEIVED,
+                    old_status=Zakaz.ORDERED, new_status=Zakaz.RECEIVED,
+                    contract_number=contract_number, contract_date=contract_date,
+                    asos=asos, faktura=faktura,
+                )
 
                 stock, _ = Stock.objects.get_or_create(
                     product=product, warehouse_location=loc,
@@ -543,13 +707,10 @@ class Command(BaseCommand):
                 )
                 stock.quantity = F('quantity') + received_qty
                 stock.save(update_fields=['quantity'])
-            else:
-                zakaz.status = status
-                zakaz.save(update_fields=['status'])
 
             made += 1
 
-        self.stdout.write(ok(f'{made} ta zakaz yaratildi'))
+        self.stdout.write(ok(f'{made} ta zakaz yaratildi (shartnoma/asos/faktura bilan)'))
 
     # ── Notifications ─────────────────────────────────────────────────────────
     def _seed_notifications(self, products, users):
