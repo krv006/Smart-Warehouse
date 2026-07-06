@@ -147,6 +147,8 @@ python manage.py seed --products 60 --orders 30 --zakazlar 20 --clients 25
 │  • prepaid_amount — oldindan to'lov (pul, qanchadir qism)  │
 │  • Ombordagi mavjud qoldiqdan FIFO bron ajratiladi         │
 │  • balance_due = total − prepaid_amount                    │
+│  • PUL KASSAGA TUSHADI: bitta amalda kassada to'lov yozuvi │
+│    ochiladi (jami summa + to'langan + status avtomatik)    │
 └────────────────────────────┬───────────────────────────────┘
                              │ yetishmagan (backorder) miqdor bo'lsa
                              ▼ AVTOMATIK
@@ -304,7 +306,8 @@ POST /orders/
 }
 ```
 → Omborda 3 ta bo'lsa: `reserved_qty=3`, `backorder_qty=7`, status=`partial`
-→ **7 ta uchun avtomatik Zakaz** ochiladi (`SH-2026/045` shartnoma asosida).
+→ **7 ta uchun avtomatik Zakaz** ochiladi (`SH-2026/045` shartnoma asosida)
+→ **Kassada avtomatik to'lov yozuvi**: jami 39 mln, to'langan 10 mln, status=`partial`.
 
 **Tahrirlash namunasi:**
 ```json
@@ -390,15 +393,52 @@ PATCH /orders/zakaz/{id}/
 | Method | URL | Tavsif |
 |--------|-----|--------|
 | GET/POST | `/cash/payments/` | To'lovlar |
-| GET/PATCH/DELETE | `/cash/payments/{id}/` | Bitta |
+| GET/PATCH/DELETE | `/cash/payments/{id}/` | Bitta (tranzaksiyalar bilan) |
+| POST | `/cash/payments/{id}/pay/` | **Qo'shimcha to'lov (bo'lib to'lash)** |
 | GET | `/cash/payments/summary/` | Kassa xulosasi |
 
 - Status: `pending` / `partial` / `paid` / `overdue`
-- Komissiya avtomatik 15%
+- Komissiya avtomatik 15% (faqat sotuv to'lovlarida; buyurtma to'lovlarida 0)
 - **Kechikkan** = `status ∈ (pending, partial, overdue)` AND `due_date < bugun`
 
-> Buyurtmadagi oldindan to'lov (`prepaid_amount`) buyurtmaning o'zida saqlanadi —
-> kassa (Payment) sotuvga (Sale) bog'langan.
+**To'lov manbalari (`source`):**
+
+| source | Bog'lanish | Qachon yaratiladi |
+|--------|-----------|-------------------|
+| `sale` | `sale` FK | Sotuv to'lovi (qo'lda, Accountant) |
+| `order` | `order` FK | **Buyurtma berilganda AVTOMATIK** — bitta amalda |
+
+**Buyurtma → Kassa (avtomatik):**
+- Narxli (`unit_price` bor) buyurtma yaratilganda kassada darhol yozuv ochiladi:
+  `total_amount` = buyurtma jami, `paid_amount` = oldindan to'lov,
+  status avtomatik (`pending`/`partial`/`paid`)
+- Buyurtma tahrirlanganda (miqdor/narx/oldindan to'lov) kassa yozuvi ham yangilanadi
+- Bitta buyurtma = bitta kassa yozuvi (takrorlanmaydi)
+- `order_info` maydonida: shartnoma raqami, jami, oldindan to'lov, qoldiq (`balance_due`)
+- Filtr: `?order=5` · qidiruv shartnoma raqami bo'yicha ham ishlaydi
+
+`/cash/payments/summary/` da buyurtma to'lovlari alohida ko'rinadi:
+`order_payments_count`, `sum_order_total_uzs`, `sum_order_prepaid_uzs`, `sum_order_due_uzs`.
+
+**Bo'lib to'lash (tranzaksiyalar):**
+
+Har bitta pul harakati alohida **tranzaksiya** (`PaymentTransaction`) bo'lib yoziladi —
+qisman to'lov qilgan mijoz keyinroq yana to'lasa, kassada tayyor yozuvga qo'shimcha
+to'lov qabul qilinadi:
+
+```json
+POST /cash/payments/{id}/pay/
+{ "amount": "5000000", "comment": "Ikkinchi bo'lib to'lash" }
+```
+
+- `paid_amount` yig'ilib boradi, status avtomatik: `pending → partial → paid`
+- Qoldiqdan ortiq to'lov RAD etiladi; to'liq to'langaniga qo'shimcha RAD etiladi
+- Har tranzaksiyada: summa, **kim qabul qildi** (`received_by`), izoh, aniq sana/vaqt
+- Buyurtma to'lovida buyurtmadagi `prepaid_amount` ham avtomatik sinxronlanadi
+  (buyurtma tahririda oshirilgan to'lov ham farq sifatida tranzaksiya bo'ladi)
+- `paid_amount` PATCH orqali o'zgartirilsa ham farq tranzaksiya bo'lib yoziladi —
+  ledger doim `sum(transactions) == paid_amount`
+- API javobida `transactions` ro'yxati to'liq qaytadi
 
 ---
 
@@ -513,6 +553,7 @@ Mijoz 10 ta so'raydi, omborda 3 ta bor. Shartnoma SH-2026/045, 10 mln oldindan t
   → POST /orders/ { contract_number:"SH-2026/045", prepaid_amount:"10000000", ... }
   → reserved_qty=3, backorder_qty=7, status="partial", balance_due hisoblanadi
   → AVTOMATIK: Zakaz #N ochiladi (7 dona, SH-2026/045 asosida) → Zakazlar ro'yxatida
+  → AVTOMATIK: kassada to'lov yozuvi (jami / to'langan 10 mln / status) → /cash/payments/
 
 Manager zakazni boshqaradi:
   → PATCH /orders/zakaz/N/ { status:"confirmed" }        # shartnoma bor — o'tadi
@@ -573,6 +614,8 @@ python manage.py seed --clear     # ixtiyoriy — test uchun
 | `orders_zakaz` | `order` (FK), `contract_number`, `contract_date`, `confirmed_at`, `asos`, `faktura` |
 | `orders_order_history` | **yangi jadval** — buyurtma auditi |
 | `orders_zakaz_history` | **yangi jadval** — zakaz auditi |
+| `cash_payment` | `order` (FK, nullable), `sale` endi nullable — buyurtma to'lovlari kassada |
+| `cash_payment_transaction` | **yangi jadval** — har bitta to'lov (bo'lib to'lash) tranzaksiyasi |
 
 ---
 

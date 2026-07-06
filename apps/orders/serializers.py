@@ -108,6 +108,17 @@ class OrderSerializer(ModelSerializer):
                 raise ValidationError(
                     f'"{self.instance.get_status_display()}" holatidagi '
                     f'buyurtmani tahrirlab bo\'lmaydi.')
+
+        # Oldindan to'lov jami summadan oshmasin
+        qty     = attrs.get('quantity',
+                            getattr(self.instance, 'quantity', None))
+        price   = attrs.get('unit_price',
+                            getattr(self.instance, 'unit_price', None))
+        prepaid = attrs.get('prepaid_amount',
+                            getattr(self.instance, 'prepaid_amount', 0) or 0)
+        if price is not None and qty and prepaid and prepaid > price * qty:
+            raise ValidationError({
+                'prepaid_amount': 'Oldindan to\'lov jami summadan oshib ketdi.'})
         return attrs
 
     # Eslatma: buyurtma (Order) HAR DOIM yaratiladi.
@@ -129,6 +140,9 @@ class OrderSerializer(ModelSerializer):
             asos=f'Buyurtma yaratildi — shartnoma №{order.contract_number}.',
         )
 
+        # Pul (summa + oldindan to'lov) bitta amalda KASSAGA tushadi
+        order.sync_payment(user=user)
+
         # 2-etap: yetishmagan miqdor avtomatik Zakazga o'tadi
         order.create_backorder_zakaz(user=user)
         return order
@@ -145,6 +159,10 @@ class OrderSerializer(ModelSerializer):
         # Miqdor o'zgargan bo'lsa — bronni qayta moslash
         if order.quantity != old_quantity:
             order.resync_reservation()
+
+        # Kassa yozuvini yangilash (summa/oldindan to'lov o'zgargan bo'lishi
+        # mumkin — farq alohida tranzaksiya bo'lib yoziladi)
+        order.sync_payment(user=user)
 
         # Tarix: har bir tahrir shartnoma raqami + asos + sana/vaqt bilan
         OrderHistory.objects.create(
@@ -235,6 +253,8 @@ class OrderBulkCreateSerializer(Serializer):
                 contract_number=contract_number,
                 asos=f'Bulk buyurtma — shartnoma №{contract_number}.',
             )
+            # Pul kassaga tushadi
+            order.sync_payment(user=user)
             # 2-etap: yetishmagan miqdor avtomatik Zakazga
             order.create_backorder_zakaz(user=user)
             created.append(order)

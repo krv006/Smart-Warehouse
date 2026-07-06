@@ -156,9 +156,9 @@ class Command(BaseCommand):
         from apps.warehouse.models import Category, Product, Stock
 
         self.stdout.write('>>> Baza tozalanmoqda...')
+        Payment.objects.all().delete()   # PROTECT: Order/Sale dan oldin
         Zakaz.objects.all().delete()
         Order.objects.all().delete()
-        Payment.objects.all().delete()
         Sale.objects.all().delete()
         Notification.objects.all().delete()
         Stock.objects.all().delete()
@@ -440,7 +440,7 @@ class Command(BaseCommand):
             else:
                 paid, status = Decimal('0'), Payment.PENDING
 
-            Payment.objects.create(
+            p = Payment.objects.create(
                 sale=sale,
                 client=sale.client or (random.choice(clients) if clients else None),
                 total_amount=total,
@@ -451,8 +451,19 @@ class Command(BaseCommand):
                 status=status,
                 comment=fake.sentence() if random.random() < 0.25 else None,
             )
+            # To'langan summa tranzaksiyalarga bo'linadi (bo'lib to'lash tarixi)
+            if paid > 0:
+                if random.random() < 0.5 and paid > 1000:
+                    first = (paid * Decimal(str(round(random.uniform(0.3, 0.7), 2)))
+                             ).quantize(Decimal('0.01'))
+                    p.transactions.create(amount=first,
+                                          comment='Birinchi bo\'lib to\'lash')
+                    p.transactions.create(amount=paid - first,
+                                          comment='Qo\'shimcha to\'lov')
+                else:
+                    p.transactions.create(amount=paid, comment='To\'lov')
             made += 1
-        self.stdout.write(ok(f"{made} ta to'lov yaratildi"))
+        self.stdout.write(ok(f"{made} ta to'lov yaratildi (tranzaksiyalar bilan)"))
 
     # ── Orders (Bron) ─────────────────────────────────────────────────────────
     def _seed_orders(self, count, products, clients, users):
@@ -533,6 +544,20 @@ class Command(BaseCommand):
             else:
                 order.status = Order.PENDING
             order.save(update_fields=['reserved_qty', 'status'])
+
+            # Pul (summa + oldindan to'lov) kassaga tushadi
+            payment = order.sync_payment(user=creator)
+
+            # ~40% qisman to'laganlar keyinroq QO'SHIMCHA to'lov qilgan
+            if (payment and payment.remaining_amount > 0
+                    and payment.paid_amount > 0 and random.random() < 0.4):
+                extra = (payment.remaining_amount
+                         * Decimal(str(round(random.uniform(0.2, 0.8), 2)))
+                         ).quantize(Decimal('1000'))
+                if extra > 0:
+                    payment.add_payment(
+                        extra, user=creator,
+                        comment='Qo\'shimcha to\'lov (bo\'lib to\'lash)')
 
             # 2-etap: yetishmagan miqdorga AVTO-ZAKAZ (~60% holatda)
             if order.backorder_qty > 0 and random.random() < 0.6:

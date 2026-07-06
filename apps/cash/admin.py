@@ -1,16 +1,28 @@
 from django.contrib import admin
 from django.utils.html import format_html
 
-from apps.cash.models import Payment
+from apps.cash.models import Payment, PaymentTransaction
+
+
+class PaymentTransactionInline(admin.TabularInline):
+    model           = PaymentTransaction
+    extra           = 0
+    can_delete      = False
+    readonly_fields = ('amount', 'received_by', 'comment', 'created_at')
+
+    def has_add_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(Payment)
 class PaymentAdmin(admin.ModelAdmin):
-    list_display    = ('id', 'sale', 'client', 'total_amount',
+    inlines = (PaymentTransactionInline,)
+    list_display    = ('id', 'source_col', 'sale', 'order', 'client', 'total_amount',
                        'commission', 'paid_amount_fmt', 'currency',
                        'status_badge', 'due_date')
     list_filter     = ('status', 'currency', 'due_date')
-    search_fields   = ('sale__product__name', 'client__company_name', 'comment')
+    search_fields   = ('sale__product__name', 'order__product__name',
+                       'order__contract_number', 'client__company_name', 'comment')
     readonly_fields = ('total_amount', 'commission', 'status', 'created_at', 'updated_at')
     date_hierarchy  = 'created_at'
     ordering        = ('-created_at',)
@@ -22,6 +34,12 @@ class PaymentAdmin(admin.ModelAdmin):
         Payment.PAID:     '#5cb85c',
         Payment.OVERDUE:  '#d9534f',
     }
+
+    @admin.display(description='Manba')
+    def source_col(self, obj):
+        if obj.order_id:
+            return format_html('<span style="color:#0d6efd;font-weight:600">Buyurtma</span>')
+        return format_html('<span style="color:#198754;font-weight:600">Sotuv</span>')
 
     @admin.display(description='Toʻlangan', ordering='paid_amount')
     def paid_amount_fmt(self, obj):

@@ -218,6 +218,58 @@ class Order(TimeStampedModel):
         )
         return zakaz
 
+    def sync_payment(self, user=None):
+        """
+        Buyurtma summasini KASSAGA yozadi/yangilaydi (Payment).
+
+        Buyurtma berilganda bitta amalda kassada ham yozuv paydo bo'ladi:
+        total (jami summa), paid_amount (oldindan to'lov) va status
+        (pending/partial/paid) avtomatik.
+
+        Har bir pul harakati alohida tranzaksiya (PaymentTransaction) bo'lib
+        yoziladi: birinchi oldindan to'lov, keyin buyurtma tahririda oshgan
+        to'lovlar — bo'lib-bo'lib to'lash tarixi kassada to'liq ko'rinadi.
+        """
+        from apps.cash.models import Payment
+        if self.total is None:
+            return None
+        prepaid = self.prepaid_amount or 0
+        payment = self.payments.order_by('id').first()
+
+        if payment is None:
+            payment = Payment.objects.create(
+                order=self,
+                client=self.client,
+                total_amount=self.total,
+                paid_amount=0,
+                currency=Payment.UZS,
+                due_date=self.due_date,
+                comment=f'Buyurtma #{self.pk} — shartnoma №{self.contract_number}',
+            )
+            if prepaid > 0:
+                payment.add_payment(
+                    prepaid, user=user,
+                    comment='Oldindan to\'lov (buyurtma bilan birga)')
+            return payment
+
+        payment.client   = self.client
+        payment.due_date = self.due_date
+        payment.save()  # total buyurtmadan qayta hisoblanadi
+
+        # Oldindan to'lov o'zgargan bo'lsa — farq alohida tranzaksiya
+        diff = prepaid - payment.paid_amount
+        if diff > 0:
+            payment.add_payment(
+                diff, user=user,
+                comment='Qo\'shimcha to\'lov (buyurtma orqali)')
+        elif diff < 0:
+            payment.transactions.create(
+                amount=diff, received_by=user,
+                comment='To\'lov korrektsiyasi (buyurtma tahriri)')
+            payment.paid_amount = prepaid
+            payment.save()
+        return payment
+
     def _sync_status(self):
         if self.reserved_qty >= self.quantity:
             self.status = self.RESERVED

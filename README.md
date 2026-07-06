@@ -257,8 +257,15 @@ Filtr: `?product=1` · `?client=<uuid>` · `?sold_date=...`
 | GET | `/cash/payments/summary/` | Kassa xulosasi |
 
 - Status: `pending` / `partial` / `paid` / `overdue`
-- Komissiya avtomatik 15%
+- Komissiya avtomatik 15% (faqat sotuv to'lovlarida)
 - **Kechikkan** = `status ∈ (pending, partial, overdue)` AND `due_date < bugun`
+- **Buyurtma to'lovlari avtomatik:** narxli buyurtma berilganda kassada darhol
+  yozuv ochiladi (jami + oldindan to'lov + status); buyurtma tahrirlanganda
+  kassa ham yangilanadi. `source` = `sale` | `order`
+- **Bo'lib to'lash:** `POST /cash/payments/{id}/pay/` — qisman to'lagan mijoz
+  keyinroq yana to'laydi; har to'lov alohida tranzaksiya (kim/qachon/qancha),
+  status avtomatik `pending → partial → paid`, buyurtmadagi `prepaid_amount`
+  sinxronlanadi
 
 ---
 
