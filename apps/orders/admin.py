@@ -1,7 +1,31 @@
 from django.contrib import admin
 from django.utils.html import format_html
 
-from apps.orders.models import Order, OrderHistory, Zakaz, ZakazHistory
+from apps.orders.models import (Order, OrderHistory, Zakaz, ZakazHistory,
+                                ProductContract)
+
+
+# ── Mahsulot shartnomalari reestri ───────────────────────────────────────────
+
+@admin.register(ProductContract)
+class ProductContractAdmin(admin.ModelAdmin):
+    list_display    = ('id', 'product', 'contract_number', 'contract_date',
+                       'source_type', 'faktura', 'order', 'zakaz',
+                       'created_by', 'created_at')
+    list_filter     = ('source_type', 'contract_date')
+    search_fields   = ('contract_number', 'faktura', 'asos',
+                       'product__name', 'product__serial_number')
+    ordering        = ('-created_at',)
+    list_per_page   = 30
+    readonly_fields = ('product', 'contract_number', 'contract_date', 'asos',
+                       'faktura', 'source_type', 'order', 'zakaz',
+                       'created_by', 'created_at', 'updated_at')
+
+    def has_add_permission(self, request):
+        return False  # faqat tizim avtomatik yozadi
+
+    def has_delete_permission(self, request, obj=None):
+        return request.user.is_superuser  # audit butunligi
 
 
 # ── Tarix inlinelar ───────────────────────────────────────────────────────────

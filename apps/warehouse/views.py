@@ -1,6 +1,8 @@
 from django.utils.dateparse import parse_date
 
 from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter
+from rest_framework.decorators import action
+from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
 from apps.common.permissions import IsOperatorOrReadOnly, IsManagement
@@ -54,6 +56,25 @@ class ProductViewSet(ModelViewSet):
         if user.is_authenticated and getattr(user, 'is_management', False):
             return ProductSerializer
         return ProductOperatorSerializer
+
+    @extend_schema(
+        summary="Mahsulotning shartnomalari (reestr)",
+        description=(
+            "Shu mahsulotga bog'langan BARCHA shartnoma yozuvlari — har bir "
+            "holat (buyurtma yaratildi/tahrirlandi, zakaz tasdiqlandi/"
+            "yuborildi/qabul qilindi...) o'z shartnoma raqami, asosi va "
+            "sanasi bilan. Davlat va mijozlar oldida asos."
+        ),
+        tags=["Warehouse"],
+    )
+    @action(detail=True, methods=['get'])
+    def contracts(self, request, pk=None):
+        from apps.orders.serializers import ProductContractSerializer
+        product = self.get_object()
+        qs = (product.contracts
+              .select_related('order', 'zakaz', 'created_by')
+              .order_by('-created_at'))
+        return Response(ProductContractSerializer(qs, many=True).data)
 
 
 @extend_schema_view(

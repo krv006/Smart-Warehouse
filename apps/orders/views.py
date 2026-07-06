@@ -8,10 +8,12 @@ from rest_framework.viewsets import GenericViewSet
 
 from apps.common.permissions import IsOperatorOrReadOnly
 from apps.orders.models import (Order, OrderHistory, Zakaz, ZakazHistory,
+                                ProductContract, register_contract,
                                 allocate_pending_orders)
 from apps.orders.serializers import (OrderSerializer, ZakazSerializer,
                                      OrderBulkCreateSerializer,
-                                     ZakazBulkCreateSerializer)
+                                     ZakazBulkCreateSerializer,
+                                     ProductContractSerializer)
 
 
 # ── Order (Bron) ──────────────────────────────────────────────────────────────
@@ -132,10 +134,17 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
                 status=400,
             )
         order.fulfill()
+        asos = request.data.get('asos') or 'Buyurtma yetkazildi.'
         OrderHistory.objects.create(
             order=order, changed_by=request.user, action=OrderHistory.FULFILLED,
             contract_number=order.contract_number,
-            asos=request.data.get('asos') or 'Buyurtma yetkazildi.',
+            asos=asos,
+        )
+        register_contract(
+            order.product, ProductContract.ORDER_FULFILLED,
+            contract_number=order.contract_number,
+            contract_date=order.contract_date,
+            asos=asos, order=order, user=request.user,
         )
         return Response(OrderSerializer(order).data)
 
@@ -159,10 +168,17 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
         order.status = Order.CANCELLED
         order.save(update_fields=['reserved_qty', 'status'])
         allocate_pending_orders(order.product)
+        asos = request.data.get('asos') or 'Buyurtma bekor qilindi.'
         OrderHistory.objects.create(
             order=order, changed_by=request.user, action=OrderHistory.CANCELLED,
             contract_number=order.contract_number,
-            asos=request.data.get('asos') or 'Buyurtma bekor qilindi.',
+            asos=asos,
+        )
+        register_contract(
+            order.product, ProductContract.ORDER_CANCELLED,
+            contract_number=order.contract_number,
+            contract_date=order.contract_date,
+            asos=asos, order=order, user=request.user,
         )
         return Response(OrderSerializer(order).data)
 
@@ -308,3 +324,41 @@ class ZakazViewSet(CreateModelMixin, ListModelMixin,
             ZakazBulkCreateSerializer().to_representation(zakazlar),
             status=201,
         )
+
+
+# ── Mahsulot shartnomalari reestri ───────────────────────────────────────────
+
+@extend_schema_view(
+    list=extend_schema(
+        summary="Mahsulot shartnomalari reestri",
+        description=(
+            "MAHSULOTGA bog'langan barcha shartnomalar — har bir holat va "
+            "detal (buyurtma yaratildi/tahrirlandi/yetkazildi, zakaz "
+            "tasdiqlandi/yuborildi/qabul qilindi...) o'z shartnoma raqami va "
+            "asosi bilan AVTOMATIK yozib boriladi. Davlat va mijozlar oldida "
+            "asos sifatida ishlatiladi.\n\n"
+            "Filtr: `?product=1`, `?contract_number=SH-2026/045`, "
+            "`?source_type=zakaz_ordered`, `?order=5`, `?zakaz=3`"
+        ),
+        tags=["Shartnomalar reestri"],
+    ),
+    retrieve=extend_schema(summary="Bitta reestr yozuvi",
+                           tags=["Shartnomalar reestri"]),
+)
+class ProductContractViewSet(ListModelMixin, RetrieveModelMixin,
+                             GenericViewSet):
+    """
+    Shartnomalar reestri — faqat o'qish uchun.
+    Yozuvlar tizim tomonidan avtomatik yaratiladi, qo'lda
+    o'zgartirilmaydi/o'chirilmaydi (audit butunligi).
+    """
+    queryset           = (ProductContract.objects
+                          .select_related('product', 'order', 'zakaz',
+                                          'created_by'))
+    serializer_class   = ProductContractSerializer
+    permission_classes = (IsAuthenticated,)
+    filterset_fields   = ('product', 'contract_number', 'source_type',
+                          'order', 'zakaz', 'contract_date')
+    search_fields      = ('contract_number', 'faktura', 'asos',
+                          'product__name', 'product__serial_number')
+    ordering_fields    = ('created_at', 'contract_date')

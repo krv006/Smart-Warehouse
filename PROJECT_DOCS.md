@@ -163,18 +163,31 @@ python manage.py seed --products 60 --orders 30 --zakazlar 20 --clients 25
 │ Status oqimi (FAQAT Manager):                              │
 │   new → confirmed → ordered → received                     │
 │                                                            │
+│ ⚠ HAR BIR holat o'zgarishida ASOS MAJBURIY!                │
+│ ⚠ confirmed / ordered / received — SHARTNOMA MAJBURIY!     │
+│                                                            │
 │ TASDIQLASH (confirmed):                                    │
 │  • contract_number kiritilmaguncha tasdiqlab BO'LMAYDI     │
+│  • asos MAJBURIY (aynan shu o'tish uchun)                  │
 │  • contract_date bo'sh bo'lsa → avtomatik BUGUN (Tashkent) │
 │  • buyurtmadan kelgan (eski kungi) shartnoma → o'sha kun   │
 │    SAQLANADI                                               │
 │  • confirmed_at — aniq sana/vaqt avtomatik yoziladi        │
 │                                                            │
+│ YUBORILDI (ordered):                                       │
+│  • shartnoma raqami MAJBURIY (tasdiqdagi meros yoki yangi) │
+│  • asos MAJBURIY                                           │
+│                                                            │
 │ QABUL QILISH (received):                                   │
-│  • asos — MAJBURIY (qabul qilish uchun asos)               │
-│  • faktura — MAJBURIY (faktura raqami)                     │
+│  • shartnoma + asos + faktura — UCHALASI MAJBURIY          │
 │  • received_qty omborga qo'shiladi                         │
 │  • pending/partial buyurtmalarga avtomatik bron ajratiladi │
+│                                                            │
+│ BEKOR QILISH (cancelled): asos MAJBURIY                    │
+│                                                            │
+│ HAR BIR holat → MAHSULOT SHARTNOMALARI REESTRIGA avtomatik │
+│ yoziladi (davlat/mijozlar oldida asos — hech narsa         │
+│ yo'qolmaydi)                                               │
 └────────────────────────────────────────────────────────────┘
 ```
 
@@ -366,11 +379,22 @@ POST /orders/bulk/
 PATCH /orders/zakaz/{id}/
 {
   "status": "confirmed",
-  "contract_number": "SH-2026/051"
+  "contract_number": "SH-2026/051",
+  "asos": "Rahbariyat ko'rib chiqib tasdiqladi"
 }
 ```
 → `contract_date` avtomatik bugungi kun (Tashkent), `confirmed_at` — aniq vaqt.
-→ Shartnomasiz yuborilsa: **400** `"Shartnoma (dogovor) kiritilmaguncha zakazni tasdiqlab bo'lmaydi."`
+→ Shartnomasiz yoki asossiz yuborilsa: **400**.
+
+**Yuborildi namunasi (faqat Manager):**
+```json
+PATCH /orders/zakaz/{id}/
+{
+  "status": "ordered",
+  "asos": "SH-2026/051 shartnoma asosida etkazuvchiga yuborildi"
+}
+```
+→ Shartnoma raqami zakazda bo'lishi SHART (yo'q bo'lsa **400**), asos MAJBURIY.
 
 **Qabul qilish namunasi (faqat Manager):**
 ```json
@@ -385,6 +409,39 @@ PATCH /orders/zakaz/{id}/
 ```
 → `asos` yoki `faktura` bo'lmasa: **400**.
 → Ombor +20, pending buyurtmalar avtomatik bronlanadi.
+
+---
+
+### 6.5.1 Shartnomalar reestri (Product bilan bog'langan)
+
+**Barcha shartnomalar MAHSULOTGA bog'lanadi** — har bir holat va detal uchun
+shartnoma raqami + asos avtomatik reestrga yoziladi. Davlat va mijozlar oldida
+har bir mahsulot bo'yicha to'liq hujjatli asos doim tayyor turadi.
+
+| Method | URL | Tavsif |
+|--------|-----|--------|
+| GET | `/orders/contracts/` | Reestr (filtr: `?product=`, `?contract_number=`, `?source_type=`, `?order=`, `?zakaz=`) |
+| GET | `/orders/contracts/{id}/` | Bitta yozuv |
+| GET | `/warehouse/products/{id}/contracts/` | **Shu mahsulotning barcha shartnomalari** |
+
+**Reestrga avtomatik yoziladigan holatlar (`source_type`):**
+
+| source_type | Qachon |
+|-------------|--------|
+| `order_created` | Buyurtma yaratildi (shartnoma bilan) |
+| `order_edited` | Buyurtma tahrirlandi (asos bilan) |
+| `order_fulfilled` | Buyurtma yetkazildi |
+| `order_cancelled` | Buyurtma bekor qilindi |
+| `zakaz_created` | Zakaz ochildi (avto/qo'lda, buyurtma shartnomasi meros) |
+| `zakaz_confirmed` | Zakaz tasdiqlandi (shartnoma + asos) |
+| `zakaz_ordered` | **Zakaz yuborildi (shartnoma + asos)** |
+| `zakaz_received` | Zakaz qabul qilindi (shartnoma + asos + faktura) |
+| `zakaz_cancelled` | Zakaz bekor qilindi (asos) |
+
+- Yozuvlar **faqat tizim tomonidan** yaratiladi — API orqali o'zgartirib/o'chirib
+  bo'lmaydi (audit butunligi); adminda ham readonly
+- Har yozuvda: mahsulot, shartnoma raqami/sanasi, asos, faktura, manba
+  (order/zakaz), kim, aniq sana/vaqt
 
 ---
 
@@ -616,6 +673,7 @@ python manage.py seed --clear     # ixtiyoriy — test uchun
 | `orders_zakaz_history` | **yangi jadval** — zakaz auditi |
 | `cash_payment` | `order` (FK, nullable), `sale` endi nullable — buyurtma to'lovlari kassada |
 | `cash_payment_transaction` | **yangi jadval** — har bitta to'lov (bo'lib to'lash) tranzaksiyasi |
+| `orders_product_contract` | **yangi jadval** — mahsulot shartnomalari reestri (har holat avtomatik) |
 
 ---
 

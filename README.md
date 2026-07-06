@@ -241,11 +241,15 @@ Filtr: `?product=1` · `?client=<uuid>` · `?sold_date=...`
 
 - Operator yaratadi (yoki buyurtmadan avto); **status faqat Management** o'zgartiradi
 - Status oqimi: `new → confirmed → ordered → received → (ombor to'ldiriladi)`
-- **Tasdiqlash:** `contract_number` (dogovor) kiritilmaguncha tasdiqlab bo'lmaydi;
-  sana avtomatik bugungi kun (Tashkent), buyurtmadan kelgan shartnomada o'sha kun saqlanadi
-- **Qabul qilish:** `asos` + `faktura` MAJBURIY; `received_qty` omborga qo'shiladi
-  + pending orderlarga bron ajratiladi
-- Har bir o'zgarish `history` (audit) ga yoziladi
+- **HAR BIR holat o'zgarishida `asos` MAJBURIY**; `confirmed`/`ordered`/`received`
+  uchun **shartnoma raqami ham MAJBURIY**
+- **Tasdiqlash:** shartnoma kiritilmaguncha bo'lmaydi; sana avtomatik bugungi kun
+  (Tashkent), buyurtmadan kelgan shartnomada o'sha kun saqlanadi
+- **Yuborildi (ordered):** shartnoma + asos majburiy
+- **Qabul qilish:** shartnoma + `asos` + `faktura` MAJBURIY; `received_qty` omborga
+  qo'shiladi + pending orderlarga bron ajratiladi
+- Har bir o'zgarish `history` (audit) ga va **mahsulot shartnomalari reestriga**
+  (`/orders/contracts/`, `/warehouse/products/{id}/contracts/`) avtomatik yoziladi
 
 ---
 

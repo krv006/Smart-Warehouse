@@ -9,7 +9,8 @@ from rest_framework.serializers import (ModelSerializer, Serializer,
                                         PrimaryKeyRelatedField)
 
 from apps.clients.models import Client
-from apps.orders.models import Order, OrderHistory, Zakaz, ZakazHistory
+from apps.orders.models import (Order, OrderHistory, Zakaz, ZakazHistory,
+                                ProductContract, register_contract)
 from apps.warehouse.models import Product
 
 # Buyurtma tahririda kuzatiladigan maydonlar (tarixga yoziladi)
@@ -134,10 +135,18 @@ class OrderSerializer(ModelSerializer):
         order.reserve()
 
         # Tarix: yaratildi (shartnoma raqami + aniq sana/vaqt)
+        asos_text = f'Buyurtma yaratildi — shartnoma №{order.contract_number}.'
         OrderHistory.objects.create(
             order=order, changed_by=user, action=OrderHistory.CREATED,
             contract_number=order.contract_number,
-            asos=f'Buyurtma yaratildi — shartnoma №{order.contract_number}.',
+            asos=asos_text,
+        )
+        # MAHSULOT shartnomalar reestriga avtomatik yozuv
+        register_contract(
+            order.product, ProductContract.ORDER_CREATED,
+            contract_number=order.contract_number,
+            contract_date=order.contract_date,
+            asos=asos_text, order=order, user=user,
         )
 
         # Pul (summa + oldindan to'lov) bitta amalda KASSAGA tushadi
@@ -170,6 +179,13 @@ class OrderSerializer(ModelSerializer):
             contract_number=order.contract_number,
             asos=asos,
             changes=json.dumps(changes, ensure_ascii=False) if changes else None,
+        )
+        # Reestr: har tahrir ham mahsulot shartnomalariga yoziladi
+        register_contract(
+            order.product, ProductContract.ORDER_EDITED,
+            contract_number=order.contract_number,
+            contract_date=order.contract_date,
+            asos=asos, order=order, user=user,
         )
         return order
 
@@ -248,10 +264,17 @@ class OrderBulkCreateSerializer(Serializer):
                 comment=item.get('comment'),
             )
             order.reserve()
+            asos_text = f'Bulk buyurtma — shartnoma №{contract_number}.'
             OrderHistory.objects.create(
                 order=order, changed_by=user, action=OrderHistory.CREATED,
                 contract_number=contract_number,
-                asos=f'Bulk buyurtma — shartnoma №{contract_number}.',
+                asos=asos_text,
+            )
+            register_contract(
+                order.product, ProductContract.ORDER_CREATED,
+                contract_number=contract_number,
+                contract_date=contract_date,
+                asos=asos_text, order=order, user=user,
             )
             # Pul kassaga tushadi
             order.sync_payment(user=user)
@@ -263,6 +286,32 @@ class OrderBulkCreateSerializer(Serializer):
     def to_representation(self, instance):
         # instance — yaratilgan Order ro'yxati
         return {'orders': OrderSerializer(instance, many=True).data}
+
+
+# ── Mahsulot shartnomalari reestri ───────────────────────────────────────────
+
+class ProductContractSerializer(ModelSerializer):
+    product_name        = SerializerMethodField()
+    source_type_display = SerializerMethodField()
+    created_by_name     = SerializerMethodField()
+
+    class Meta:
+        model  = ProductContract
+        fields = ('id', 'product', 'product_name',
+                  'contract_number', 'contract_date',
+                  'asos', 'faktura',
+                  'source_type', 'source_type_display',
+                  'order', 'zakaz',
+                  'created_by', 'created_by_name', 'created_at')
+
+    def get_product_name(self, obj):
+        return str(obj.product)
+
+    def get_source_type_display(self, obj):
+        return obj.get_source_type_display()
+
+    def get_created_by_name(self, obj):
+        return str(obj.created_by) if obj.created_by else None
 
 
 # ── Zakaz tarixi ──────────────────────────────────────────────────────────────
@@ -340,7 +389,21 @@ class ZakazSerializer(ModelSerializer):
             contract_date=zakaz.contract_date,
             asos='Zakaz yaratildi.',
         )
+        register_contract(
+            zakaz.product, ProductContract.ZAKAZ_CREATED,
+            contract_number=zakaz.contract_number,
+            contract_date=zakaz.contract_date,
+            asos='Zakaz yaratildi.', zakaz=zakaz, user=zakaz.created_by,
+        )
         return zakaz
+
+    # Har bir status o'zgarishi → reestrga qaysi turda yozilishi
+    _CONTRACT_SOURCE = {
+        Zakaz.CONFIRMED: ProductContract.ZAKAZ_CONFIRMED,
+        Zakaz.ORDERED:   ProductContract.ZAKAZ_ORDERED,
+        Zakaz.RECEIVED:  ProductContract.ZAKAZ_RECEIVED,
+        Zakaz.CANCELLED: ProductContract.ZAKAZ_CANCELLED,
+    }
 
     def update(self, instance, validated_data):
         user       = self.context['request'].user
@@ -359,31 +422,37 @@ class ZakazSerializer(ModelSerializer):
                     f'"{instance.get_status_display()}" statusidagi zakazni o\'zgartirib bo\'lmaydi.'
                 )
 
-            # TASDIQLASH: shartnoma kiritilmaguncha tasdiqlab bo'lmaydi
-            if new_status == Zakaz.CONFIRMED:
+            errors = {}
+
+            # HAR BIR holat o'zgarishida ASOS majburiy (aynan shu o'tish uchun)
+            if not validated_data.get('asos'):
+                errors['asos'] = (f'"{dict(Zakaz.STATUS_CHOICES).get(new_status, new_status)}" '
+                                  f'holatiga o\'tish uchun asos kiritilishi shart.')
+
+            # HAR BIR ish holati (tasdiqlash/yuborish/qabul) uchun SHARTNOMA majburiy
+            if new_status in (Zakaz.CONFIRMED, Zakaz.ORDERED, Zakaz.RECEIVED):
                 contract = validated_data.get('contract_number') or instance.contract_number
                 if not contract:
-                    raise ValidationError({
-                        'contract_number': 'Shartnoma (dogavor) kiritilmaguncha '
-                                           'zakazni tasdiqlab bo\'lmaydi.'
-                    })
-                # Sana: yangi shartnoma bo'lsa — bugungi kun (Tashkent);
-                # buyurtmadan kelgan (eski) shartnoma bo'lsa — o'sha kun saqlanadi
-                if not (validated_data.get('contract_date') or instance.contract_date):
-                    validated_data['contract_date'] = timezone.localdate()
-                validated_data['confirmed_at'] = timezone.now()
+                    errors['contract_number'] = (
+                        'Shartnoma (dogavor) raqami kiritilmaguncha bu holatga '
+                        'o\'tkazib bo\'lmaydi.')
 
-            # QABUL QILISH: asos + faktura majburiy
+            # QABUL QILISH: qo'shimcha faktura majburiy
             if new_status == Zakaz.RECEIVED:
-                asos    = validated_data.get('asos') or instance.asos
                 faktura = validated_data.get('faktura') or instance.faktura
-                errors  = {}
-                if not asos:
-                    errors['asos'] = 'Qabul qilish uchun asos kiritilishi shart.'
                 if not faktura:
                     errors['faktura'] = 'Qabul qilish uchun faktura kiritilishi shart.'
-                if errors:
-                    raise ValidationError(errors)
+
+            if errors:
+                raise ValidationError(errors)
+
+            # Sana: yangi shartnoma bo'lsa — bugungi kun (Tashkent);
+            # buyurtmadan kelgan (eski) shartnoma bo'lsa — o'sha kun saqlanadi
+            if new_status in (Zakaz.CONFIRMED, Zakaz.ORDERED, Zakaz.RECEIVED):
+                if not (validated_data.get('contract_date') or instance.contract_date):
+                    validated_data['contract_date'] = timezone.localdate()
+            if new_status == Zakaz.CONFIRMED:
+                validated_data['confirmed_at'] = timezone.now()
 
         old_status   = instance.status
         was_received = instance.status == Zakaz.RECEIVED
@@ -404,6 +473,17 @@ class ZakazSerializer(ModelSerializer):
                 asos=zakaz.asos, faktura=zakaz.faktura,
                 changes=json.dumps(changes, ensure_ascii=False) if changes else None,
             )
+            # MAHSULOT shartnomalar reestriga avtomatik yozuv — har holat
+            # o'z shartnoma raqami va asosi bilan saqlanadi
+            source = self._CONTRACT_SOURCE.get(zakaz.status)
+            if source:
+                register_contract(
+                    zakaz.product, source,
+                    contract_number=zakaz.contract_number,
+                    contract_date=zakaz.contract_date,
+                    asos=zakaz.asos, faktura=zakaz.faktura,
+                    order=zakaz.order, zakaz=zakaz, user=user,
+                )
         elif changes:
             ZakazHistory.objects.create(
                 zakaz=zakaz, changed_by=user, action=ZakazHistory.EDITED,

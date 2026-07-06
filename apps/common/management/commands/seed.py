@@ -467,7 +467,8 @@ class Command(BaseCommand):
 
     # ── Orders (Bron) ─────────────────────────────────────────────────────────
     def _seed_orders(self, count, products, clients, users):
-        from apps.orders.models import Order, OrderHistory
+        from apps.orders.models import (Order, OrderHistory, ProductContract,
+                                        register_contract)
         from apps.warehouse.models import Stock
         from django.db.models import F
 
@@ -512,11 +513,17 @@ class Command(BaseCommand):
                 comment=fake.sentence() if random.random() < 0.3 else None,
             )
 
-            # Tarix: yaratildi
+            # Tarix: yaratildi + shartnomalar reestri
+            created_asos = f'Buyurtma yaratildi — shartnoma №{contract_number}.'
             OrderHistory.objects.create(
                 order=order, changed_by=creator, action=OrderHistory.CREATED,
                 contract_number=contract_number,
-                asos=f'Buyurtma yaratildi — shartnoma №{contract_number}.',
+                asos=created_asos,
+            )
+            register_contract(
+                product, ProductContract.ORDER_CREATED,
+                contract_number=contract_number, contract_date=contract_date,
+                asos=created_asos, order=order, user=creator,
             )
 
             # Mavjud qoldiqdan bron ajrat
@@ -565,45 +572,66 @@ class Command(BaseCommand):
                 if z:
                     auto_zakaz += 1
 
-            # ~35% buyurtma tahrirlangan (asos + tarix bilan)
+            # ~35% buyurtma tahrirlangan (asos + tarix + reestr bilan)
             if random.random() < 0.35:
                 old_due = order.due_date
                 new_due = fake_en.date_between(start_date='+5d', end_date='+120d')
                 order.due_date = new_due
                 order.save(update_fields=['due_date'])
+                editor    = random.choice(operators)
+                edit_asos = random.choice(EDIT_ASOSLAR)
                 OrderHistory.objects.create(
-                    order=order, changed_by=random.choice(operators),
+                    order=order, changed_by=editor,
                     action=OrderHistory.EDITED,
                     contract_number=contract_number,
-                    asos=random.choice(EDIT_ASOSLAR),
+                    asos=edit_asos,
                     changes=json.dumps(
                         {'due_date': {'old': str(old_due), 'new': str(new_due)}},
                         ensure_ascii=False),
+                )
+                register_contract(
+                    product, ProductContract.ORDER_EDITED,
+                    contract_number=contract_number, contract_date=contract_date,
+                    asos=edit_asos, order=order, user=editor,
                 )
                 edited += 1
 
             made += 1
 
-        # Ba'zi orderlarni fulfilled va cancelled qilamiz (tarix bilan)
+        # Ba'zi orderlarni fulfilled va cancelled qilamiz (tarix + reestr bilan)
         all_orders = list(Order.objects.all())
         for order in random.sample(all_orders, min(3, len(all_orders))):
             order.status = Order.FULFILLED
             order.save(update_fields=['status'])
+            actor = random.choice(operators)
             OrderHistory.objects.create(
-                order=order, changed_by=random.choice(operators),
+                order=order, changed_by=actor,
                 action=OrderHistory.FULFILLED,
                 contract_number=order.contract_number,
                 asos='Buyurtma yetkazildi.',
+            )
+            register_contract(
+                order.product, ProductContract.ORDER_FULFILLED,
+                contract_number=order.contract_number,
+                contract_date=order.contract_date,
+                asos='Buyurtma yetkazildi.', order=order, user=actor,
             )
         for order in random.sample(all_orders, min(2, len(all_orders))):
             if order.status != Order.FULFILLED:
                 order.status = Order.CANCELLED
                 order.save(update_fields=['status'])
+                actor = random.choice(operators)
                 OrderHistory.objects.create(
-                    order=order, changed_by=random.choice(operators),
+                    order=order, changed_by=actor,
                     action=OrderHistory.CANCELLED,
                     contract_number=order.contract_number,
                     asos='Mijoz buyurtmani bekor qildi.',
+                )
+                register_contract(
+                    order.product, ProductContract.ORDER_CANCELLED,
+                    contract_number=order.contract_number,
+                    contract_date=order.contract_date,
+                    asos='Mijoz buyurtmani bekor qildi.', order=order, user=actor,
                 )
 
         self.stdout.write(ok(f'{made} ta buyurtma/bron yaratildi '
@@ -611,7 +639,8 @@ class Command(BaseCommand):
 
     # ── Zakazlar (Etkazuvchidan buyurtma) ────────────────────────────────────────
     def _seed_zakazlar(self, count, products, users):
-        from apps.orders.models import Zakaz, ZakazHistory
+        from apps.orders.models import (Zakaz, ZakazHistory, ProductContract,
+                                        register_contract)
         from apps.warehouse.models import Stock
         from django.db.models import F
 
@@ -659,50 +688,75 @@ class Command(BaseCommand):
                 zakaz=zakaz, changed_by=creator, action=ZakazHistory.CREATED,
                 new_status=Zakaz.NEW, asos='Zakaz yaratildi.',
             )
+            register_contract(
+                product, ProductContract.ZAKAZ_CREATED,
+                asos='Zakaz yaratildi.', zakaz=zakaz, user=creator,
+            )
 
             if status == Zakaz.NEW:
                 made += 1
                 continue
 
             if status == Zakaz.CANCELLED:
+                cancel_asos = 'Etkazuvchi bilan kelishilmadi — bekor qilindi.'
                 zakaz.status = Zakaz.CANCELLED
-                zakaz.save(update_fields=['status'])
+                zakaz.asos   = cancel_asos
+                zakaz.save(update_fields=['status', 'asos'])
                 ZakazHistory.objects.create(
                     zakaz=zakaz, changed_by=manager,
                     action=ZakazHistory.STATUS_CHANGED,
                     old_status=Zakaz.NEW, new_status=Zakaz.CANCELLED,
-                    asos='Etkazuvchi bilan kelishilmadi — bekor qilindi.',
+                    asos=cancel_asos,
+                )
+                register_contract(
+                    product, ProductContract.ZAKAZ_CANCELLED,
+                    asos=cancel_asos, zakaz=zakaz, user=manager,
                 )
                 made += 1
                 continue
 
             # confirmed / ordered / received — avval TASDIQLASH bosqichi:
-            # shartnoma MAJBURIY, sana avtomatik o'sha kun, confirmed_at yoziladi
+            # HAR BIR holatda shartnoma + asos MAJBURIY (API qoidasiga mos)
             contract_number = _contract_number()
             contract_date   = fake_en.date_between(start_date='-30d', end_date='today')
+            confirm_asos    = f'Tasdiqlandi — shartnoma №{contract_number}.'
             zakaz.contract_number = contract_number
             zakaz.contract_date   = contract_date
             zakaz.confirmed_at    = timezone.now()
+            zakaz.asos            = confirm_asos
             zakaz.status          = Zakaz.CONFIRMED
             zakaz.save(update_fields=['contract_number', 'contract_date',
-                                      'confirmed_at', 'status'])
+                                      'confirmed_at', 'asos', 'status'])
             ZakazHistory.objects.create(
                 zakaz=zakaz, changed_by=manager,
                 action=ZakazHistory.STATUS_CHANGED,
                 old_status=Zakaz.NEW, new_status=Zakaz.CONFIRMED,
                 contract_number=contract_number, contract_date=contract_date,
-                asos=f'Tasdiqlandi — shartnoma №{contract_number}.',
+                asos=confirm_asos,
+            )
+            register_contract(
+                product, ProductContract.ZAKAZ_CONFIRMED,
+                contract_number=contract_number, contract_date=contract_date,
+                asos=confirm_asos, zakaz=zakaz, user=manager,
             )
 
             if status in (Zakaz.ORDERED, Zakaz.RECEIVED):
+                ordered_asos = (f'Etkazuvchiga yuborildi — '
+                                f'shartnoma №{contract_number} asosida.')
                 zakaz.status = Zakaz.ORDERED
-                zakaz.save(update_fields=['status'])
+                zakaz.asos   = ordered_asos
+                zakaz.save(update_fields=['status', 'asos'])
                 ZakazHistory.objects.create(
                     zakaz=zakaz, changed_by=manager,
                     action=ZakazHistory.STATUS_CHANGED,
                     old_status=Zakaz.CONFIRMED, new_status=Zakaz.ORDERED,
                     contract_number=contract_number, contract_date=contract_date,
-                    asos='Etkazuvchiga yuborildi.',
+                    asos=ordered_asos,
+                )
+                register_contract(
+                    product, ProductContract.ZAKAZ_ORDERED,
+                    contract_number=contract_number, contract_date=contract_date,
+                    asos=ordered_asos, zakaz=zakaz, user=manager,
                 )
 
             if status == Zakaz.RECEIVED:
@@ -724,6 +778,11 @@ class Command(BaseCommand):
                     old_status=Zakaz.ORDERED, new_status=Zakaz.RECEIVED,
                     contract_number=contract_number, contract_date=contract_date,
                     asos=asos, faktura=faktura,
+                )
+                register_contract(
+                    product, ProductContract.ZAKAZ_RECEIVED,
+                    contract_number=contract_number, contract_date=contract_date,
+                    asos=asos, faktura=faktura, zakaz=zakaz, user=manager,
                 )
 
                 stock, _ = Stock.objects.get_or_create(

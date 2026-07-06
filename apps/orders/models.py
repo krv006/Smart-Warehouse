@@ -210,11 +210,18 @@ class Order(TimeStampedModel):
             status=Zakaz.NEW,
             created_by=user,
         )
+        asos = (f'Buyurtma #{self.pk} dan avtomatik zakaz — '
+                f'yetishmagan {self.backorder_qty} dona.')
         ZakazHistory.objects.create(
             zakaz=zakaz, changed_by=user, action=ZakazHistory.CREATED,
             new_status=Zakaz.NEW, contract_number=self.contract_number,
-            asos=(f'Buyurtma #{self.pk} dan avtomatik zakaz — '
-                  f'yetishmagan {self.backorder_qty} dona.'),
+            asos=asos,
+        )
+        register_contract(
+            self.product, ProductContract.ZAKAZ_CREATED,
+            contract_number=self.contract_number,
+            contract_date=self.contract_date,
+            asos=asos, order=self, zakaz=zakaz, user=user,
         )
         return zakaz
 
@@ -388,6 +395,92 @@ class Zakaz(TimeStampedModel):
         self.product.refresh_from_db()
         if self.product.available_quantity > self.product.min_quantity:
             Notification.resolve_low_stock_notifications(self.product)
+
+
+# ── Mahsulot shartnomalari reestri ───────────────────────────────────────────
+
+class ProductContract(TimeStampedModel):
+    """
+    MAHSULOTGA bog'langan shartnomalar reestri.
+
+    Har bir holat va detal (buyurtma yaratildi/tahrirlandi, zakaz
+    tasdiqlandi/yuborildi/qabul qilindi...) uchun shartnoma raqami + asos
+    AVTOMATIK shu yerga yoziladi. Davlat va mijozlar oldida har bir mahsulot
+    bo'yicha qaysi shartnoma va qaysi asos bilan ish qilingani doim tayyor
+    turadi — hech narsa yo'qolmaydi.
+    """
+    ORDER_CREATED   = 'order_created'
+    ORDER_EDITED    = 'order_edited'
+    ORDER_FULFILLED = 'order_fulfilled'
+    ORDER_CANCELLED = 'order_cancelled'
+    ZAKAZ_CREATED   = 'zakaz_created'
+    ZAKAZ_CONFIRMED = 'zakaz_confirmed'
+    ZAKAZ_ORDERED   = 'zakaz_ordered'
+    ZAKAZ_RECEIVED  = 'zakaz_received'
+    ZAKAZ_CANCELLED = 'zakaz_cancelled'
+
+    SOURCE_CHOICES = (
+        (ORDER_CREATED,   'Buyurtma yaratildi'),
+        (ORDER_EDITED,    'Buyurtma tahrirlandi'),
+        (ORDER_FULFILLED, 'Buyurtma yetkazildi'),
+        (ORDER_CANCELLED, 'Buyurtma bekor qilindi'),
+        (ZAKAZ_CREATED,   'Zakaz yaratildi'),
+        (ZAKAZ_CONFIRMED, 'Zakaz tasdiqlandi'),
+        (ZAKAZ_ORDERED,   'Zakaz yuborildi'),
+        (ZAKAZ_RECEIVED,  'Zakaz qabul qilindi'),
+        (ZAKAZ_CANCELLED, 'Zakaz bekor qilindi'),
+    )
+
+    product         = ForeignKey('warehouse.Product', on_delete=CASCADE,
+                                 related_name='contracts')
+    contract_number = CharField(max_length=100, blank=True, null=True)
+    contract_date   = DateField(null=True, blank=True)
+    asos            = TextField(blank=True, null=True)
+    faktura         = CharField(max_length=100, blank=True, null=True)
+    source_type     = CharField(max_length=20, choices=SOURCE_CHOICES)
+    order           = ForeignKey('orders.Order', on_delete=SET_NULL,
+                                 null=True, blank=True,
+                                 related_name='contract_entries')
+    zakaz           = ForeignKey('orders.Zakaz', on_delete=SET_NULL,
+                                 null=True, blank=True,
+                                 related_name='contract_entries')
+    created_by      = ForeignKey(settings.AUTH_USER_MODEL, on_delete=SET_NULL,
+                                 null=True, blank=True,
+                                 related_name='product_contracts')
+
+    class Meta:
+        db_table            = 'orders_product_contract'
+        ordering            = ('-created_at',)
+        verbose_name        = 'Mahsulot shartnomasi'
+        verbose_name_plural = 'Mahsulot shartnomalari'
+        indexes = [
+            models.Index(fields=['product', 'contract_number']),
+        ]
+
+    def __str__(self):
+        return (f'{self.product.name} — №{self.contract_number or "—"} '
+                f'[{self.get_source_type_display()}]')
+
+
+def register_contract(product, source_type, *, contract_number=None,
+                      contract_date=None, asos=None, faktura=None,
+                      order=None, zakaz=None, user=None):
+    """
+    Shartnoma reestriga AVTOMATIK yozuv (background).
+    Har bir holat/detal o'z yozuvi bilan saqlanadi — o'chirilmaydi,
+    ustidan yozilmaydi.
+    """
+    return ProductContract.objects.create(
+        product=product,
+        source_type=source_type,
+        contract_number=contract_number,
+        contract_date=contract_date,
+        asos=asos,
+        faktura=faktura,
+        order=order,
+        zakaz=zakaz,
+        created_by=user,
+    )
 
 
 # ── Audit tarixi ──────────────────────────────────────────────────────────────
