@@ -7,7 +7,8 @@ from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
 
 from apps.common.permissions import IsOperatorOrReadOnly
-from apps.orders.models import Order, Zakaz, allocate_pending_orders
+from apps.orders.models import (Order, OrderHistory, Zakaz, ZakazHistory,
+                                allocate_pending_orders)
 from apps.orders.serializers import (OrderSerializer, ZakazSerializer,
                                      OrderBulkCreateSerializer,
                                      ZakazBulkCreateSerializer)
@@ -20,23 +21,34 @@ from apps.orders.serializers import (OrderSerializer, ZakazSerializer,
         summary="Buyurtmalar / Bron ro'yxati",
         description=(
             "Filtr: `?status=pending|partial|reserved|fulfilled|cancelled`, "
-            "`?product=1`, `?client=<uuid>`"
+            "`?product=1`, `?client=<uuid>`, `?contract_number=SH-2026/045`"
         ),
         tags=["Orders / Bron"],
     ),
-    retrieve=extend_schema(summary="Buyurtma", tags=["Orders / Bron"]),
+    retrieve=extend_schema(summary="Buyurtma (tarixi bilan)", tags=["Orders / Bron"]),
     create=extend_schema(
         summary="Yangi buyurtma (Operator / Manager)",
         description=(
-            "Mavjud bron bo'lmagan qoldiqdan bron ajratiladi.\n\n"
+            "**Shartnoma raqami (`contract_number`) MAJBURIY.** "
+            "`contract_date` yuborilmasa — bugungi kun (Tashkent).\n\n"
+            "`prepaid_amount` — oldindan to'langan summa (qisman to'lov). "
+            "`balance_due` = total − prepaid_amount.\n\n"
             "- `available_quantity > 0` → bron + backorder (partial/pending)\n"
-            "- `available_quantity == 0` → **xato**: mahsulot tugagan, Zakaz bering.\n\n"
+            "- Yetishmagan (backorder) miqdor uchun **AVTOMATIK Zakaz** ochiladi — "
+            "o'sha shartnoma raqami asosida (Zakazlar ro'yxatida ko'rinadi).\n\n"
             "Yangi qoldiq kelganida pending/partial buyurtmalar **avtomatik** bronlanadi."
         ),
         tags=["Orders / Bron"],
     ),
     partial_update=extend_schema(
-        summary="Buyurtma yangilash (due_date, comment)",
+        summary="Buyurtma tahrirlash (bir necha bor mumkin, asos majburiy)",
+        description=(
+            "Buyurtmani bir necha bor tahrirlash mumkin. Har tahrirda **`asos`** "
+            "(tahrir sababi) MAJBURIY — tahrir shartnoma raqami, asos va aniq "
+            "sana/vaqt bilan tarixga (`history`) yoziladi.\n\n"
+            "Miqdor o'zgartirilsa bron avtomatik qayta moslanadi. "
+            "Tahrir Zakaz qismiga ta'sir qilmaydi."
+        ),
         tags=["Orders / Bron"],
     ),
 )
@@ -45,26 +57,31 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
     """
     Buyurtma / Bron.
     O'chirish yo'q — buning o'rniga /cancel/ action ishlatiladi.
-    Faqat PATCH (due_date, comment o'zgartirish uchun).
+    PATCH — tahrirlash (asos majburiy, tarixga yoziladi).
     """
-    queryset           = Order.objects.select_related('product', 'client')
+    queryset           = (Order.objects
+                          .select_related('product', 'client')
+                          .prefetch_related('history__changed_by'))
     serializer_class   = OrderSerializer
     permission_classes = (IsOperatorOrReadOnly,)
-    filterset_fields   = ('status', 'product', 'client')
+    filterset_fields   = ('status', 'product', 'client', 'contract_number')
     search_fields      = ('product__name', 'product__serial_number',
-                          'client__company_name', 'comment')
+                          'client__company_name', 'contract_number', 'comment')
     ordering_fields    = ('due_date', 'created_at', 'status')
     http_method_names  = ('get', 'post', 'patch', 'head', 'options')
 
     @extend_schema(
         summary="Bir vaqtda bir nechta mahsulot buyurtmasi (bulk)",
         description=(
-            "Bitta client/due_date ostida bir nechta mahsulot buyurtma qilinadi. "
-            "Har biri alohida Order yozuvi bo'ladi, har biriga bron ajratiladi.\n\n"
+            "Bitta client/due_date/**shartnoma** ostida bir nechta mahsulot "
+            "buyurtma qilinadi. Har biri alohida Order yozuvi bo'ladi, har biriga "
+            "bron ajratiladi. Yetishmagan miqdorlar uchun avtomatik Zakaz ochiladi.\n\n"
             "```json\n"
             "{\n"
             '  "client": "<uuid>",\n'
             '  "due_date": "2026-08-01",\n'
+            '  "contract_number": "SH-2026/045",\n'
+            '  "prepaid_amount": "5000000",\n'
             '  "items": [\n'
             '    { "product": 12, "quantity": 4, "unit_price": "3900000" },\n'
             '    { "product": 7,  "quantity": 2, "unit_price": "1200000" }\n'
@@ -91,7 +108,8 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
         summary="Buyurtmani yetkazildi deb belgilash",
         description=(
             "Bron qilingan miqdor ombor qoldiqidan ayiriladi. "
-            "Boshqa pending buyurtmalarga avtomatik bron qayta ajratiladi."
+            "Boshqa pending buyurtmalarga avtomatik bron qayta ajratiladi. "
+            "Amal tarixga yoziladi (ixtiyoriy body: `{ \"asos\": \"...\" }`)."
         ),
         tags=["Orders / Bron"],
     )
@@ -114,11 +132,19 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
                 status=400,
             )
         order.fulfill()
+        OrderHistory.objects.create(
+            order=order, changed_by=request.user, action=OrderHistory.FULFILLED,
+            contract_number=order.contract_number,
+            asos=request.data.get('asos') or 'Buyurtma yetkazildi.',
+        )
         return Response(OrderSerializer(order).data)
 
     @extend_schema(
         summary="Buyurtmani bekor qilish (bron bo'shatiladi)",
-        description="Bron bo'shatiladi va boshqa pending buyurtmalarga ajratiladi.",
+        description=(
+            "Bron bo'shatiladi va boshqa pending buyurtmalarga ajratiladi. "
+            "Amal tarixga yoziladi (ixtiyoriy body: `{ \"asos\": \"...\" }`)."
+        ),
         tags=["Orders / Bron"],
     )
     @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
@@ -133,14 +159,20 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
         order.status = Order.CANCELLED
         order.save(update_fields=['reserved_qty', 'status'])
         allocate_pending_orders(order.product)
+        OrderHistory.objects.create(
+            order=order, changed_by=request.user, action=OrderHistory.CANCELLED,
+            contract_number=order.contract_number,
+            asos=request.data.get('asos') or 'Buyurtma bekor qilindi.',
+        )
         return Response(OrderSerializer(order).data)
 
     @extend_schema(
-        summary="Buyurtмадаги yetishmagan miqdorga zakaz berish",
+        summary="Buyurtmadagi yetishmagan miqdorga zakaz berish (qo'lda)",
         description=(
-            "Buyurtмадаги `backorder_qty` (yetishmagan miqdor) uchun **haqiqiy "
-            "Zakaz yozuvi** yaratadi. Zakaz Zakazlar ro'yxatida (`/orders/zakaz/`) "
-            "ko'rinadi — buyurtмада emas.\n\n"
+            "Odatda zakaz buyurtma yaratilganda **avtomatik** ochiladi. Bu endpoint "
+            "avtomatik zakaz ochilmagan/bekor qilingan holatlar uchun.\n\n"
+            "Buyurtmadagi `backorder_qty` (yetishmagan miqdor) uchun Zakaz yozuvi "
+            "yaratadi — buyurtma va **shartnoma raqami asosida** bog'lanadi.\n\n"
             "Ixtiyoriy body: `{ \"supplier\": \"...\", \"expected_date\": \"2026-08-01\" }`"
         ),
         request=None,
@@ -152,7 +184,7 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
         order = self.get_object()
         if order.backorder_qty <= 0:
             return Response(
-                {'detail': 'Bu buyurtмада zakaz kerak bo\'lgan (yetishmagan) miqdor yo\'q.'},
+                {'detail': 'Bu buyurtmada zakaz kerak bo\'lgan (yetishmagan) miqdor yo\'q.'},
                 status=400,
             )
         if order.has_active_zakaz:
@@ -160,14 +192,21 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
                 {'detail': 'Bu mahsulot uchun faol zakaz allaqachon mavjud.'},
                 status=400,
             )
-        zakaz = Zakaz.objects.create(
-            product=order.product,
-            quantity=order.backorder_qty,
-            supplier=request.data.get('supplier'),
-            expected_date=request.data.get('expected_date') or order.due_date,
-            status=Zakaz.NEW,
-            created_by=request.user if request.user.is_authenticated else None,
-        )
+        zakaz = order.create_backorder_zakaz(user=request.user)
+        if zakaz is None:
+            return Response({'detail': 'Zakaz yaratib bo\'lmadi.'}, status=400)
+        # Ixtiyoriy supplier/expected_date qayta yozish
+        supplier      = request.data.get('supplier')
+        expected_date = request.data.get('expected_date')
+        update_fields = []
+        if supplier:
+            zakaz.supplier = supplier
+            update_fields.append('supplier')
+        if expected_date:
+            zakaz.expected_date = expected_date
+            update_fields.append('expected_date')
+        if update_fields:
+            zakaz.save(update_fields=update_fields)
         return Response(ZakazSerializer(zakaz).data, status=201)
 
 
@@ -177,17 +216,20 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
     list=extend_schema(
         summary="Zakazlar ro'yxati",
         description=(
-            "Filtr: `?status=new|confirmed|ordered|received|cancelled`, `?product=1`\n\n"
-            "Operator yaratadi. Status faqat Manager tomonidan o'zgartiriladi."
+            "Filtr: `?status=new|confirmed|ordered|received|cancelled`, `?product=1`, "
+            "`?order=5`, `?contract_number=SH-2026/045`\n\n"
+            "Operator yaratadi (yoki buyurtmadan avtomatik). "
+            "Status faqat Manager tomonidan o'zgartiriladi."
         ),
         tags=["Zakaz"],
     ),
-    retrieve=extend_schema(summary="Zakaz", tags=["Zakaz"]),
+    retrieve=extend_schema(summary="Zakaz (tarixi bilan)", tags=["Zakaz"]),
     create=extend_schema(
         summary="Yangi zakaz (Operator / Manager)",
         description=(
             "Status avtomatik `new` qilib saqlanadi.\n\n"
-            "Odatda mahsulot `available_quantity == 0` bo'lganda zakaz beriladi.\n\n"
+            "Odatda zakaz buyurtmadagi yetishmagan miqdor uchun **avtomatik** "
+            "ochiladi (shartnoma raqami bilan birga).\n\n"
             "`received_qty` va status o'zgartirish faqat Manager uchun (PATCH orqali)."
         ),
         tags=["Zakaz"],
@@ -196,10 +238,16 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
         summary="Zakaz yangilash — status, received_qty (faqat Manager)",
         description=(
             "**Operator:** faqat `supplier`, `expected_date`, `comment`, "
-            "`warehouse_location` o'zgartira oladi.\n\n"
+            "`warehouse_location`, `asos`, `faktura` o'zgartira oladi.\n\n"
             "**Manager:** `status` va `received_qty` ham o'zgartira oladi.\n\n"
-            "Status `received` ga o'tganda `received_qty` ombor qoldig'iga qo'shiladi "
-            "va pending buyurtmalarga avtomatik bron ajratiladi."
+            "**Tasdiqlash (`confirmed`):** `contract_number` (dogovor) "
+            "kiritilmaguncha tasdiqlab BO'LMAYDI. Shartnoma sanasi bo'sh bo'lsa "
+            "avtomatik bugungi kun (Tashkent) qo'yiladi; buyurtmadan kelgan "
+            "shartnomada o'sha kun saqlanadi. `confirmed_at` — aniq sana/vaqt.\n\n"
+            "**Qabul qilish (`received`):** `asos` va `faktura` MAJBURIY. "
+            "`received_qty` ombor qoldig'iga qo'shiladi va pending buyurtmalarga "
+            "avtomatik bron ajratiladi.\n\n"
+            "Har bir o'zgarish tarixga (`history`) yoziladi."
         ),
         tags=["Zakaz"],
     ),
@@ -208,19 +256,23 @@ class ZakazViewSet(CreateModelMixin, ListModelMixin,
                    RetrieveModelMixin, UpdateModelMixin, GenericViewSet):
     """
     Zakaz (procurement order).
-    Operator: yaratadi + supplier/comment/expected_date o'zgartiradi.
+    Operator: yaratadi + supplier/comment/expected_date/asos/faktura o'zgartiradi.
     Manager: status + received_qty o'zgartiradi.
     O'chirish: admin panel orqali.
     """
-    queryset           = Zakaz.objects.select_related('product', 'created_by')
+    queryset           = (Zakaz.objects
+                          .select_related('product', 'created_by', 'order')
+                          .prefetch_related('history__changed_by'))
     serializer_class   = ZakazSerializer
     permission_classes = (IsAuthenticated,)
     filterset_fields   = {
-        'status':  ['exact'],
-        'product': ['exact'],
+        'status':          ['exact'],
+        'product':         ['exact'],
+        'order':           ['exact'],
+        'contract_number': ['exact'],
     }
     search_fields      = ('product__name', 'product__serial_number',
-                          'supplier', 'comment')
+                          'supplier', 'contract_number', 'faktura', 'comment')
     ordering_fields    = ('expected_date', 'created_at', 'status')
     http_method_names  = ('get', 'post', 'patch', 'head', 'options')
 
@@ -234,6 +286,7 @@ class ZakazViewSet(CreateModelMixin, ListModelMixin,
             "{\n"
             '  "supplier": "Xitoy, Guangzhou",\n'
             '  "expected_date": "2026-08-15",\n'
+            '  "contract_number": "SH-2026/045",\n'
             '  "items": [\n'
             '    { "product": 12, "quantity": 7 },\n'
             '    { "product": 7,  "quantity": 5 }\n'

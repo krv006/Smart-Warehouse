@@ -1,23 +1,49 @@
 from django.contrib import admin
 from django.utils.html import format_html
 
-from apps.orders.models import Order, Zakaz
+from apps.orders.models import Order, OrderHistory, Zakaz, ZakazHistory
+
+
+# ── Tarix inlinelar ───────────────────────────────────────────────────────────
+
+class OrderHistoryInline(admin.TabularInline):
+    model           = OrderHistory
+    extra           = 0
+    can_delete      = False
+    readonly_fields = ('action', 'contract_number', 'asos', 'changes',
+                       'changed_by', 'created_at')
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+
+class ZakazHistoryInline(admin.TabularInline):
+    model           = ZakazHistory
+    extra           = 0
+    can_delete      = False
+    readonly_fields = ('action', 'old_status', 'new_status', 'contract_number',
+                       'contract_date', 'asos', 'faktura', 'changes',
+                       'changed_by', 'created_at')
+
+    def has_add_permission(self, request, obj=None):
+        return False
 
 
 # ── Order (Bron) ──────────────────────────────────────────────────────────────
 
 @admin.register(Order)
 class OrderAdmin(admin.ModelAdmin):
-    list_display    = ('id', 'product', 'client', 'quantity_col',
-                       'reserved_col', 'backorder_col', 'status_badge',
+    list_display    = ('id', 'contract_number', 'product', 'client', 'quantity_col',
+                       'reserved_col', 'backorder_col', 'prepaid_col', 'status_badge',
                        'due_date', 'created_at')
-    list_filter     = ('status', 'due_date')
-    search_fields   = ('product__name', 'product__serial_number',
+    list_filter     = ('status', 'due_date', 'contract_date')
+    search_fields   = ('contract_number', 'product__name', 'product__serial_number',
                        'client__company_name', 'comment')
     ordering        = ('due_date', '-created_at')
     list_per_page   = 25
     readonly_fields = ('reserved_qty', 'status', 'created_at', 'updated_at')
     autocomplete_fields = ('product',)
+    inlines         = (OrderHistoryInline,)
 
     _STATUS_COLORS = {
         Order.PENDING:   ('#fd7e14', 'Zakaz'),
@@ -44,6 +70,12 @@ class OrderAdmin(admin.ModelAdmin):
             return format_html('<span style="color:#198754">—</span>')
         return format_html('<span style="color:#dc3545;font-weight:700">{} dona</span>', bq)
 
+    @admin.display(description='Oldindan to\'lov')
+    def prepaid_col(self, obj):
+        if not obj.prepaid_amount:
+            return format_html('<span style="color:#6c757d">—</span>')
+        return format_html('<span style="color:#198754">{}</span>', obj.prepaid_amount)
+
     @admin.display(description='Holat')
     def status_badge(self, obj):
         color, label = self._STATUS_COLORS.get(obj.status, ('#333', obj.status))
@@ -56,16 +88,18 @@ class OrderAdmin(admin.ModelAdmin):
 
 @admin.register(Zakaz)
 class ZakazAdmin(admin.ModelAdmin):
-    list_display    = ('id', 'product', 'quantity', 'received_qty_col',
-                       'supplier', 'status_badge', 'expected_date',
-                       'created_by', 'created_at')
-    list_filter     = ('status', 'expected_date')
-    search_fields   = ('product__name', 'product__serial_number',
-                       'supplier', 'comment', 'created_by__username')
+    list_display    = ('id', 'contract_number', 'product', 'quantity', 'received_qty_col',
+                       'supplier', 'faktura', 'status_badge', 'expected_date',
+                       'order', 'created_by', 'created_at')
+    list_filter     = ('status', 'expected_date', 'contract_date')
+    search_fields   = ('contract_number', 'faktura', 'product__name',
+                       'product__serial_number', 'supplier', 'comment',
+                       'created_by__username')
     ordering        = ('-created_at',)
     list_per_page   = 25
-    readonly_fields = ('created_by', 'created_at', 'updated_at')
+    readonly_fields = ('created_by', 'confirmed_at', 'created_at', 'updated_at')
     autocomplete_fields = ('product',)
+    inlines         = (ZakazHistoryInline,)
 
     _STATUS_COLORS = {
         Zakaz.NEW:       ('#0d6efd', 'Yangi'),

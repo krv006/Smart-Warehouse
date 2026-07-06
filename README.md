@@ -4,9 +4,9 @@ Django REST Framework asosida qurilgan to'liq ombor / savdo / kassa boshqaruv AP
 Uch rol (**Operator**, **Accountant**, **Management**), bron/zakaz tizimi, in-app
 bildirishnomalar va Excel hisobotlar bilan.
 
-> 📄 Qo'shimcha hujjatlar:
-> - [FRONTEND_API.md](FRONTEND_API.md) — frontchi uchun to'liq endpoint qo'llanma
-> - [ORDERS_ZAKAZ.md](ORDERS_ZAKAZ.md) — Bron (Order) va Zakaz tizimi chuqur tavsifi
+> 📄 **To'liq hujjat (0 → 100):** [PROJECT_DOCS.md](PROJECT_DOCS.md) —
+> barcha endpointlar, Buyurtma → Zakaz oqimi (shartnoma, asos, faktura,
+> oldindan to'lov), audit/tarix tizimi va biznes qoidalar.
 
 ---
 
@@ -209,48 +209,43 @@ Filtr: `?product=1` · `?client=<uuid>` · `?sold_date=...`
 
 ### Orders (Bron) va Zakaz
 
-> To'liq tavsif: [ORDERS_ZAKAZ.md](ORDERS_ZAKAZ.md)
+> To'liq tavsif: [PROJECT_DOCS.md](PROJECT_DOCS.md#5-buyurtma--zakaz-oqimi)
 
 #### Order (Mijoz bron/buyurtmasi)
 | Method | URL | Tavsif |
 |--------|-----|--------|
 | GET | `/orders/` | Ro'yxat |
-| POST | `/orders/` | Bitta mahsulot buyurtmasi |
+| POST | `/orders/` | Buyurtma — **shartnoma raqami MAJBURIY** |
 | POST | `/orders/bulk/` | **Bir vaqtda bir nechta mahsulot** |
-| PATCH | `/orders/{id}/` | due_date / comment |
+| PATCH | `/orders/{id}/` | Tahrirlash (bir necha bor mumkin, **asos majburiy**) |
 | POST | `/orders/{id}/fulfill/` | Yetkazildi |
 | POST | `/orders/{id}/cancel/` | Bekor qilish |
+| POST | `/orders/{id}/create-zakaz/` | Yetishmagan miqdorga qo'lda zakaz |
 
-**Bulk namunasi:**
-```json
-POST /orders/bulk/
-{
-  "client": "<uuid>",
-  "due_date": "2026-08-01",
-  "items": [
-    { "product": 12, "quantity": 4, "unit_price": "3900000" },
-    { "product": 7,  "quantity": 2, "unit_price": "1200000" }
-  ]
-}
-```
+**Order fieldlari:** `contract_number` (majburiy), `contract_date`,
+`prepaid_amount` (oldindan to'lov), `balance_due`, `quantity`, `unit_price`,
+`total`, `reserved_qty`, `backorder_qty`, `has_active_zakaz`, `history`,
+`status` (`pending`/`partial`/`reserved`/`fulfilled`/`cancelled`).
 
-**Order fieldlari:** `quantity`, `unit_price`, `total`, `reserved_qty`, `backorder_qty`,
-`has_active_zakaz`, `status` (`pending`/`partial`/`reserved`/`fulfilled`/`cancelled`).
-
-- `available_quantity == 0` bo'lsa Order yaratib bo'lmaydi → **Zakaz** bering
-- `has_active_zakaz == true` → frontend "Zakaz berish" tugmasini yashiradi (takroriy zakaz oldini oladi)
+- Buyurtma HAR DOIM yaratiladi — yetishmagan (backorder) miqdor uchun
+  **AVTOMATIK Zakaz** ochiladi (shartnoma raqami meros o'tadi)
+- Har tahrir shartnoma raqami + asos + aniq sana/vaqt bilan tarixga yoziladi
 - Yangi qoldiq kelganda pending buyurtmalar `due_date` bo'yicha avtomatik bronlanadi
 
 #### Zakaz (Etkazuvchidan buyurtma)
 | Method | URL | Tavsif |
 |--------|-----|--------|
 | GET/POST | `/orders/zakaz/` | Ro'yxat / yangi (status="new") |
-| PATCH | `/orders/zakaz/{id}/` | Yangilash |
+| POST | `/orders/zakaz/bulk/` | Bir nechta mahsulot uchun |
+| PATCH | `/orders/zakaz/{id}/` | Yangilash (status — faqat Manager) |
 
-- Operator yaratadi; **status faqat Management** o'zgartiradi
+- Operator yaratadi (yoki buyurtmadan avto); **status faqat Management** o'zgartiradi
 - Status oqimi: `new → confirmed → ordered → received → (ombor to'ldiriladi)`
-- `received` bo'lganda `received_qty` omborga qo'shiladi + pending orderlarga bron ajratiladi
-- `warehouse_location` ixtiyoriy (bo'sh → `Asosiy ombor`)
+- **Tasdiqlash:** `contract_number` (dogovor) kiritilmaguncha tasdiqlab bo'lmaydi;
+  sana avtomatik bugungi kun (Tashkent), buyurtmadan kelgan shartnomada o'sha kun saqlanadi
+- **Qabul qilish:** `asos` + `faktura` MAJBURIY; `received_qty` omborga qo'shiladi
+  + pending orderlarga bron ajratiladi
+- Har bir o'zgarish `history` (audit) ga yoziladi
 
 ---
 
@@ -334,16 +329,18 @@ Hammasi `?date_from` / `?date_to` qabul qiladi.
 
 ### Bron va zakaz oqimi (real stsenariy)
 ```
-Mijoz 10 ta so'raydi, omborda 3 ta bor
-  → POST /orders/  → reserved_qty=3, backorder_qty=7, status="partial"
-Yetishmagan 7+ ni zakaz qilamiz
-  → POST /orders/zakaz/  → status="new"
-Manager boshqaradi: new → confirmed → ordered
+Mijoz 10 ta so'raydi, omborda 3 ta bor. Shartnoma SH-2026/045, oldindan to'lov bor.
+  → POST /orders/ { contract_number:"SH-2026/045", prepaid_amount:"10000000", ... }
+  → reserved_qty=3, backorder_qty=7, status="partial"
+  → AVTOMATIK: yetishmagan 7 ta uchun Zakaz ochiladi (SH-2026/045 asosida)
+Manager boshqaradi: new → confirmed (shartnoma majburiy, sana avto-bugun) → ordered
 Tovar keldi:
-  → PATCH /orders/zakaz/{id}/ { status:"received", received_qty:20, warehouse_location:"B-2-3" }
+  → PATCH /orders/zakaz/{id}/ { status:"received", received_qty:20,
+      warehouse_location:"B-2-3", asos:"Dalolatnoma №77", faktura:"F-2026/555" }
   → ombor +20, pending order avtomatik to'ldiriladi → status="reserved"
 Topshirish:
   → POST /orders/{id}/fulfill/  → ombordan ayrildi, status="fulfilled"
+Har bir amal (yaratish/tahrir/status) shartnoma + asos + sana/vaqt bilan tarixda.
 ```
 
 ### FIFO

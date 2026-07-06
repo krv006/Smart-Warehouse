@@ -1,10 +1,11 @@
 from django.conf import settings
-from django.db import transaction
+from django.db import models, transaction
 from django.db.models import (
-    CharField, ForeignKey, PROTECT, SET_NULL,
-    PositiveIntegerField, DecimalField, DateField, TextField,
+    CharField, ForeignKey, CASCADE, PROTECT, SET_NULL,
+    PositiveIntegerField, DecimalField, DateField, DateTimeField, TextField,
 )
 from django.db.models import F
+from django.utils import timezone
 
 from apps.common.models import TimeStampedModel
 
@@ -15,9 +16,12 @@ class Order(TimeStampedModel):
     """
     Mijoz buyurtmasi va bron tizimi.
 
-    Yaratilganda mavjud (bron bo'lmagan) qoldiqdan bron ajratiladi.
-    Agar available_quantity == 0 bo'lsa — Order yaratib bo'lmaydi,
-    o'rniga Zakaz berish kerak.
+    1-etap: buyurtma olinadi (shartnoma raqami majburiy, oldindan to'lov saqlanadi).
+    Yaratilganda mavjud (bron bo'lmagan) qoldiqdan bron ajratiladi. Yetishmagan
+    (backorder) qism uchun **avtomatik Zakaz** ochiladi — o'sha shartnoma raqami asosida.
+
+    Buyurtmani bir necha bor tahrirlash mumkin — har bir tahrir shartnoma raqami,
+    asos va aniq sana/vaqt bilan tarixga (OrderHistory) yoziladi.
 
     Holat oqimi:
         pending → (qoldiq kelganda) → partial / reserved → fulfilled
@@ -37,19 +41,25 @@ class Order(TimeStampedModel):
         (CANCELLED, 'Bekor qilindi'),
     )
 
-    client       = ForeignKey('clients.Client', on_delete=SET_NULL,
-                              null=True, blank=True, related_name='orders')
-    product      = ForeignKey('warehouse.Product', on_delete=PROTECT,
-                              related_name='orders')
-    quantity     = PositiveIntegerField(help_text='Buyurtma qilingan miqdor')
-    unit_price   = DecimalField(max_digits=14, decimal_places=2, null=True, blank=True,
-                                help_text='Birlik narxi (sotuv narxi)')
-    reserved_qty = PositiveIntegerField(default=0,
-                                        help_text='Hozirda bron qilingan miqdor')
-    due_date     = DateField(null=True, blank=True,
-                             help_text='Yetkazish muddati (deadline)')
-    status       = CharField(max_length=12, choices=STATUS_CHOICES, default=PENDING)
-    comment      = TextField(blank=True, null=True)
+    client          = ForeignKey('clients.Client', on_delete=SET_NULL,
+                                 null=True, blank=True, related_name='orders')
+    product         = ForeignKey('warehouse.Product', on_delete=PROTECT,
+                                 related_name='orders')
+    quantity        = PositiveIntegerField(help_text='Buyurtma qilingan miqdor')
+    unit_price      = DecimalField(max_digits=14, decimal_places=2, null=True, blank=True,
+                                   help_text='Birlik narxi (sotuv narxi)')
+    prepaid_amount  = DecimalField(max_digits=14, decimal_places=2, default=0,
+                                   help_text='Oldindan to\'langan summa (qisman to\'lov)')
+    contract_number = CharField(max_length=100, default='',
+                                help_text='Shartnoma (dogovor) raqami — majburiy')
+    contract_date   = DateField(default=timezone.localdate,
+                                help_text='Shartnoma sanasi (Tashkent)')
+    reserved_qty    = PositiveIntegerField(default=0,
+                                           help_text='Hozirda bron qilingan miqdor')
+    due_date        = DateField(null=True, blank=True,
+                                help_text='Yetkazish muddati (deadline)')
+    status          = CharField(max_length=12, choices=STATUS_CHOICES, default=PENDING)
+    comment         = TextField(blank=True, null=True)
 
     class Meta:
         db_table            = 'orders_order'
@@ -72,6 +82,13 @@ class Order(TimeStampedModel):
         if self.unit_price is None:
             return None
         return self.unit_price * self.quantity
+
+    @property
+    def balance_due(self):
+        """Qolgan to'lov (total − prepaid_amount)."""
+        if self.total is None:
+            return None
+        return self.total - (self.prepaid_amount or 0)
 
     @property
     def has_active_zakaz(self):
@@ -131,6 +148,20 @@ class Order(TimeStampedModel):
         self.reserved_qty = 0
 
     @transaction.atomic
+    def resync_reservation(self):
+        """
+        Miqdor tahrirlanganda bronni qayta moslaydi:
+        ortsa — qo'shimcha bron oladi, kamaysa — ortiqchasini bo'shatadi.
+        """
+        if self.status in (self.FULFILLED, self.CANCELLED):
+            return
+        if self.reserved_qty > self.quantity:
+            self.release()
+            self.save(update_fields=['reserved_qty'])
+        self.reserve()
+        allocate_pending_orders(self.product)
+
+    @transaction.atomic
     def fulfill(self):
         """
         Yetkazildi: bron qilingan miqdorni ham quantity, ham reserved_quantity
@@ -158,6 +189,35 @@ class Order(TimeStampedModel):
         self.save(update_fields=['reserved_qty', 'status'])
         allocate_pending_orders(self.product)
 
+    @transaction.atomic
+    def create_backorder_zakaz(self, user=None):
+        """
+        2-etap: buyurtmadagi yetishmagan (backorder) miqdor uchun avtomatik
+        Zakaz ochadi. Zakaz o'sha buyurtma va SHARTNOMA RAQAMI asosida bog'lanadi
+        — shunda yetishmagan mahsulot qaysi shartnoma asosida zakaz qilingani aniq.
+        Shu mahsulot uchun faol zakaz bo'lsa — takror ochilmaydi.
+        """
+        if self.backorder_qty <= 0 or self.has_active_zakaz:
+            return None
+        zakaz = Zakaz.objects.create(
+            order=self,
+            product=self.product,
+            quantity=self.backorder_qty,
+            contract_number=self.contract_number,
+            contract_date=self.contract_date,
+            supplier=self.product.source,
+            expected_date=self.due_date,
+            status=Zakaz.NEW,
+            created_by=user,
+        )
+        ZakazHistory.objects.create(
+            zakaz=zakaz, changed_by=user, action=ZakazHistory.CREATED,
+            new_status=Zakaz.NEW, contract_number=self.contract_number,
+            asos=(f'Buyurtma #{self.pk} dan avtomatik zakaz — '
+                  f'yetishmagan {self.backorder_qty} dona.'),
+        )
+        return zakaz
+
     def _sync_status(self):
         if self.reserved_qty >= self.quantity:
             self.status = self.RESERVED
@@ -173,16 +233,19 @@ class Zakaz(TimeStampedModel):
     """
     Etkazuvchidan mahsulot zakaz qilish (procurement order).
 
-    Yaratish: operator yoki manager (status avtomatik 'new').
+    Yaratish: operator yoki manager (status avtomatik 'new'), yoki buyurtmadagi
+    yetishmagan miqdor uchun avtomatik.
     Status o'zgartirish: FAQAT manager.
+
+    Muhim qoidalar:
+        - Tasdiqlash (confirmed): shartnoma (dogovor) raqami kiritilmaguncha
+          tasdiqlab bo'lmaydi. Tasdiqlashda shartnoma sanasi avtomatik bugungi
+          (Asia/Tashkent) qilib qo'yiladi.
+        - Qabul qilish (received): asos va faktura majburiy.
 
     Holat oqimi:
         new → confirmed → ordered → received → (avtomatik ombor to'ldiriladi)
         har qanday → cancelled
-
-    status=received bo'lganda:
-        - received_qty omborga qo'shiladi
-        - pending/partial orderlarga avtomatik bron ajratiladi
     """
     NEW       = 'new'
     CONFIRMED = 'confirmed'
@@ -198,6 +261,9 @@ class Zakaz(TimeStampedModel):
         (CANCELLED, 'Bekor qilindi'),
     )
 
+    order              = ForeignKey('orders.Order', on_delete=SET_NULL,
+                                    null=True, blank=True, related_name='zakazlar',
+                                    verbose_name='Manba buyurtma')
     product            = ForeignKey('warehouse.Product', on_delete=PROTECT,
                                     related_name='zakazlar')
     quantity           = PositiveIntegerField(help_text='Zakaz qilingan miqdor')
@@ -207,6 +273,21 @@ class Zakaz(TimeStampedModel):
     supplier           = CharField(max_length=255, blank=True, null=True,
                                    help_text='Etkazuvchi nomi / manzili')
     status             = CharField(max_length=12, choices=STATUS_CHOICES, default=NEW)
+
+    # Shartnoma (dogovor) — tasdiqlash uchun asos
+    contract_number    = CharField(max_length=100, blank=True, null=True,
+                                   help_text='Shartnoma (dogovor) raqami — tasdiqlash uchun majburiy')
+    contract_date      = DateField(null=True, blank=True,
+                                   help_text='Shartnoma sanasi (tasdiqlashda avtomatik bugungi kun)')
+    confirmed_at       = DateTimeField(null=True, blank=True,
+                                       help_text='Tasdiqlangan aniq sana/vaqt (Tashkent)')
+
+    # Qabul qilish — asos + faktura
+    asos               = TextField(blank=True, null=True,
+                                   help_text='Qabul qilish uchun asos (majburiy)')
+    faktura            = CharField(max_length=100, blank=True, null=True,
+                                   help_text='Faktura raqami (qabul qilish uchun majburiy)')
+
     expected_date      = DateField(null=True, blank=True,
                                    help_text='Kutilayotgan kelish sanasi')
     warehouse_location = CharField(max_length=255, blank=True, null=True,
@@ -255,6 +336,84 @@ class Zakaz(TimeStampedModel):
         self.product.refresh_from_db()
         if self.product.available_quantity > self.product.min_quantity:
             Notification.resolve_low_stock_notifications(self.product)
+
+
+# ── Audit tarixi ──────────────────────────────────────────────────────────────
+
+class OrderHistory(models.Model):
+    """
+    Buyurtmaning har bir yaratilishi/tahriri tarixi.
+    Shartnoma raqami + asos + aniq sana/vaqt bilan (audit uchun).
+    """
+    CREATED   = 'created'
+    EDITED    = 'edited'
+    FULFILLED = 'fulfilled'
+    CANCELLED = 'cancelled'
+
+    ACTION_CHOICES = (
+        (CREATED,   'Yaratildi'),
+        (EDITED,    'Tahrirlandi'),
+        (FULFILLED, 'Yetkazildi'),
+        (CANCELLED, 'Bekor qilindi'),
+    )
+
+    order           = ForeignKey(Order, on_delete=CASCADE, related_name='history')
+    changed_by      = ForeignKey(settings.AUTH_USER_MODEL, on_delete=SET_NULL,
+                                 null=True, blank=True, related_name='order_changes')
+    action          = CharField(max_length=12, choices=ACTION_CHOICES)
+    contract_number = CharField(max_length=100, blank=True, null=True)
+    asos            = TextField(blank=True, null=True, help_text='Tahrir/amal asosi')
+    changes         = TextField(blank=True, null=True, help_text='O\'zgargan maydonlar (JSON)')
+    created_at      = DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table            = 'orders_order_history'
+        ordering            = ('-created_at',)
+        verbose_name        = 'Buyurtma tarixi'
+        verbose_name_plural = 'Buyurtma tarixi'
+
+    def __str__(self):
+        return f'Order #{self.order_id} — {self.get_action_display()} @ {self.created_at:%Y-%m-%d %H:%M}'
+
+
+class ZakazHistory(models.Model):
+    """
+    Zakazning har bir yaratilishi/status o'zgarishi/tahriri tarixi.
+    Shartnoma raqami, asos, faktura + aniq sana/vaqt bilan (audit uchun).
+    """
+    CREATED        = 'created'
+    STATUS_CHANGED = 'status_changed'
+    EDITED         = 'edited'
+    RECEIVED       = 'received'
+
+    ACTION_CHOICES = (
+        (CREATED,        'Yaratildi'),
+        (STATUS_CHANGED, 'Status o\'zgardi'),
+        (EDITED,         'Tahrirlandi'),
+        (RECEIVED,       'Qabul qilindi'),
+    )
+
+    zakaz           = ForeignKey(Zakaz, on_delete=CASCADE, related_name='history')
+    changed_by      = ForeignKey(settings.AUTH_USER_MODEL, on_delete=SET_NULL,
+                                 null=True, blank=True, related_name='zakaz_changes')
+    action          = CharField(max_length=14, choices=ACTION_CHOICES)
+    old_status      = CharField(max_length=12, blank=True, null=True)
+    new_status      = CharField(max_length=12, blank=True, null=True)
+    contract_number = CharField(max_length=100, blank=True, null=True)
+    contract_date   = DateField(null=True, blank=True)
+    asos            = TextField(blank=True, null=True)
+    faktura         = CharField(max_length=100, blank=True, null=True)
+    changes         = TextField(blank=True, null=True, help_text='O\'zgargan maydonlar (JSON)')
+    created_at      = DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table            = 'orders_zakaz_history'
+        ordering            = ('-created_at',)
+        verbose_name        = 'Zakaz tarixi'
+        verbose_name_plural = 'Zakaz tarixi'
+
+    def __str__(self):
+        return f'Zakaz #{self.zakaz_id} — {self.get_action_display()} @ {self.created_at:%Y-%m-%d %H:%M}'
 
 
 # ── Yordamchi funksiya ────────────────────────────────────────────────────────

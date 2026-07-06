@@ -14,9 +14,9 @@ router.register('sales', SaleViewSet, basename='sale')
 
 urlpatterns = [
     # Auth
-    path('auth/login/',             login,                                name='login'),
-    path('auth/token/refresh/',     TokenRefreshView.as_view(),           name='token-refresh'),
-    path('auth/register-operator/', register_operator,                    name='register-operator'),
+    path('auth/login/', login, name='login'),
+    path('auth/token/refresh/', TokenRefreshView.as_view(), name='token-refresh'),
+    path('auth/register-operator/', register_operator, name='register-operator'),
 
     # Hisobot
     path('reports/', reports, name='reports'),
