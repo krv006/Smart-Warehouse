@@ -212,25 +212,30 @@ Filtr: `?product=1` · `?client=<uuid>` · `?sold_date=...`
 > To'liq tavsif: [PROJECT_DOCS.md](PROJECT_DOCS.md#5-buyurtma--zakaz-oqimi)
 
 #### Order (Mijoz bron/buyurtmasi)
+
+**BITTA buyurtma — bir nechta mahsulot (`items`).** Nechta mahsulot bo'lsa ham
+buyurtma bitta hujjat.
+
 | Method | URL | Tavsif |
 |--------|-----|--------|
 | GET | `/orders/` | Ro'yxat |
-| POST | `/orders/` | Buyurtma — **shartnoma raqami MAJBURIY** |
-| POST | `/orders/bulk/` | **Bir vaqtda bir nechta mahsulot** |
-| PATCH | `/orders/{id}/` | Tahrirlash (bir necha bor mumkin, **asos majburiy**) |
-| POST | `/orders/{id}/fulfill/` | Yetkazildi |
+| POST | `/orders/` | Buyurtma (`items[]`) — **shartnoma raqami MAJBURIY** |
+| POST | `/orders/bulk/` | `items[]` — natija ham BITTA buyurtma (moslik uchun) |
+| PATCH | `/orders/{id}/` | Tahrirlash: qator miqdori (`items[{id,...}]`) / yangi qator / sarlavha (**asos majburiy**) |
+| POST | `/orders/{id}/fulfill/` | Yetkazildi (barcha qatorlar) |
 | POST | `/orders/{id}/cancel/` | Bekor qilish |
-| POST | `/orders/{id}/create-zakaz/` | Yetishmagan miqdorga qo'lda zakaz |
+| POST | `/orders/{id}/create-zakaz/` | Yetishmagan qatorlarga qo'lda zakaz |
 
-**Order fieldlari:** `contract_number` (majburiy), `contract_date`,
-`prepaid_amount` (oldindan to'lov), `balance_due`, `quantity`, `unit_price`,
-`total`, `reserved_qty`, `backorder_qty`, `has_active_zakaz`, `history`,
-`status` (`pending`/`partial`/`reserved`/`fulfilled`/`cancelled`).
+**Order fieldlari:** `items[]` (har qatorda `product`, `quantity`, `unit_price`,
+`total`, `reserved_qty`, `backorder_qty`, `has_active_zakaz`), `contract_number`
+(majburiy), `contract_date`, `prepaid_amount`, `balance_due`, `total_quantity`,
+`total`, `history`, `status` (`pending`/`partial`/`reserved`/`fulfilled`/`cancelled`).
 
-- Buyurtma HAR DOIM yaratiladi — yetishmagan (backorder) miqdor uchun
-  **AVTOMATIK Zakaz** ochiladi (shartnoma raqami meros o'tadi)
+- Buyurtma HAR DOIM yaratiladi — yetishmagan (backorder) qatorlar uchun
+  **AVTOMATIK Zakaz** ochiladi, har mahsulotga alohida (shartnoma meros o'tadi)
+- Kassada butun buyurtma uchun BITTA to'lov yozuvi
 - Har tahrir shartnoma raqami + asos + aniq sana/vaqt bilan tarixga yoziladi
-- Yangi qoldiq kelganda pending buyurtmalar `due_date` bo'yicha avtomatik bronlanadi
+- Yangi qoldiq kelganda pending qatorlar `due_date` bo'yicha avtomatik bronlanadi
 
 #### Zakaz (Etkazuvchidan buyurtma)
 | Method | URL | Tavsif |

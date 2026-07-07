@@ -10,20 +10,19 @@ from django.utils import timezone
 from apps.common.models import TimeStampedModel
 
 
-# ── Order (Mijoz buyurtmasi / bron) ──────────────────────────────────────────
+# ── Order (Mijoz buyurtmasi / bron — HUJJAT) ─────────────────────────────────
 
 class Order(TimeStampedModel):
     """
-    Mijoz buyurtmasi va bron tizimi.
+    Mijoz buyurtmasi — BITTA hujjat, ichida bir nechta mahsulot qatori
+    (OrderItem). Nechta mahsulot bo'lishidan qat'i nazar buyurtma BITTA.
 
-    1-etap: buyurtma olinadi (shartnoma raqami majburiy, oldindan to'lov saqlanadi).
-    Yaratilganda mavjud (bron bo'lmagan) qoldiqdan bron ajratiladi. Yetishmagan
-    (backorder) qism uchun **avtomatik Zakaz** ochiladi — o'sha shartnoma raqami asosida.
+    1-etap: buyurtma olinadi (shartnoma raqami majburiy, oldindan to'lov
+    saqlanadi, pul kassaga tushadi). Har bir qator uchun ombordagi mavjud
+    qoldiqdan bron ajratiladi. Yetishmagan (backorder) qatorlar uchun
+    avtomatik Zakaz ochiladi — o'sha shartnoma raqami asosida.
 
-    Buyurtmani bir necha bor tahrirlash mumkin — har bir tahrir shartnoma raqami,
-    asos va aniq sana/vaqt bilan tarixga (OrderHistory) yoziladi.
-
-    Holat oqimi:
+    Holat oqimi (qatorlardan hisoblanadi):
         pending → (qoldiq kelganda) → partial / reserved → fulfilled
         har qanday → cancelled
     """
@@ -43,19 +42,12 @@ class Order(TimeStampedModel):
 
     client          = ForeignKey('clients.Client', on_delete=SET_NULL,
                                  null=True, blank=True, related_name='orders')
-    product         = ForeignKey('warehouse.Product', on_delete=PROTECT,
-                                 related_name='orders')
-    quantity        = PositiveIntegerField(help_text='Buyurtma qilingan miqdor')
-    unit_price      = DecimalField(max_digits=14, decimal_places=2, null=True, blank=True,
-                                   help_text='Birlik narxi (sotuv narxi)')
     prepaid_amount  = DecimalField(max_digits=14, decimal_places=2, default=0,
                                    help_text='Oldindan to\'langan summa (qisman to\'lov)')
     contract_number = CharField(max_length=100, default='',
                                 help_text='Shartnoma (dogovor) raqami — majburiy')
     contract_date   = DateField(default=timezone.localdate,
                                 help_text='Shartnoma sanasi (Tashkent)')
-    reserved_qty    = PositiveIntegerField(default=0,
-                                           help_text='Hozirda bron qilingan miqdor')
     due_date        = DateField(null=True, blank=True,
                                 help_text='Yetkazish muddati (deadline)')
     status          = CharField(max_length=12, choices=STATUS_CHOICES, default=PENDING)
@@ -69,19 +61,33 @@ class Order(TimeStampedModel):
 
     def __str__(self):
         client = str(self.client) if self.client else '—'
-        return f'#{self.pk} {self.product.name} x{self.quantity} [{self.get_status_display()}] → {client}'
+        return (f'#{self.pk} ({self.items.count()} mahsulot) '
+                f'[{self.get_status_display()}] → {client}')
+
+    # ── Yig'ma ko'rsatkichlar (qatorlardan) ──────────────────────────────────
+
+    @property
+    def total_quantity(self):
+        """Barcha qatorlar bo'yicha jami buyurtma miqdori."""
+        return sum(i.quantity for i in self.items.all())
+
+    @property
+    def reserved_qty(self):
+        """Barcha qatorlar bo'yicha jami bron."""
+        return sum(i.reserved_qty for i in self.items.all())
 
     @property
     def backorder_qty(self):
-        """Hali bronlanmagan, kelishi kutilayotgan miqdor."""
-        return max(0, self.quantity - self.reserved_qty)
+        """Barcha qatorlar bo'yicha jami yetishmagan miqdor."""
+        return sum(i.backorder_qty for i in self.items.all())
 
     @property
     def total(self):
-        """Jami summa (unit_price * quantity)."""
-        if self.unit_price is None:
+        """Jami summa (barcha qatorlar). Hech bir qatorda narx bo'lmasa None."""
+        totals = [i.total for i in self.items.all() if i.total is not None]
+        if not totals:
             return None
-        return self.unit_price * self.quantity
+        return sum(totals)
 
     @property
     def balance_due(self):
@@ -92,138 +98,52 @@ class Order(TimeStampedModel):
 
     @property
     def has_active_zakaz(self):
-        """
-        Shu mahsulot uchun faol (yakunlanmagan) zakaz bormi?
-        True bo'lsa — frontend "Zakaz berish" tugmasini yashiradi.
-        """
-        return self.product.zakazlar.filter(
-            status__in=(Zakaz.NEW, Zakaz.CONFIRMED, Zakaz.ORDERED)
-        ).exists()
+        """Birorta qator mahsuloti uchun faol zakaz bormi?"""
+        return any(i.has_active_zakaz for i in self.items.all())
+
+    # ── Amallar ──────────────────────────────────────────────────────────────
 
     @transaction.atomic
     def reserve(self):
-        """Ombordagi mavjud qoldiqdan FIFO tartibida bron ajratadi."""
-        from apps.warehouse.models import Stock
-        still_needed = self.quantity - self.reserved_qty
-        if still_needed <= 0:
-            return
-
-        for stock in (Stock.objects
-                      .select_for_update()
-                      .filter(product=self.product, quantity__gt=0)
-                      .order_by('id')):
-            available = stock.quantity - stock.reserved_quantity
-            if available <= 0:
-                continue
-            take = min(available, still_needed)
-            stock.reserved_quantity = F('reserved_quantity') + take
-            stock.save(update_fields=['reserved_quantity'])
-            still_needed -= take
-            if still_needed <= 0:
-                break
-
-        self.reserved_qty = self.quantity - still_needed
-        self._sync_status()
-        self.save(update_fields=['reserved_qty', 'status'])
+        """Barcha qatorlarga ombordagi mavjud qoldiqdan FIFO bron ajratadi."""
+        for item in self.items.select_for_update():
+            item.reserve()
+        self.refresh_status()
 
     @transaction.atomic
     def release(self):
-        """Bron bo'shatadi (bekor qilish yoki fulfill uchun)."""
-        from apps.warehouse.models import Stock
-        to_release = self.reserved_qty
-        if to_release <= 0:
-            return
-
-        for stock in (Stock.objects
-                      .select_for_update()
-                      .filter(product=self.product, reserved_quantity__gt=0)
-                      .order_by('id')):
-            take = min(stock.reserved_quantity, to_release)
-            stock.reserved_quantity = F('reserved_quantity') - take
-            stock.save(update_fields=['reserved_quantity'])
-            to_release -= take
-            if to_release <= 0:
-                break
-
-        self.reserved_qty = 0
-
-    @transaction.atomic
-    def resync_reservation(self):
-        """
-        Miqdor tahrirlanganda bronni qayta moslaydi:
-        ortsa — qo'shimcha bron oladi, kamaysa — ortiqchasini bo'shatadi.
-        """
-        if self.status in (self.FULFILLED, self.CANCELLED):
-            return
-        if self.reserved_qty > self.quantity:
-            self.release()
-            self.save(update_fields=['reserved_qty'])
-        self.reserve()
-        allocate_pending_orders(self.product)
+        """Barcha qatorlar bronini bo'shatadi."""
+        for item in self.items.select_for_update():
+            item.release()
 
     @transaction.atomic
     def fulfill(self):
         """
-        Yetkazildi: bron qilingan miqdorni ham quantity, ham reserved_quantity
-        dan ayiradi. Boshqa pending orderlarga avtomatik bron qayta ajratiladi.
+        Yetkazildi: har qator bo'yicha bron qilingan miqdor ombordan ayiriladi.
+        Boshqa pending buyurtmalarga avtomatik bron qayta ajratiladi.
         """
-        from apps.warehouse.models import Stock
-        remaining = self.reserved_qty
-        if remaining <= 0:
-            return
-
-        for stock in (Stock.objects
-                      .select_for_update()
-                      .filter(product=self.product, reserved_quantity__gt=0)
-                      .order_by('id')):
-            take = min(min(stock.reserved_quantity, stock.quantity), remaining)
-            stock.quantity          = F('quantity') - take
-            stock.reserved_quantity = F('reserved_quantity') - take
-            stock.save(update_fields=['quantity', 'reserved_quantity'])
-            remaining -= take
-            if remaining <= 0:
-                break
-
-        self.reserved_qty = 0
+        products = []
+        for item in self.items.select_for_update():
+            item.fulfill_reserved()
+            products.append(item.product)
         self.status = self.FULFILLED
-        self.save(update_fields=['reserved_qty', 'status'])
-        allocate_pending_orders(self.product)
+        self.save(update_fields=['status'])
+        for product in products:
+            allocate_pending_orders(product)
 
-    @transaction.atomic
-    def create_backorder_zakaz(self, user=None):
-        """
-        2-etap: buyurtmadagi yetishmagan (backorder) miqdor uchun avtomatik
-        Zakaz ochadi. Zakaz o'sha buyurtma va SHARTNOMA RAQAMI asosida bog'lanadi
-        — shunda yetishmagan mahsulot qaysi shartnoma asosida zakaz qilingani aniq.
-        Shu mahsulot uchun faol zakaz bo'lsa — takror ochilmaydi.
-        """
-        if self.backorder_qty <= 0 or self.has_active_zakaz:
-            return None
-        zakaz = Zakaz.objects.create(
-            order=self,
-            product=self.product,
-            quantity=self.backorder_qty,
-            contract_number=self.contract_number,
-            contract_date=self.contract_date,
-            supplier=self.product.source,
-            expected_date=self.due_date,
-            status=Zakaz.NEW,
-            created_by=user,
-        )
-        asos = (f'Buyurtma #{self.pk} dan avtomatik zakaz — '
-                f'yetishmagan {self.backorder_qty} dona.')
-        ZakazHistory.objects.create(
-            zakaz=zakaz, changed_by=user, action=ZakazHistory.CREATED,
-            new_status=Zakaz.NEW, contract_number=self.contract_number,
-            asos=asos,
-        )
-        register_contract(
-            self.product, ProductContract.ZAKAZ_CREATED,
-            contract_number=self.contract_number,
-            contract_date=self.contract_date,
-            asos=asos, order=self, zakaz=zakaz, user=user,
-        )
-        return zakaz
+    def refresh_status(self):
+        """Holatni qatorlardan qayta hisoblaydi (fulfilled/cancelled dan tashqari)."""
+        if self.status in (self.FULFILLED, self.CANCELLED):
+            return
+        total_q  = self.total_quantity
+        reserved = self.reserved_qty
+        if total_q > 0 and reserved >= total_q:
+            self.status = self.RESERVED
+        elif reserved > 0:
+            self.status = self.PARTIAL
+        else:
+            self.status = self.PENDING
+        self.save(update_fields=['status'])
 
     def sync_payment(self, user=None):
         """
@@ -277,13 +197,169 @@ class Order(TimeStampedModel):
             payment.save()
         return payment
 
-    def _sync_status(self):
-        if self.reserved_qty >= self.quantity:
-            self.status = self.RESERVED
-        elif self.reserved_qty > 0:
-            self.status = self.PARTIAL
-        else:
-            self.status = self.PENDING
+    @transaction.atomic
+    def create_backorder_zakaz(self, user=None):
+        """
+        2-etap: buyurtmadagi yetishmagan (backorder) qatorlar uchun avtomatik
+        Zakaz ochadi (har mahsulotga alohida zakaz). Zakaz buyurtma va
+        SHARTNOMA RAQAMI asosida bog'lanadi. Faol zakazi bor mahsulotga
+        takror ochilmaydi.
+        """
+        created = []
+        for item in self.items.all():
+            if item.backorder_qty <= 0 or item.has_active_zakaz:
+                continue
+            zakaz = Zakaz.objects.create(
+                order=self,
+                product=item.product,
+                quantity=item.backorder_qty,
+                contract_number=self.contract_number,
+                contract_date=self.contract_date,
+                supplier=item.product.source,
+                expected_date=self.due_date,
+                status=Zakaz.NEW,
+                created_by=user,
+            )
+            asos = (f'Buyurtma #{self.pk} dan avtomatik zakaz — '
+                    f'"{item.product.name}" yetishmagan {item.backorder_qty} dona.')
+            ZakazHistory.objects.create(
+                zakaz=zakaz, changed_by=user, action=ZakazHistory.CREATED,
+                new_status=Zakaz.NEW, contract_number=self.contract_number,
+                asos=asos,
+            )
+            register_contract(
+                item.product, ProductContract.ZAKAZ_CREATED,
+                contract_number=self.contract_number,
+                contract_date=self.contract_date,
+                asos=asos, order=self, zakaz=zakaz, user=user,
+            )
+            created.append(zakaz)
+        return created
+
+
+class OrderItem(TimeStampedModel):
+    """
+    Buyurtma qatori — bitta buyurtma ichidagi bitta mahsulot.
+    Bron/backorder har qator bo'yicha alohida yuritiladi.
+    """
+    order        = ForeignKey(Order, on_delete=CASCADE, related_name='items')
+    product      = ForeignKey('warehouse.Product', on_delete=PROTECT,
+                              related_name='order_items')
+    quantity     = PositiveIntegerField(help_text='Buyurtma qilingan miqdor')
+    unit_price   = DecimalField(max_digits=14, decimal_places=2, null=True, blank=True,
+                                help_text='Birlik narxi (sotuv narxi)')
+    reserved_qty = PositiveIntegerField(default=0,
+                                        help_text='Hozirda bron qilingan miqdor')
+    comment      = TextField(blank=True, null=True)
+
+    class Meta:
+        db_table            = 'orders_order_item'
+        ordering            = ('id',)
+        verbose_name        = 'Buyurtma qatori'
+        verbose_name_plural = 'Buyurtma qatorlari'
+
+    def __str__(self):
+        return f'{self.product.name} x{self.quantity} (order #{self.order_id})'
+
+    @property
+    def backorder_qty(self):
+        """Hali bronlanmagan, kelishi kutilayotgan miqdor."""
+        return max(0, self.quantity - self.reserved_qty)
+
+    @property
+    def total(self):
+        """Qator summasi (unit_price * quantity)."""
+        if self.unit_price is None:
+            return None
+        return self.unit_price * self.quantity
+
+    @property
+    def has_active_zakaz(self):
+        """Shu mahsulot uchun faol (yakunlanmagan) zakaz bormi?"""
+        return self.product.zakazlar.filter(
+            status__in=(Zakaz.NEW, Zakaz.CONFIRMED, Zakaz.ORDERED)
+        ).exists()
+
+    @transaction.atomic
+    def reserve(self):
+        """Ombordagi mavjud qoldiqdan FIFO tartibida bron ajratadi."""
+        from apps.warehouse.models import Stock
+        still_needed = self.quantity - self.reserved_qty
+        if still_needed <= 0:
+            return
+
+        for stock in (Stock.objects
+                      .select_for_update()
+                      .filter(product=self.product, quantity__gt=0)
+                      .order_by('id')):
+            available = stock.quantity - stock.reserved_quantity
+            if available <= 0:
+                continue
+            take = min(available, still_needed)
+            stock.reserved_quantity = F('reserved_quantity') + take
+            stock.save(update_fields=['reserved_quantity'])
+            still_needed -= take
+            if still_needed <= 0:
+                break
+
+        self.reserved_qty = self.quantity - still_needed
+        self.save(update_fields=['reserved_qty'])
+
+    @transaction.atomic
+    def release(self):
+        """Bron bo'shatadi (bekor qilish yoki miqdor kamayishi uchun)."""
+        from apps.warehouse.models import Stock
+        to_release = self.reserved_qty
+        if to_release <= 0:
+            return
+
+        for stock in (Stock.objects
+                      .select_for_update()
+                      .filter(product=self.product, reserved_quantity__gt=0)
+                      .order_by('id')):
+            take = min(stock.reserved_quantity, to_release)
+            stock.reserved_quantity = F('reserved_quantity') - take
+            stock.save(update_fields=['reserved_quantity'])
+            to_release -= take
+            if to_release <= 0:
+                break
+
+        self.reserved_qty = 0
+        self.save(update_fields=['reserved_qty'])
+
+    @transaction.atomic
+    def resync_reservation(self):
+        """
+        Miqdor tahrirlanganda bronni qayta moslaydi:
+        ortsa — qo'shimcha bron oladi, kamaysa — hammasini bo'shatib qaytadan.
+        """
+        if self.reserved_qty > self.quantity:
+            self.release()
+        self.reserve()
+        allocate_pending_orders(self.product)
+
+    @transaction.atomic
+    def fulfill_reserved(self):
+        """Bron qilingan miqdorni ham quantity, ham reserved dan ayiradi."""
+        from apps.warehouse.models import Stock
+        remaining = self.reserved_qty
+        if remaining <= 0:
+            return
+
+        for stock in (Stock.objects
+                      .select_for_update()
+                      .filter(product=self.product, reserved_quantity__gt=0)
+                      .order_by('id')):
+            take = min(min(stock.reserved_quantity, stock.quantity), remaining)
+            stock.quantity          = F('quantity') - take
+            stock.reserved_quantity = F('reserved_quantity') - take
+            stock.save(update_fields=['quantity', 'reserved_quantity'])
+            remaining -= take
+            if remaining <= 0:
+                break
+
+        self.reserved_qty = 0
+        self.save(update_fields=['reserved_qty'])
 
 
 # ── Zakaz (Etkazuvchidan buyurtma) ───────────────────────────────────────────
@@ -293,14 +369,14 @@ class Zakaz(TimeStampedModel):
     Etkazuvchidan mahsulot zakaz qilish (procurement order).
 
     Yaratish: operator yoki manager (status avtomatik 'new'), yoki buyurtmadagi
-    yetishmagan miqdor uchun avtomatik.
+    yetishmagan qator uchun avtomatik.
     Status o'zgartirish: FAQAT manager.
 
     Muhim qoidalar:
-        - Tasdiqlash (confirmed): shartnoma (dogovor) raqami kiritilmaguncha
-          tasdiqlab bo'lmaydi. Tasdiqlashda shartnoma sanasi avtomatik bugungi
-          (Asia/Tashkent) qilib qo'yiladi.
-        - Qabul qilish (received): asos va faktura majburiy.
+        - HAR BIR holat o'zgarishida asos MAJBURIY.
+        - confirmed / ordered / received — shartnoma raqami MAJBURIY.
+        - Tasdiqlashda sana bo'sh bo'lsa avtomatik bugungi kun (Asia/Tashkent).
+        - Qabul qilishda (received) qo'shimcha faktura MAJBURIY.
 
     Holat oqimi:
         new → confirmed → ordered → received → (avtomatik ombor to'ldiriladi)
@@ -333,17 +409,17 @@ class Zakaz(TimeStampedModel):
                                    help_text='Etkazuvchi nomi / manzili')
     status             = CharField(max_length=12, choices=STATUS_CHOICES, default=NEW)
 
-    # Shartnoma (dogovor) — tasdiqlash uchun asos
+    # Shartnoma (dogovor) — har bir ish holati uchun asos
     contract_number    = CharField(max_length=100, blank=True, null=True,
-                                   help_text='Shartnoma (dogovor) raqami — tasdiqlash uchun majburiy')
+                                   help_text='Shartnoma (dogovor) raqami — tasdiqlash/yuborish/qabul uchun majburiy')
     contract_date      = DateField(null=True, blank=True,
                                    help_text='Shartnoma sanasi (tasdiqlashda avtomatik bugungi kun)')
     confirmed_at       = DateTimeField(null=True, blank=True,
                                        help_text='Tasdiqlangan aniq sana/vaqt (Tashkent)')
 
-    # Qabul qilish — asos + faktura
+    # Asos (har holat o'tishida yangilanadi) + faktura (qabulda)
     asos               = TextField(blank=True, null=True,
-                                   help_text='Qabul qilish uchun asos (majburiy)')
+                                   help_text='Oxirgi holat o\'tishining asosi')
     faktura            = CharField(max_length=100, blank=True, null=True,
                                    help_text='Faktura raqami (qabul qilish uchun majburiy)')
 
@@ -565,14 +641,20 @@ class ZakazHistory(models.Model):
 
 def allocate_pending_orders(product):
     """
-    Mahsulot qoldig'i o'zgarganda pending/partial buyurtmalarga
+    Mahsulot qoldig'i o'zgarganda pending/partial buyurtma QATORLARIGA
     due_date tartibida (eng yaqin deadline birinchi) bron ajratadi.
     """
-    pending = (
-        Order.objects
-        .filter(product=product, status__in=(Order.PENDING, Order.PARTIAL))
-        .order_by('due_date', 'created_at')
+    items = (
+        OrderItem.objects
+        .filter(product=product,
+                order__status__in=(Order.PENDING, Order.PARTIAL))
+        .select_related('order')
+        .order_by('order__due_date', 'order__created_at', 'id')
         .select_for_update()
     )
-    for order in pending:
-        order.reserve()
+    touched_orders = {}
+    for item in items:
+        item.reserve()
+        touched_orders[item.order_id] = item.order
+    for order in touched_orders.values():
+        order.refresh_status()

@@ -1,5 +1,6 @@
 import json
 
+from django.db import transaction
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.serializers import (ModelSerializer, Serializer,
@@ -9,14 +10,14 @@ from rest_framework.serializers import (ModelSerializer, Serializer,
                                         PrimaryKeyRelatedField)
 
 from apps.clients.models import Client
-from apps.orders.models import (Order, OrderHistory, Zakaz, ZakazHistory,
+from apps.orders.models import (Order, OrderItem, OrderHistory,
+                                Zakaz, ZakazHistory,
                                 ProductContract, register_contract)
 from apps.warehouse.models import Product
 
-# Buyurtma tahririda kuzatiladigan maydonlar (tarixga yoziladi)
-_ORDER_TRACKED_FIELDS = ('client', 'product', 'quantity', 'unit_price',
-                         'prepaid_amount', 'contract_number', 'contract_date',
-                         'due_date', 'comment')
+# Buyurtma sarlavha tahririda kuzatiladigan maydonlar (tarixga yoziladi)
+_ORDER_TRACKED_FIELDS = ('client', 'prepaid_amount', 'contract_number',
+                         'contract_date', 'due_date', 'comment')
 
 _ZAKAZ_TRACKED_FIELDS = ('quantity', 'received_qty', 'supplier',
                          'contract_number', 'contract_date', 'asos', 'faktura',
@@ -55,11 +56,38 @@ class OrderHistorySerializer(ModelSerializer):
         return obj.get_action_display()
 
 
-# ── Order (Bron) ──────────────────────────────────────────────────────────────
+# ── Order (Bron) — BITTA buyurtma, ko'p mahsulot ─────────────────────────────
+
+class OrderItemSerializer(ModelSerializer):
+    """Buyurtma ichidagi bitta mahsulot qatori."""
+    id               = IntegerField(required=False,
+                                    help_text='Tahrirda mavjud qatorni ko\'rsatish uchun')
+    product_name     = SerializerMethodField()
+    total            = ReadOnlyField()
+    backorder_qty    = ReadOnlyField()
+    has_active_zakaz = ReadOnlyField()
+
+    class Meta:
+        model  = OrderItem
+        fields = ('id', 'product', 'product_name',
+                  'quantity', 'unit_price', 'total',
+                  'reserved_qty', 'backorder_qty', 'has_active_zakaz',
+                  'comment')
+        read_only_fields = ('reserved_qty',)
+
+    def get_product_name(self, obj):
+        return str(obj.product)
+
 
 class OrderSerializer(ModelSerializer):
-    product_name     = SerializerMethodField()
+    """
+    Buyurtma — BITTA hujjat, ichida bir nechta mahsulot (`items`).
+    Nechta mahsulot bo'lishidan qat'i nazar buyurtma bitta bo'ladi.
+    """
+    items            = OrderItemSerializer(many=True, required=False)
     client_name      = SerializerMethodField()
+    total_quantity   = ReadOnlyField()
+    reserved_qty     = ReadOnlyField()
     backorder_qty    = ReadOnlyField()
     total            = ReadOnlyField()
     balance_due      = ReadOnlyField()
@@ -78,12 +106,20 @@ class OrderSerializer(ModelSerializer):
     asos = CharField(write_only=True, required=False, allow_blank=True,
                      help_text='Tahrir/amal asosi (tahrirlashda majburiy)')
 
+    # Eski (bitta mahsulotli) format ham qabul qilinadi — items ga aylanadi
+    product    = PrimaryKeyRelatedField(queryset=Product.objects.all(),
+                                        required=False, write_only=True)
+    quantity   = IntegerField(required=False, min_value=1, write_only=True)
+    unit_price = DecimalField(max_digits=14, decimal_places=2,
+                              required=False, allow_null=True, write_only=True)
+
     class Meta:
         model  = Order
         fields = (
             'id', 'client', 'client_name',
-            'product', 'product_name',
-            'quantity', 'unit_price', 'total',
+            'items',
+            'product', 'quantity', 'unit_price',   # legacy (write-only)
+            'total_quantity', 'total',
             'prepaid_amount', 'balance_due',
             'contract_number', 'contract_date',
             'reserved_qty', 'backorder_qty',
@@ -91,10 +127,7 @@ class OrderSerializer(ModelSerializer):
             'due_date', 'status', 'comment', 'created_at',
             'asos', 'history',
         )
-        read_only_fields = ('reserved_qty', 'status', 'created_at')
-
-    def get_product_name(self, obj):
-        return str(obj.product)
+        read_only_fields = ('status', 'created_at')
 
     def get_client_name(self, obj):
         return str(obj.client) if obj.client else None
@@ -109,65 +142,147 @@ class OrderSerializer(ModelSerializer):
                 raise ValidationError(
                     f'"{self.instance.get_status_display()}" holatidagi '
                     f'buyurtmani tahrirlab bo\'lmaydi.')
+        else:
+            # Yaratishda kamida bitta mahsulot bo'lishi shart
+            if not attrs.get('items') and not attrs.get('product'):
+                raise ValidationError(
+                    {'items': 'Kamida bitta mahsulot kiritilishi kerak.'})
 
-        # Oldindan to'lov jami summadan oshmasin
-        qty     = attrs.get('quantity',
-                            getattr(self.instance, 'quantity', None))
-        price   = attrs.get('unit_price',
-                            getattr(self.instance, 'unit_price', None))
-        prepaid = attrs.get('prepaid_amount',
-                            getattr(self.instance, 'prepaid_amount', 0) or 0)
-        if price is not None and qty and prepaid and prepaid > price * qty:
-            raise ValidationError({
-                'prepaid_amount': 'Oldindan to\'lov jami summadan oshib ketdi.'})
+        # Oldindan to'lov jami summadan oshmasin (yaratishda; tahrirda
+        # qatorlar qo'llangandan keyin update() ichida tekshiriladi)
+        if self.instance is None:
+            prepaid = attrs.get('prepaid_amount') or 0
+            if prepaid:
+                totals = []
+                if attrs.get('items'):
+                    totals = [i['quantity'] * i['unit_price']
+                              for i in attrs['items'] if i.get('unit_price')]
+                elif attrs.get('product') and attrs.get('unit_price'):
+                    totals = [attrs.get('quantity', 1) * attrs['unit_price']]
+                if totals and prepaid > sum(totals):
+                    raise ValidationError({
+                        'prepaid_amount': 'Oldindan to\'lov jami summadan oshib ketdi.'})
         return attrs
 
     # Eslatma: buyurtma (Order) HAR DOIM yaratiladi.
-    # Qoldiq yetmasa — backorder bo'lib qoladi va yetishmagan miqdor uchun
+    # Qoldiq yetmasa — backorder bo'lib qoladi va yetishmagan qatorlar uchun
     # AVTOMATIK Zakaz ochiladi (o'sha shartnoma raqami asosida).
 
+    @transaction.atomic
     def create(self, validated_data):
         validated_data.pop('asos', None)
         validated_data.setdefault('contract_date', timezone.localdate())
         user = self.context['request'].user
 
-        order = super().create(validated_data)
+        # items yoki legacy (product/quantity/unit_price)
+        items_data = validated_data.pop('items', None)
+        product    = validated_data.pop('product', None)
+        quantity   = validated_data.pop('quantity', None)
+        unit_price = validated_data.pop('unit_price', None)
+        if not items_data:
+            items_data = [{'product': product, 'quantity': quantity or 1,
+                           'unit_price': unit_price}]
+
+        order = Order.objects.create(**validated_data)
+        for item in items_data:
+            item.pop('id', None)
+            OrderItem.objects.create(order=order, **item)
+
         order.reserve()
 
         # Tarix: yaratildi (shartnoma raqami + aniq sana/vaqt)
-        asos_text = f'Buyurtma yaratildi — shartnoma №{order.contract_number}.'
+        names = ', '.join(i.product.name for i in order.items.all())
+        asos_text = (f'Buyurtma yaratildi ({names}) — '
+                     f'shartnoma №{order.contract_number}.')
         OrderHistory.objects.create(
             order=order, changed_by=user, action=OrderHistory.CREATED,
             contract_number=order.contract_number,
             asos=asos_text,
         )
-        # MAHSULOT shartnomalar reestriga avtomatik yozuv
-        register_contract(
-            order.product, ProductContract.ORDER_CREATED,
-            contract_number=order.contract_number,
-            contract_date=order.contract_date,
-            asos=asos_text, order=order, user=user,
-        )
+        # MAHSULOT shartnomalar reestriga — har qator mahsuloti uchun
+        for item in order.items.all():
+            register_contract(
+                item.product, ProductContract.ORDER_CREATED,
+                contract_number=order.contract_number,
+                contract_date=order.contract_date,
+                asos=asos_text, order=order, user=user,
+            )
 
         # Pul (summa + oldindan to'lov) bitta amalda KASSAGA tushadi
         order.sync_payment(user=user)
 
-        # 2-etap: yetishmagan miqdor avtomatik Zakazga o'tadi
+        # 2-etap: yetishmagan qatorlar avtomatik Zakazga o'tadi
         order.create_backorder_zakaz(user=user)
         return order
 
+    @transaction.atomic
     def update(self, instance, validated_data):
         asos = validated_data.pop('asos', '')
         user = self.context['request'].user
 
+        items_data   = validated_data.pop('items', None)
+        legacy_qty   = validated_data.pop('quantity', None)
+        legacy_price = validated_data.pop('unit_price', None)
+        validated_data.pop('product', None)
+
         changes = _diff(instance, validated_data, _ORDER_TRACKED_FIELDS)
-        old_quantity = instance.quantity
 
         order = super().update(instance, validated_data)
 
-        # Miqdor o'zgargan bo'lsa — bronni qayta moslash
-        if order.quantity != old_quantity:
-            order.resync_reservation()
+        # Qatorlarni yangilash: id bor → mavjud qator, id yo'q → yangi qator
+        item_changes = []
+
+        # Legacy: bitta qatorli buyurtmada quantity/unit_price to'g'ridan-to'g'ri
+        if (not items_data and (legacy_qty is not None or legacy_price is not None)
+                and order.items.count() == 1):
+            item    = order.items.first()
+            old_qty = item.quantity
+            if legacy_qty is not None:
+                item.quantity = legacy_qty
+            if legacy_price is not None:
+                item.unit_price = legacy_price
+            item.save()
+            if item.quantity != old_qty:
+                item.resync_reservation()
+                item_changes.append(
+                    {'item': item.pk, 'product': str(item.product),
+                     'quantity': {'old': old_qty, 'new': item.quantity}})
+        if items_data:
+            for d in items_data:
+                iid = d.pop('id', None)
+                if iid:
+                    try:
+                        item = order.items.get(pk=iid)
+                    except OrderItem.DoesNotExist:
+                        raise ValidationError(
+                            {'items': f'Qator #{iid} bu buyurtmada topilmadi.'})
+                    old_qty = item.quantity
+                    for f in ('quantity', 'unit_price', 'comment'):
+                        if f in d:
+                            setattr(item, f, d[f])
+                    item.save()
+                    if item.quantity != old_qty:
+                        item.resync_reservation()
+                        item_changes.append(
+                            {'item': iid, 'product': str(item.product),
+                             'quantity': {'old': old_qty, 'new': item.quantity}})
+                else:
+                    d.pop('reserved_qty', None)
+                    item = OrderItem.objects.create(order=order, **d)
+                    item.reserve()
+                    item_changes.append(
+                        {'item': item.pk, 'product': str(item.product),
+                         'added': item.quantity})
+        if item_changes:
+            changes['items'] = item_changes
+
+        order.refresh_status()
+
+        # Oldindan to'lov jami summadan oshmasin (qatorlar qo'llanganidan keyin)
+        if (order.total is not None
+                and (order.prepaid_amount or 0) > order.total):
+            raise ValidationError({
+                'prepaid_amount': 'Oldindan to\'lov jami summadan oshib ketdi.'})
 
         # Kassa yozuvini yangilash (summa/oldindan to'lov o'zgargan bo'lishi
         # mumkin — farq alohida tranzaksiya bo'lib yoziladi)
@@ -180,31 +295,21 @@ class OrderSerializer(ModelSerializer):
             asos=asos,
             changes=json.dumps(changes, ensure_ascii=False) if changes else None,
         )
-        # Reestr: har tahrir ham mahsulot shartnomalariga yoziladi
-        register_contract(
-            order.product, ProductContract.ORDER_EDITED,
-            contract_number=order.contract_number,
-            contract_date=order.contract_date,
-            asos=asos, order=order, user=user,
-        )
+        # Reestr: tahrir har qator mahsulotiga yoziladi
+        for item in order.items.all():
+            register_contract(
+                item.product, ProductContract.ORDER_EDITED,
+                contract_number=order.contract_number,
+                contract_date=order.contract_date,
+                asos=asos, order=order, user=user,
+            )
         return order
-
-
-class OrderItemSerializer(ModelSerializer):
-    """Bulk buyurtma ichidagi bitta mahsulot qatori."""
-    prepaid_amount = DecimalField(max_digits=14, decimal_places=2,
-                                  required=False, default=0)
-
-    class Meta:
-        model  = Order
-        fields = ('product', 'quantity', 'unit_price', 'prepaid_amount', 'comment')
 
 
 class OrderBulkCreateSerializer(Serializer):
     """
-    Bir vaqtda bir nechta mahsulot buyurtmasi.
-    Har bir mahsulot alohida Order yozuvi bo'ladi (bitta client/due_date/
-    shartnoma ostida). Yetishmagan miqdorlar uchun avtomatik Zakaz ochiladi.
+    Bir vaqtda bir nechta mahsulot buyurtmasi — natija BITTA buyurtma,
+    ichida bir nechta qator (items).
 
     Namuna:
     {
@@ -228,8 +333,8 @@ class OrderBulkCreateSerializer(Serializer):
                                 })
     contract_date   = DateField(required=False)
     prepaid_amount  = DecimalField(max_digits=14, decimal_places=2,
-                                   required=False, allow_null=True,
-                                   help_text='Umumiy oldindan to\'lov — birinchi qatorga yoziladi')
+                                   required=False, allow_null=True)
+    comment         = CharField(required=False, allow_blank=True, allow_null=True)
     items           = OrderItemSerializer(many=True)
 
     def validate_items(self, value):
@@ -238,54 +343,14 @@ class OrderBulkCreateSerializer(Serializer):
         return value
 
     def create(self, validated_data):
-        client          = validated_data.get('client')
-        due_date        = validated_data.get('due_date')
-        contract_number = validated_data['contract_number']
-        contract_date   = validated_data.get('contract_date') or timezone.localdate()
-        common_prepaid  = validated_data.get('prepaid_amount')
-        items           = validated_data['items']
-        user            = self.context['request'].user
-
-        created = []
-        for i, item in enumerate(items):
-            prepaid = item.get('prepaid_amount') or 0
-            # Umumiy oldindan to'lov ko'rsatilgan bo'lsa — birinchi qatorga
-            if i == 0 and common_prepaid and not prepaid:
-                prepaid = common_prepaid
-            order = Order.objects.create(
-                client=client,
-                due_date=due_date,
-                contract_number=contract_number,
-                contract_date=contract_date,
-                product=item['product'],
-                quantity=item['quantity'],
-                unit_price=item.get('unit_price'),
-                prepaid_amount=prepaid,
-                comment=item.get('comment'),
-            )
-            order.reserve()
-            asos_text = f'Bulk buyurtma — shartnoma №{contract_number}.'
-            OrderHistory.objects.create(
-                order=order, changed_by=user, action=OrderHistory.CREATED,
-                contract_number=contract_number,
-                asos=asos_text,
-            )
-            register_contract(
-                order.product, ProductContract.ORDER_CREATED,
-                contract_number=contract_number,
-                contract_date=contract_date,
-                asos=asos_text, order=order, user=user,
-            )
-            # Pul kassaga tushadi
-            order.sync_payment(user=user)
-            # 2-etap: yetishmagan miqdor avtomatik Zakazga
-            order.create_backorder_zakaz(user=user)
-            created.append(order)
-        return created
+        # BITTA buyurtma sifatida OrderSerializer orqali yaratiladi
+        if validated_data.get('prepaid_amount') is None:
+            validated_data.pop('prepaid_amount', None)
+        return OrderSerializer(context=self.context).create(validated_data)
 
     def to_representation(self, instance):
-        # instance — yaratilgan Order ro'yxati
-        return {'orders': OrderSerializer(instance, many=True).data}
+        # instance — yaratilgan BITTA Order
+        return {'order': OrderSerializer(instance).data}
 
 
 # ── Mahsulot shartnomalari reestri ───────────────────────────────────────────
@@ -575,6 +640,12 @@ class ZakazBulkCreateSerializer(Serializer):
                 action=ZakazHistory.CREATED, new_status=Zakaz.NEW,
                 contract_number=contract_number, contract_date=contract_date,
                 asos='Bulk zakaz yaratildi.',
+            )
+            register_contract(
+                zakaz.product, ProductContract.ZAKAZ_CREATED,
+                contract_number=contract_number, contract_date=contract_date,
+                asos='Bulk zakaz yaratildi.', zakaz=zakaz,
+                user=zakaz.created_by,
             )
             created.append(zakaz)
         return created

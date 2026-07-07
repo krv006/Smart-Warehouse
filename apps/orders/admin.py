@@ -1,8 +1,8 @@
 from django.contrib import admin
 from django.utils.html import format_html
 
-from apps.orders.models import (Order, OrderHistory, Zakaz, ZakazHistory,
-                                ProductContract)
+from apps.orders.models import (Order, OrderItem, OrderHistory,
+                                Zakaz, ZakazHistory, ProductContract)
 
 
 # ── Mahsulot shartnomalari reestri ───────────────────────────────────────────
@@ -55,19 +55,26 @@ class ZakazHistoryInline(admin.TabularInline):
 
 # ── Order (Bron) ──────────────────────────────────────────────────────────────
 
+class OrderItemInline(admin.TabularInline):
+    model               = OrderItem
+    extra               = 0
+    autocomplete_fields = ('product',)
+    readonly_fields     = ('reserved_qty',)
+
+
 @admin.register(Order)
 class OrderAdmin(admin.ModelAdmin):
-    list_display    = ('id', 'contract_number', 'product', 'client', 'quantity_col',
+    list_display    = ('id', 'contract_number', 'items_col', 'client', 'quantity_col',
                        'reserved_col', 'backorder_col', 'prepaid_col', 'status_badge',
                        'due_date', 'created_at')
     list_filter     = ('status', 'due_date', 'contract_date')
-    search_fields   = ('contract_number', 'product__name', 'product__serial_number',
+    search_fields   = ('contract_number', 'items__product__name',
+                       'items__product__serial_number',
                        'client__company_name', 'comment')
     ordering        = ('due_date', '-created_at')
     list_per_page   = 25
-    readonly_fields = ('reserved_qty', 'status', 'created_at', 'updated_at')
-    autocomplete_fields = ('product',)
-    inlines         = (OrderHistoryInline,)
+    readonly_fields = ('status', 'created_at', 'updated_at')
+    inlines         = (OrderItemInline, OrderHistoryInline)
 
     _STATUS_COLORS = {
         Order.PENDING:   ('#fd7e14', 'Zakaz'),
@@ -77,9 +84,16 @@ class OrderAdmin(admin.ModelAdmin):
         Order.CANCELLED: ('#6c757d', 'Bekor'),
     }
 
+    @admin.display(description='Mahsulotlar')
+    def items_col(self, obj):
+        names = [i.product.name for i in obj.items.all()[:3]]
+        extra = obj.items.count() - len(names)
+        text  = ', '.join(names) + (f' +{extra}' if extra > 0 else '')
+        return text or '—'
+
     @admin.display(description='Buyurtma')
     def quantity_col(self, obj):
-        return format_html('<b>{} dona</b>', obj.quantity)
+        return format_html('<b>{} dona</b>', obj.total_quantity)
 
     @admin.display(description='Bron')
     def reserved_col(self, obj):

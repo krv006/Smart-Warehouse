@@ -31,13 +31,29 @@ from apps.orders.serializers import (OrderSerializer, ZakazSerializer,
     create=extend_schema(
         summary="Yangi buyurtma (Operator / Manager)",
         description=(
+            "**BITTA buyurtma — bir nechta mahsulot (`items`).** Nechta mahsulot "
+            "bo'lishidan qat'i nazar buyurtma bitta hujjat bo'ladi.\n\n"
+            "```json\n"
+            "{\n"
+            '  "client": "<uuid>",\n'
+            '  "contract_number": "SH-2026/045",\n'
+            '  "prepaid_amount": "5000000",\n'
+            '  "due_date": "2026-08-01",\n'
+            '  "items": [\n'
+            '    { "product": 12, "quantity": 4, "unit_price": "3900000" },\n'
+            '    { "product": 7,  "quantity": 2, "unit_price": "1200000" }\n'
+            "  ]\n"
+            "}\n"
+            "```\n\n"
             "**Shartnoma raqami (`contract_number`) MAJBURIY.** "
             "`contract_date` yuborilmasa — bugungi kun (Tashkent).\n\n"
-            "`prepaid_amount` — oldindan to'langan summa (qisman to'lov). "
+            "`prepaid_amount` — oldindan to'langan summa (kassaga tushadi). "
             "`balance_due` = total − prepaid_amount.\n\n"
-            "- `available_quantity > 0` → bron + backorder (partial/pending)\n"
-            "- Yetishmagan (backorder) miqdor uchun **AVTOMATIK Zakaz** ochiladi — "
-            "o'sha shartnoma raqami asosida (Zakazlar ro'yxatida ko'rinadi).\n\n"
+            "- Har qatorga ombordan FIFO bron ajratiladi\n"
+            "- Yetishmagan (backorder) qatorlar uchun **AVTOMATIK Zakaz** ochiladi — "
+            "o'sha shartnoma raqami asosida\n"
+            "- Eski format (`product`+`quantity`+`unit_price` to'g'ridan-to'g'ri) "
+            "ham qabul qilinadi — bitta qatorli buyurtma bo'ladi\n\n"
             "Yangi qoldiq kelganida pending/partial buyurtmalar **avtomatik** bronlanadi."
         ),
         tags=["Orders / Bron"],
@@ -62,22 +78,30 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
     PATCH — tahrirlash (asos majburiy, tarixga yoziladi).
     """
     queryset           = (Order.objects
-                          .select_related('product', 'client')
-                          .prefetch_related('history__changed_by'))
+                          .select_related('client')
+                          .prefetch_related('items__product',
+                                            'history__changed_by'))
     serializer_class   = OrderSerializer
     permission_classes = (IsOperatorOrReadOnly,)
-    filterset_fields   = ('status', 'product', 'client', 'contract_number')
-    search_fields      = ('product__name', 'product__serial_number',
+    filterset_fields   = {
+        'status':          ['exact'],
+        'client':          ['exact'],
+        'contract_number': ['exact'],
+        'items__product':  ['exact'],
+    }
+    search_fields      = ('items__product__name', 'items__product__serial_number',
                           'client__company_name', 'contract_number', 'comment')
     ordering_fields    = ('due_date', 'created_at', 'status')
     http_method_names  = ('get', 'post', 'patch', 'head', 'options')
 
     @extend_schema(
-        summary="Bir vaqtda bir nechta mahsulot buyurtmasi (bulk)",
+        summary="Bir nechta mahsulotli buyurtma (bulk) — natija BITTA buyurtma",
         description=(
             "Bitta client/due_date/**shartnoma** ostida bir nechta mahsulot "
-            "buyurtma qilinadi. Har biri alohida Order yozuvi bo'ladi, har biriga "
-            "bron ajratiladi. Yetishmagan miqdorlar uchun avtomatik Zakaz ochiladi.\n\n"
+            "buyurtma qilinadi. **Natija — BITTA buyurtma**, ichida qatorlar "
+            "(`items`). Yetishmagan qatorlar uchun avtomatik Zakaz ochiladi.\n\n"
+            "`POST /orders/` ning o'zi ham `items` ni qabul qiladi — bu endpoint "
+            "moslik uchun saqlangan.\n\n"
             "```json\n"
             "{\n"
             '  "client": "<uuid>",\n'
@@ -100,9 +124,9 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
             data=request.data, context={'request': request}
         )
         serializer.is_valid(raise_exception=True)
-        orders = serializer.save()
+        order = serializer.save()
         return Response(
-            OrderBulkCreateSerializer().to_representation(orders),
+            OrderBulkCreateSerializer().to_representation(order),
             status=201,
         )
 
@@ -140,12 +164,13 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
             contract_number=order.contract_number,
             asos=asos,
         )
-        register_contract(
-            order.product, ProductContract.ORDER_FULFILLED,
-            contract_number=order.contract_number,
-            contract_date=order.contract_date,
-            asos=asos, order=order, user=request.user,
-        )
+        for item in order.items.all():
+            register_contract(
+                item.product, ProductContract.ORDER_FULFILLED,
+                contract_number=order.contract_number,
+                contract_date=order.contract_date,
+                asos=asos, order=order, user=request.user,
+            )
         return Response(OrderSerializer(order).data)
 
     @extend_schema(
@@ -166,20 +191,21 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
             )
         order.release()
         order.status = Order.CANCELLED
-        order.save(update_fields=['reserved_qty', 'status'])
-        allocate_pending_orders(order.product)
+        order.save(update_fields=['status'])
         asos = request.data.get('asos') or 'Buyurtma bekor qilindi.'
         OrderHistory.objects.create(
             order=order, changed_by=request.user, action=OrderHistory.CANCELLED,
             contract_number=order.contract_number,
             asos=asos,
         )
-        register_contract(
-            order.product, ProductContract.ORDER_CANCELLED,
-            contract_number=order.contract_number,
-            contract_date=order.contract_date,
-            asos=asos, order=order, user=request.user,
-        )
+        for item in order.items.all():
+            allocate_pending_orders(item.product)
+            register_contract(
+                item.product, ProductContract.ORDER_CANCELLED,
+                contract_number=order.contract_number,
+                contract_date=order.contract_date,
+                asos=asos, order=order, user=request.user,
+            )
         return Response(OrderSerializer(order).data)
 
     @extend_schema(
@@ -203,27 +229,30 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
                 {'detail': 'Bu buyurtmada zakaz kerak bo\'lgan (yetishmagan) miqdor yo\'q.'},
                 status=400,
             )
-        if order.has_active_zakaz:
+        zakazlar = order.create_backorder_zakaz(user=request.user)
+        if not zakazlar:
             return Response(
-                {'detail': 'Bu mahsulot uchun faol zakaz allaqachon mavjud.'},
+                {'detail': 'Zakaz yaratilmadi — yetishmagan mahsulotlar uchun '
+                           'faol zakaz allaqachon mavjud.'},
                 status=400,
             )
-        zakaz = order.create_backorder_zakaz(user=request.user)
-        if zakaz is None:
-            return Response({'detail': 'Zakaz yaratib bo\'lmadi.'}, status=400)
-        # Ixtiyoriy supplier/expected_date qayta yozish
+        # Ixtiyoriy supplier/expected_date qayta yozish (hammасига)
         supplier      = request.data.get('supplier')
         expected_date = request.data.get('expected_date')
-        update_fields = []
-        if supplier:
-            zakaz.supplier = supplier
-            update_fields.append('supplier')
-        if expected_date:
-            zakaz.expected_date = expected_date
-            update_fields.append('expected_date')
-        if update_fields:
-            zakaz.save(update_fields=update_fields)
-        return Response(ZakazSerializer(zakaz).data, status=201)
+        for zakaz in zakazlar:
+            update_fields = []
+            if supplier:
+                zakaz.supplier = supplier
+                update_fields.append('supplier')
+            if expected_date:
+                zakaz.expected_date = expected_date
+                update_fields.append('expected_date')
+            if update_fields:
+                zakaz.save(update_fields=update_fields)
+        return Response(
+            {'zakazlar': ZakazSerializer(zakazlar, many=True).data},
+            status=201,
+        )
 
 
 # ── Zakaz (Etkazuvchidan buyurtma) ────────────────────────────────────────────

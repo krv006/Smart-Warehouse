@@ -142,16 +142,18 @@ python manage.py seed --products 60 --orders 30 --zakazlar 20 --clients 25
 ```
 ┌────────────────── 1-ETAP: BUYURTMA OLISH ──────────────────┐
 │ POST /orders/                                              │
+│  • BITTA buyurtma — bir nechta mahsulot (items[])          │
+│    nechta mahsulot bo'lsa ham buyurtma BITTA hujjat        │
 │  • contract_number (shartnoma raqami) — MAJBURIY           │
 │  • contract_date — yuborilmasa bugungi kun (Tashkent)      │
 │  • prepaid_amount — oldindan to'lov (pul, qanchadir qism)  │
-│  • Ombordagi mavjud qoldiqdan FIFO bron ajratiladi         │
+│  • Har qatorga ombordagi qoldiqdan FIFO bron ajratiladi    │
 │  • balance_due = total − prepaid_amount                    │
-│  • PUL KASSAGA TUSHADI: bitta amalda kassada to'lov yozuvi │
-│    ochiladi (jami summa + to'langan + status avtomatik)    │
+│  • PUL KASSAGA TUSHADI: bitta amalda kassada BITTA to'lov  │
+│    yozuvi (butun buyurtma summasi + to'langan + status)    │
 └────────────────────────────┬───────────────────────────────┘
-                             │ yetishmagan (backorder) miqdor bo'lsa
-                             ▼ AVTOMATIK
+                             │ yetishmagan (backorder) qatorlar bo'lsa
+                             ▼ AVTOMATIK (har mahsulotga alohida zakaz)
 ┌────────────────── 2-ETAP: ZAKAZ (procurement) ─────────────┐
 │ Zakaz avtomatik ochiladi:                                  │
 │  • order (manba buyurtma) bog'lanadi                       │
@@ -279,70 +281,70 @@ Filtr: `?product=1` · `?client=<uuid>` · `?sold_date=...`
 
 ### 6.4 Orders (Buyurtma / Bron)
 
+**Buyurtma — BITTA hujjat, ichida bir nechta mahsulot qatori (`items`).**
+Nechta mahsulot bo'lishidan qat'i nazar buyurtma bitta bo'ladi.
+
 | Method | URL | Tavsif |
 |--------|-----|--------|
-| GET | `/orders/` | Ro'yxat (filtr: `?status=`, `?product=`, `?client=`, `?contract_number=`) |
-| POST | `/orders/` | Yangi buyurtma — **shartnoma majburiy, avto-zakaz** |
-| POST | `/orders/bulk/` | Bir vaqtda bir nechta mahsulot |
-| GET | `/orders/{id}/` | Bitta (to'liq `history` bilan) |
+| GET | `/orders/` | Ro'yxat (filtr: `?status=`, `?items__product=`, `?client=`, `?contract_number=`) |
+| POST | `/orders/` | Yangi buyurtma (`items[]`) — **shartnoma majburiy, avto-zakaz** |
+| POST | `/orders/bulk/` | `items[]` bilan — natija ham **BITTA buyurtma** (moslik uchun) |
+| GET | `/orders/{id}/` | Bitta (qatorlar + to'liq `history` bilan) |
 | PATCH | `/orders/{id}/` | **Tahrirlash — `asos` majburiy, tarixga yoziladi** |
-| POST | `/orders/{id}/fulfill/` | Yetkazildi (tarixga yoziladi) |
+| POST | `/orders/{id}/fulfill/` | Yetkazildi (barcha qatorlar; tarixga yoziladi) |
 | POST | `/orders/{id}/cancel/` | Bekor qilish (tarixga yoziladi) |
-| POST | `/orders/{id}/create-zakaz/` | Yetishmagan miqdorga qo'lda zakaz (odatda avto) |
+| POST | `/orders/{id}/create-zakaz/` | Yetishmagan qatorlarga qo'lda zakaz (odatda avto) |
 
-**Order fieldlari:**
+**Order fieldlari (hujjat):**
 
 | Field | Tavsif |
 |-------|--------|
+| `items` | **Mahsulot qatorlari** — har birida `product`, `quantity`, `unit_price`, `total`, `reserved_qty`, `backorder_qty`, `has_active_zakaz` |
 | `contract_number` | **Shartnoma (dogovor) raqami — MAJBURIY** |
 | `contract_date` | Shartnoma sanasi (default: bugun, Tashkent) |
 | `prepaid_amount` | Oldindan to'langan summa (pul, qisman to'lov) |
 | `balance_due` | Qolgan to'lov = `total − prepaid_amount` |
-| `quantity`, `unit_price`, `total` | Miqdor, birlik narxi, jami |
-| `reserved_qty`, `backorder_qty` | Bron qilingan / yetishmagan |
-| `has_active_zakaz` | Shu mahsulotga faol zakaz bormi |
-| `status` | `pending` / `partial` / `reserved` / `fulfilled` / `cancelled` |
+| `total_quantity`, `total` | Barcha qatorlar bo'yicha jami miqdor / summa |
+| `reserved_qty`, `backorder_qty` | Jami bron qilingan / yetishmagan (qatorlardan) |
+| `status` | `pending` / `partial` / `reserved` / `fulfilled` / `cancelled` (qatorlardan hisoblanadi) |
 | `asos` | *(faqat yozish)* Tahrir sababi — PATCH da majburiy |
 | `history` | *(faqat o'qish)* To'liq audit tarixi |
 
-**Yangi buyurtma namunasi:**
+**Yangi buyurtma namunasi (bir nechta mahsulot — BITTA buyurtma):**
 ```json
 POST /orders/
 {
   "client": "<uuid>",
-  "product": 12,
-  "quantity": 10,
-  "unit_price": "3900000",
+  "contract_number": "SH-2026/045",
   "prepaid_amount": "10000000",
-  "contract_number": "SH-2026/045",
-  "due_date": "2026-08-01"
-}
-```
-→ Omborda 3 ta bo'lsa: `reserved_qty=3`, `backorder_qty=7`, status=`partial`
-→ **7 ta uchun avtomatik Zakaz** ochiladi (`SH-2026/045` shartnoma asosida)
-→ **Kassada avtomatik to'lov yozuvi**: jami 39 mln, to'langan 10 mln, status=`partial`.
-
-**Tahrirlash namunasi:**
-```json
-PATCH /orders/{id}/
-{
-  "quantity": 12,
-  "asos": "Mijoz miqdorni oshirdi (tel. orqali kelishildi)"
-}
-```
-
-**Bulk namunasi:**
-```json
-POST /orders/bulk/
-{
-  "client": "<uuid>",
   "due_date": "2026-08-01",
-  "contract_number": "SH-2026/045",
-  "prepaid_amount": "5000000",
   "items": [
-    { "product": 12, "quantity": 4, "unit_price": "3900000" },
-    { "product": 7,  "quantity": 2, "unit_price": "1200000" }
+    { "product": 12, "quantity": 10, "unit_price": "3900000" },
+    { "product": 7,  "quantity": 2,  "unit_price": "1200000" }
   ]
+}
+```
+→ Har qatorga alohida bron: 12-mahsulotdan omborda 3 ta bo'lsa —
+o'sha qator `reserved=3, backorder=7`, buyurtma status=`partial`
+→ **Yetishmagan qatorlar uchun avtomatik Zakaz** (har mahsulotga alohida,
+`SH-2026/045` shartnoma asosida)
+→ **Kassada BITTA to'lov yozuvi**: butun buyurtma jami, to'langan 10 mln.
+
+> Eski format (`product` + `quantity` + `unit_price` to'g'ridan-to'g'ri) ham
+> qabul qilinadi — bitta qatorli buyurtma bo'ladi.
+
+**Tahrirlash namunalari:**
+```json
+PATCH /orders/{id}/            // qator miqdorini o'zgartirish
+{
+  "asos": "Mijoz miqdorni oshirdi (tel. orqali kelishildi)",
+  "items": [ { "id": 5, "product": 12, "quantity": 12 } ]
+}
+
+PATCH /orders/{id}/            // yangi mahsulot qo'shish (id siz)
+{
+  "asos": "Mijoz yana bitta mahsulot qo'shdi",
+  "items": [ { "product": 9, "quantity": 3, "unit_price": "700000" } ]
 }
 ```
 
@@ -674,6 +676,7 @@ python manage.py seed --clear     # ixtiyoriy — test uchun
 | `cash_payment` | `order` (FK, nullable), `sale` endi nullable — buyurtma to'lovlari kassada |
 | `cash_payment_transaction` | **yangi jadval** — har bitta to'lov (bo'lib to'lash) tranzaksiyasi |
 | `orders_product_contract` | **yangi jadval** — mahsulot shartnomalari reestri (har holat avtomatik) |
+| `orders_order_item` | **yangi jadval** — buyurtma qatorlari (BITTA buyurtma = ko'p mahsulot); `orders_order` dan `product/quantity/unit_price/reserved_qty` shu yerga ko'chdi |
 
 ---
 

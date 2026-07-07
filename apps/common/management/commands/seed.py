@@ -467,10 +467,8 @@ class Command(BaseCommand):
 
     # ── Orders (Bron) ─────────────────────────────────────────────────────────
     def _seed_orders(self, count, products, clients, users):
-        from apps.orders.models import (Order, OrderHistory, ProductContract,
-                                        register_contract)
-        from apps.warehouse.models import Stock
-        from django.db.models import F
+        from apps.orders.models import (Order, OrderItem, OrderHistory,
+                                        ProductContract, register_contract)
 
         operators = [u for u in users if u.is_operator] or users
 
@@ -478,20 +476,38 @@ class Command(BaseCommand):
         edited = 0
         auto_zakaz = 0
         for _ in range(count):
-            product = random.choice(products)
-            qty     = random.randint(2, 15)
             client  = random.choice(clients) if clients else None
             creator = random.choice(operators)
 
-            # Narx — selling_price bo'lsa o'sha, aks holda tasodifiy
-            unit_price = product.selling_price or Decimal(str(random.randint(500_000, 20_000_000)))
+            # BITTA buyurtma — 1-3 mahsulot qatori
+            order_products = random.sample(products,
+                                           k=min(random.randint(1, 3), len(products)))
 
             # Shartnoma — har buyurtmada MAJBURIY
             contract_number = _contract_number()
             contract_date   = fake_en.date_between(start_date='-60d', end_date='today')
 
+            order = Order.objects.create(
+                client=client,
+                prepaid_amount=0,
+                contract_number=contract_number,
+                contract_date=contract_date,
+                due_date=fake_en.date_between(start_date='+3d', end_date='+90d'),
+                comment=fake.sentence() if random.random() < 0.3 else None,
+            )
+
+            total = Decimal('0')
+            for product in order_products:
+                qty        = random.randint(2, 15)
+                unit_price = (product.selling_price
+                              or Decimal(str(random.randint(500_000, 20_000_000))))
+                OrderItem.objects.create(
+                    order=order, product=product,
+                    quantity=qty, unit_price=unit_price,
+                )
+                total += unit_price * qty
+
             # Oldindan to'lov: ~40% yo'q, ~40% qisman, ~20% to'liq
-            total = unit_price * qty
             r = random.random()
             if r < 0.4:
                 prepaid = Decimal('0')
@@ -500,57 +516,28 @@ class Command(BaseCommand):
                            ).quantize(Decimal('1000'))
             else:
                 prepaid = total
+            if prepaid:
+                order.prepaid_amount = prepaid
+                order.save(update_fields=['prepaid_amount'])
 
-            order = Order.objects.create(
-                product=product,
-                client=client,
-                quantity=qty,
-                unit_price=unit_price,
-                prepaid_amount=prepaid,
-                contract_number=contract_number,
-                contract_date=contract_date,
-                due_date=fake_en.date_between(start_date='+3d', end_date='+90d'),
-                comment=fake.sentence() if random.random() < 0.3 else None,
-            )
+            # Bron ajratish (barcha qatorlar, FIFO)
+            order.reserve()
 
-            # Tarix: yaratildi + shartnomalar reestri
-            created_asos = f'Buyurtma yaratildi — shartnoma №{contract_number}.'
+            # Tarix: yaratildi + shartnomalar reestri (har qator mahsuloti)
+            names = ', '.join(p.name for p in order_products)
+            created_asos = (f'Buyurtma yaratildi ({names}) — '
+                            f'shartnoma №{contract_number}.')
             OrderHistory.objects.create(
                 order=order, changed_by=creator, action=OrderHistory.CREATED,
                 contract_number=contract_number,
                 asos=created_asos,
             )
-            register_contract(
-                product, ProductContract.ORDER_CREATED,
-                contract_number=contract_number, contract_date=contract_date,
-                asos=created_asos, order=order, user=creator,
-            )
-
-            # Mavjud qoldiqdan bron ajrat
-            still_needed = qty
-            stocks = (Stock.objects
-                      .filter(product=product, quantity__gt=0)
-                      .order_by('id'))
-            for st in stocks:
-                if still_needed <= 0:
-                    break
-                available = st.quantity - st.reserved_quantity
-                if available <= 0:
-                    continue
-                take = min(available, still_needed)
-                st.reserved_quantity = F('reserved_quantity') + take
-                st.save(update_fields=['reserved_quantity'])
-                still_needed -= take
-
-            reserved = qty - still_needed
-            order.reserved_qty = reserved
-            if reserved >= qty:
-                order.status = Order.RESERVED
-            elif reserved > 0:
-                order.status = Order.PARTIAL
-            else:
-                order.status = Order.PENDING
-            order.save(update_fields=['reserved_qty', 'status'])
+            for product in order_products:
+                register_contract(
+                    product, ProductContract.ORDER_CREATED,
+                    contract_number=contract_number, contract_date=contract_date,
+                    asos=created_asos, order=order, user=creator,
+                )
 
             # Pul (summa + oldindan to'lov) kassaga tushadi
             payment = order.sync_payment(user=creator)
@@ -566,11 +553,10 @@ class Command(BaseCommand):
                         extra, user=creator,
                         comment='Qo\'shimcha to\'lov (bo\'lib to\'lash)')
 
-            # 2-etap: yetishmagan miqdorga AVTO-ZAKAZ (~60% holatda)
+            # 2-etap: yetishmagan qatorlarga AVTO-ZAKAZ (~60% holatda)
             if order.backorder_qty > 0 and random.random() < 0.6:
-                z = order.create_backorder_zakaz(user=creator)
-                if z:
-                    auto_zakaz += 1
+                zakazlar = order.create_backorder_zakaz(user=creator)
+                auto_zakaz += len(zakazlar)
 
             # ~35% buyurtma tahrirlangan (asos + tarix + reestr bilan)
             if random.random() < 0.35:
@@ -589,11 +575,12 @@ class Command(BaseCommand):
                         {'due_date': {'old': str(old_due), 'new': str(new_due)}},
                         ensure_ascii=False),
                 )
-                register_contract(
-                    product, ProductContract.ORDER_EDITED,
-                    contract_number=contract_number, contract_date=contract_date,
-                    asos=edit_asos, order=order, user=editor,
-                )
+                for product in order_products:
+                    register_contract(
+                        product, ProductContract.ORDER_EDITED,
+                        contract_number=contract_number, contract_date=contract_date,
+                        asos=edit_asos, order=order, user=editor,
+                    )
                 edited += 1
 
             made += 1
@@ -610,12 +597,13 @@ class Command(BaseCommand):
                 contract_number=order.contract_number,
                 asos='Buyurtma yetkazildi.',
             )
-            register_contract(
-                order.product, ProductContract.ORDER_FULFILLED,
-                contract_number=order.contract_number,
-                contract_date=order.contract_date,
-                asos='Buyurtma yetkazildi.', order=order, user=actor,
-            )
+            for item in order.items.all():
+                register_contract(
+                    item.product, ProductContract.ORDER_FULFILLED,
+                    contract_number=order.contract_number,
+                    contract_date=order.contract_date,
+                    asos='Buyurtma yetkazildi.', order=order, user=actor,
+                )
         for order in random.sample(all_orders, min(2, len(all_orders))):
             if order.status != Order.FULFILLED:
                 order.status = Order.CANCELLED
@@ -627,12 +615,13 @@ class Command(BaseCommand):
                     contract_number=order.contract_number,
                     asos='Mijoz buyurtmani bekor qildi.',
                 )
-                register_contract(
-                    order.product, ProductContract.ORDER_CANCELLED,
-                    contract_number=order.contract_number,
-                    contract_date=order.contract_date,
-                    asos='Mijoz buyurtmani bekor qildi.', order=order, user=actor,
-                )
+                for item in order.items.all():
+                    register_contract(
+                        item.product, ProductContract.ORDER_CANCELLED,
+                        contract_number=order.contract_number,
+                        contract_date=order.contract_date,
+                        asos='Mijoz buyurtmani bekor qildi.', order=order, user=actor,
+                    )
 
         self.stdout.write(ok(f'{made} ta buyurtma/bron yaratildi '
                              f'({edited} ta tahrirlangan, {auto_zakaz} ta avto-zakaz)'))
