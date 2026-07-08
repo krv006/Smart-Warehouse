@@ -468,7 +468,8 @@ class Command(BaseCommand):
     # ── Orders (Bron) ─────────────────────────────────────────────────────────
     def _seed_orders(self, count, products, clients, users):
         from apps.orders.models import (Order, OrderItem, OrderHistory,
-                                        ProductContract, register_contract)
+                                        ProductContract, register_contract,
+                                        allocate_pending_orders)
 
         operators = [u for u in users if u.is_operator] or users
 
@@ -585,12 +586,14 @@ class Command(BaseCommand):
 
             made += 1
 
-        # Ba'zi orderlarni fulfilled va cancelled qilamiz (tarix + reestr bilan)
-        all_orders = list(Order.objects.all())
-        for order in random.sample(all_orders, min(3, len(all_orders))):
-            order.status = Order.FULFILLED
-            order.save(update_fields=['status'])
+        # Ba'zi buyurtmalar YETKAZILADI — REAL fulfill() bilan:
+        # bron ombordan ayiriladi, reserved=0 bo'ladi (ma'lumot izchil qoladi).
+        # Faqat TO'LIQ bronlangan buyurtmalar yetkaziladi (real hayotdagidek).
+        fulfilled_n = 0
+        candidates = [o for o in Order.objects.all() if o.status == Order.RESERVED]
+        for order in random.sample(candidates, min(3, len(candidates))):
             actor = random.choice(operators)
+            order.fulfill()
             OrderHistory.objects.create(
                 order=order, changed_by=actor,
                 action=OrderHistory.FULFILLED,
@@ -604,27 +607,44 @@ class Command(BaseCommand):
                     contract_date=order.contract_date,
                     asos='Buyurtma yetkazildi.', order=order, user=actor,
                 )
-        for order in random.sample(all_orders, min(2, len(all_orders))):
-            if order.status != Order.FULFILLED:
-                order.status = Order.CANCELLED
-                order.save(update_fields=['status'])
-                actor = random.choice(operators)
-                OrderHistory.objects.create(
-                    order=order, changed_by=actor,
-                    action=OrderHistory.CANCELLED,
+            # Topshirishda ko'pchilik to'liq hisob-kitob qiladi (~70%)
+            payment = order.payments.order_by('id').first()
+            if (payment and payment.remaining_amount > 0
+                    and random.random() < 0.7):
+                payment.add_payment(
+                    payment.remaining_amount, user=actor,
+                    comment='Topshirishda to\'liq hisob-kitob')
+            fulfilled_n += 1
+
+        # Ba'zilari BEKOR qilinadi — REAL release() bilan (bron bo'shatiladi,
+        # boshqa kutayotgan buyurtmalarga qayta taqsimlanadi).
+        cancelled_n = 0
+        candidates = list(Order.objects.exclude(
+            status__in=(Order.FULFILLED, Order.CANCELLED)))
+        for order in random.sample(candidates, min(2, len(candidates))):
+            actor = random.choice(operators)
+            order.release()
+            order.status = Order.CANCELLED
+            order.save(update_fields=['status'])
+            OrderHistory.objects.create(
+                order=order, changed_by=actor,
+                action=OrderHistory.CANCELLED,
+                contract_number=order.contract_number,
+                asos='Mijoz buyurtmani bekor qildi.',
+            )
+            for item in order.items.all():
+                allocate_pending_orders(item.product)
+                register_contract(
+                    item.product, ProductContract.ORDER_CANCELLED,
                     contract_number=order.contract_number,
-                    asos='Mijoz buyurtmani bekor qildi.',
+                    contract_date=order.contract_date,
+                    asos='Mijoz buyurtmani bekor qildi.', order=order, user=actor,
                 )
-                for item in order.items.all():
-                    register_contract(
-                        item.product, ProductContract.ORDER_CANCELLED,
-                        contract_number=order.contract_number,
-                        contract_date=order.contract_date,
-                        asos='Mijoz buyurtmani bekor qildi.', order=order, user=actor,
-                    )
+            cancelled_n += 1
 
         self.stdout.write(ok(f'{made} ta buyurtma/bron yaratildi '
-                             f'({edited} ta tahrirlangan, {auto_zakaz} ta avto-zakaz)'))
+                             f'({edited} tahrirlangan, {auto_zakaz} avto-zakaz, '
+                             f'{fulfilled_n} yetkazilgan, {cancelled_n} bekor)'))
 
     # ── Zakazlar (Etkazuvchidan buyurtma) ────────────────────────────────────────
     def _seed_zakazlar(self, count, products, users):
@@ -774,12 +794,9 @@ class Command(BaseCommand):
                     asos=asos, faktura=faktura, zakaz=zakaz, user=manager,
                 )
 
-                stock, _ = Stock.objects.get_or_create(
-                    product=product, warehouse_location=loc,
-                    defaults={'quantity': 0, 'reserved_quantity': 0},
-                )
-                stock.quantity = F('quantity') + received_qty
-                stock.save(update_fields=['quantity'])
+                # REAL qabul: ombor to'ldiriladi + kutayotgan buyurtma
+                # qatorlariga avtomatik bron + low-stock bildirishnoma yopiladi
+                zakaz.receive()
 
             made += 1
 
