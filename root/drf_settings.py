@@ -16,6 +16,16 @@ REST_FRAMEWORK = {
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 25,
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    # Brute-force / DoS himoyasi — so'rovlar sonini cheklash
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.AnonRateThrottle",
+        "rest_framework.throttling.UserRateThrottle",
+    ],
+    "DEFAULT_THROTTLE_RATES": {
+        "anon":  "60/min",     # autentifikatsiyasiz
+        "user":  "1000/min",   # tizimga kirgan foydalanuvchi
+        "login": "10/min",     # login urinishlari (parol brute-force ga qarshi)
+    },
 }
 
 from datetime import timedelta

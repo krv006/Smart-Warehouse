@@ -727,6 +727,33 @@ python manage.py seed --clear     # ixtiyoriy — test uchun
 
 ---
 
+## 9.1 Xavfsizlik (Security)
+
+**Kod darajasidagi himoyalar (barchasi kiritilgan):**
+
+| Himoya | Tafsilot |
+|--------|----------|
+| `DEBUG` default `False` | `.env` da aniq `DEBUG=True` bo'lmasa production rejimi (xatolar ochilmaydi) |
+| `SECRET_KEY` majburiy | `DEBUG=False` da env'da bo'lmasa server ishga tushmaydi (ishonchsiz kalit bilan JWT soxtalashtirilmaydi) |
+| `ALLOWED_HOSTS` env'dan | `.env` dagi vergul bilan ajratilgan domenlar; prod'da `*` emas |
+| CORS whitelist | `CORS_ALLOWED_ORIGINS` (env) — credentials bilan `*` ishlatilmaydi |
+| Prod cookie/HSTS | `DEBUG=False` da `SESSION/CSRF_COOKIE_SECURE`, HSTS, `X_FRAME_OPTIONS=DENY` |
+| Login throttle | `10/min` (parol brute-force); anon `60/min`, user `1000/min` |
+| Parol validatsiya | Register'da Django `AUTH_PASSWORD_VALIDATORS` ishlaydi |
+| Rol bo'yicha narx | Operator API va **Excel eksportda** ham `purchase_price`/`selling_price`/`profit` ko'rmaydi |
+| Superuser himoyasi | Manager superuser hisobini ko'rmaydi/o'zgartira/o'chira olmaydi; o'zini o'chira olmaydi |
+| Client shifrlash | `full_name`/`inn`/`phone` — Fernet; `CanViewClients` bilan cheklangan |
+
+**Deploy'da (server `.env`) MAJBURIY:**
+```env
+DEBUG=False
+SECRET_KEY=<kuchli-tasodifiy-kalit>
+ALLOWED_HOSTS=smart.thesofmebel.uz
+CORS_ALLOWED_ORIGINS=https://warehouse-eosin-six.vercel.app,https://smart.thesofmebel.uz
+```
+
+---
+
 ## 10. Swagger UI
 
 | URL | Tavsif |

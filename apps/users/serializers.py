@@ -1,4 +1,6 @@
 from django.contrib.auth import authenticate
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework.serializers import (ModelSerializer, Serializer,
                                         ValidationError, CharField)
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -43,6 +45,20 @@ class RegisterOperatorSerializer(ModelSerializer):
         fields = ('id', 'username', 'password', 'first_name', 'last_name',
                   'role', 'phone', 'telegram_id')
         read_only_fields = ('id',)
+
+    def validate_password(self, value):
+        # Django parol validatorlari (murakkablik, umumiy parollar va h.k.)
+        try:
+            validate_password(value)
+        except DjangoValidationError as e:
+            raise ValidationError(list(e.messages))
+        return value
+
+    def validate_role(self, value):
+        # Faqat ruxsat etilgan rollar — superuser/staff bu yerdan berilmaydi
+        if value not in dict(User.ROLES):
+            raise ValidationError('Noto\'g\'ri rol.')
+        return value
 
     def create(self, validated_data):
         password = validated_data.pop('password')

@@ -10,22 +10,59 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 load_dotenv(BASE_DIR / '.env')
 
-SECRET_KEY = os.environ.get(
-    'SECRET_KEY',
-    'django-insecure-r@x(9r$&er@-l1m_-#3r&%c-bs&0i*_yk7rtwvzzqno9&2qgg8',
-)
+DEBUG = os.environ.get('DEBUG', 'False') == 'True'
 
-DEBUG = os.environ.get('DEBUG', 'True') == 'True'
+# SECRET_KEY — production'da (.env) MAJBURIY. Ishonchsiz kalit bilan
+# istalgan kishi yaroqli JWT yasab, superuser nomidan kira olardi.
+SECRET_KEY = os.environ.get('SECRET_KEY')
+if not SECRET_KEY:
+    if DEBUG:
+        # Faqat lokal dev uchun — production'da hech qachon ishlatilmaydi
+        SECRET_KEY = 'django-insecure-dev-only-CHANGE-ME-in-env'
+    else:
+        raise RuntimeError(
+            'SECRET_KEY environment o\'zgaruvchisi kiritilishi shart '
+            '(DEBUG=False). .env fayliga kuchli tasodifiy kalit qo\'ying.'
+        )
 
-ALLOWED_HOSTS = ['*']
+# ALLOWED_HOSTS — .env dan vergul bilan ajratilgan ro'yxat
+ALLOWED_HOSTS = [
+    h.strip() for h in os.environ.get('ALLOWED_HOSTS', '').split(',') if h.strip()
+]
+if not ALLOWED_HOSTS:
+    ALLOWED_HOSTS = ['*'] if DEBUG else ['localhost', '127.0.0.1']
 
-CORS_ALLOW_ALL_ORIGINS = True
+# CORS — .env dagi CORS_ALLOWED_ORIGINS (vergul bilan) whitelist qilinadi.
+# Credentials bilan '*' xavfli, shuning uchun aniq domenlar talab qilinadi.
+_cors_origins = [
+    o.strip() for o in os.environ.get('CORS_ALLOWED_ORIGINS', '').split(',') if o.strip()
+]
+if _cors_origins:
+    CORS_ALLOWED_ORIGINS   = _cors_origins
+    CORS_ALLOW_ALL_ORIGINS = False
+else:
+    # Whitelist bo'sh bo'lsa: dev'da hammaga ochiq, prod'da hech kimga
+    CORS_ALLOW_ALL_ORIGINS = DEBUG
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_HEADERS = [
     'accept', 'authorization', 'content-type',
     'origin', 'x-csrftoken', 'x-requested-with',
 ]
 CORS_ALLOW_METHODS = ['DELETE', 'GET', 'OPTIONS', 'PATCH', 'POST', 'PUT']
+
+# CSRF — trusted originlar (session-auth admin panel uchun)
+CSRF_TRUSTED_ORIGINS = _cors_origins or []
+
+# Production xavfsizlik sozlamalari (DEBUG=False da yoqiladi)
+if not DEBUG:
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_BROWSER_XSS_FILTER   = True
+    SESSION_COOKIE_SECURE       = True
+    CSRF_COOKIE_SECURE          = True
+    SECURE_HSTS_SECONDS         = 31536000
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_PROXY_SSL_HEADER     = ('HTTP_X_FORWARDED_PROTO', 'https')
+    X_FRAME_OPTIONS             = 'DENY'
 
 DJANGO_APPS = [
     'jazzmin',

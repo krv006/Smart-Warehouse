@@ -16,7 +16,8 @@ from apps.warehouse.models import Stock, Product
 
 
 class SalesExportView(APIView):
-    permission_classes = (IsAuthenticated,)
+    # Sotuv narxi/summasi bor — operator ko'rmasligi kerak
+    permission_classes = (IsAccountantOrManagement,)
 
     @extend_schema(
         summary="Sotuvlar — Excel yuklash",
@@ -38,7 +39,8 @@ class SalesExportView(APIView):
 
 
 class StockExportView(APIView):
-    permission_classes = (IsAuthenticated,)
+    # Kelish narxi (purchase_price) bor — operator ko'rmasligi kerak
+    permission_classes = (IsAccountantOrManagement,)
 
     @extend_schema(summary="Ombor holati — Excel yuklash", tags=["Reports / Excel"])
     def get(self, request):

@@ -5,7 +5,8 @@ from rest_framework.viewsets import ModelViewSet
 
 from apps.common.permissions import IsOperatorOrReadOnly
 from apps.sales.models import Sale
-from apps.sales.serializers import SaleSerializer, SaleBulkCreateSerializer
+from apps.sales.serializers import (SaleSerializer, SaleOperatorSerializer,
+                                    SaleBulkCreateSerializer)
 
 
 @extend_schema_view(
@@ -31,6 +32,15 @@ class SaleViewSet(ModelViewSet):
     filterset_fields   = ('product', 'sold_date', 'client')
     search_fields      = ('product__name', 'sold_to', 'destination', 'client__company_name')
     ordering_fields    = ('sold_date', 'sold_price', 'quantity')
+
+    def get_serializer_class(self):
+        # Operator (management/accountant emas) sotuv narxi/foydasini ko'rmaydi
+        user = self.request.user
+        if user.is_authenticated and (
+                getattr(user, 'is_management', False)
+                or getattr(user, 'is_accountant', False)):
+            return SaleSerializer
+        return SaleOperatorSerializer
 
     @extend_schema(
         summary="Bir vaqtda bir nechta mahsulot savdosi (bulk)",

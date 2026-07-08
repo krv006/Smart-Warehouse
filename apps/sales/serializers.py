@@ -73,6 +73,20 @@ class SaleSerializer(ModelSerializer):
         return sale
 
 
+class SaleOperatorSerializer(SaleSerializer):
+    """
+    Operator uchun — sotuv narxi, jami summa va foyda YASHIRIN.
+    Biznes qoidasi: operator sotuv summalarini/narxlarni ko'rmaydi.
+    sold_price yozishда kerak, shuning uchun write_only qilinadi.
+    """
+    sold_price = DecimalField(max_digits=14, decimal_places=2, write_only=True)
+
+    class Meta(SaleSerializer.Meta):
+        fields = ('id', 'product', 'product_name', 'client', 'client_name',
+                  'quantity', 'sold_price',
+                  'sold_to', 'destination', 'sold_date', 'comment', 'created_at')
+
+
 class SaleItemSerializer(Serializer):
     """Bulk savdo ichidagi bitta mahsulot qatori."""
     product    = PrimaryKeyRelatedField(queryset=Product.objects.all())
