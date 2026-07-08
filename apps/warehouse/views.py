@@ -1,3 +1,5 @@
+from django.db import transaction
+from django.db.models import F
 from django.utils.dateparse import parse_date
 
 from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter
@@ -56,6 +58,117 @@ class ProductViewSet(ModelViewSet):
         if user.is_authenticated and getattr(user, 'is_management', False):
             return ProductSerializer
         return ProductOperatorSerializer
+
+    @extend_schema(
+        summary="Kirim — mahsulot keldi (omborni to'ldirish)",
+        description=(
+            "Omborda BOR mahsulotdan yana kelganda ishlatiladi (stock sonini "
+            "qo'lda tahrirlash o'rniga to'g'ri hujjatli yo'l).\n\n"
+            "```json\n"
+            "{\n"
+            '  "quantity": 20,\n'
+            '  "warehouse_location": "B-2-3",\n'
+            '  "asos": "Kirim orderi №77",\n'
+            '  "contract_number": "SH-2026/051",\n'
+            '  "faktura": "F-2026/900"\n'
+            "}\n"
+            "```\n\n"
+            "- `quantity` va `asos` — MAJBURIY (asossiz kirim yo'q)\n"
+            "- `warehouse_location` bo'sh bo'lsa — `Asosiy ombor`\n"
+            "- Qoldiq oshadi va **kutayotgan buyurtmalarga avtomatik bron** "
+            "ajratiladi (har biri tarixga shartnoma asosida yoziladi)\n"
+            "- Kirim mahsulot **shartnomalar reestriga** (`stock_in`) tushadi\n"
+            "- Low-stock bildirishnoma avtomatik yopiladi"
+        ),
+        tags=["Warehouse"],
+    )
+    @action(detail=True, methods=['post'], url_path='add-stock')
+    def add_stock(self, request, pk=None):
+        from apps.orders.models import (ProductContract, register_contract,
+                                        allocate_pending_orders, OrderHistory)
+        from apps.notifications.models import Notification
+        from apps.orders.models import OrderItem, Order
+
+        product = self.get_object()
+
+        # Majburiy maydonlar
+        try:
+            qty = int(request.data.get('quantity') or 0)
+        except (TypeError, ValueError):
+            qty = 0
+        if qty <= 0:
+            return Response(
+                {'quantity': 'Kirim miqdori musbat son bo\'lishi kerak.'},
+                status=400)
+        asos = request.data.get('asos')
+        if not asos:
+            return Response(
+                {'asos': 'Kirim uchun asos kiritilishi shart '
+                         '(masalan: "Kirim orderi №77").'},
+                status=400)
+
+        loc             = request.data.get('warehouse_location') or 'Asosiy ombor'
+        contract_number = request.data.get('contract_number')
+        faktura         = request.data.get('faktura')
+
+        with transaction.atomic():
+            stock, _ = Stock.objects.select_for_update().get_or_create(
+                product=product, warehouse_location=loc,
+                defaults={'quantity': 0, 'reserved_quantity': 0},
+            )
+            stock.quantity = F('quantity') + qty
+            stock.save(update_fields=['quantity'])
+            stock.refresh_from_db()
+
+            # Kutayotgan buyurtmalarga avtomatik bron + tarixga iz
+            pending_items = OrderItem.objects.filter(
+                product=product,
+                order__status__in=(Order.PENDING, Order.PARTIAL))
+            before = {i.pk: i.reserved_qty for i in pending_items}
+            allocate_pending_orders(product)
+            gained_by_order = {}
+            for i in (OrderItem.objects.filter(pk__in=before)
+                      .select_related('order')):
+                gained = i.reserved_qty - before[i.pk]
+                if gained > 0:
+                    gained_by_order.setdefault(i.order, 0)
+                    gained_by_order[i.order] += gained
+            for order, gained in gained_by_order.items():
+                OrderHistory.objects.create(
+                    order=order, changed_by=request.user,
+                    action=OrderHistory.ALLOCATED,
+                    contract_number=contract_number,
+                    asos=(f'Kirim ({asos}'
+                          + (f', shartnoma №{contract_number}' if contract_number else '')
+                          + (f', faktura {faktura}' if faktura else '')
+                          + f') — {gained} dona avtomatik bron ajratildi.'),
+                )
+
+            # Shartnomalar reestriga kirim yozuvi
+            register_contract(
+                product, ProductContract.STOCK_IN,
+                contract_number=contract_number,
+                faktura=faktura,
+                asos=asos,
+                user=request.user,
+            )
+
+        # Low-stock bildirishnomani yop (agar qoldiq etarli bo'lsa)
+        if product.available_quantity > product.min_quantity:
+            Notification.resolve_low_stock_notifications(product)
+
+        return Response({
+            'detail':             f'{qty} dona kirim qilindi ({loc}).',
+            'stock':              {'id': stock.pk,
+                                   'warehouse_location': stock.warehouse_location,
+                                   'quantity': stock.quantity,
+                                   'reserved_quantity': stock.reserved_quantity},
+            'quantity_in_stock':  product.quantity_in_stock,
+            'reserved_quantity':  product.reserved_quantity,
+            'available_quantity': product.available_quantity,
+            'allocated_orders':   [{'order': o.pk, 'allocated': g}
+                                   for o, g in gained_by_order.items()],
+        }, status=201)
 
     @extend_schema(
         summary="Mahsulotning shartnomalari (reestr)",

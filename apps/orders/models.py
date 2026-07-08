@@ -521,6 +521,7 @@ class ProductContract(TimeStampedModel):
     ZAKAZ_ORDERED   = 'zakaz_ordered'
     ZAKAZ_RECEIVED  = 'zakaz_received'
     ZAKAZ_CANCELLED = 'zakaz_cancelled'
+    STOCK_IN        = 'stock_in'
 
     SOURCE_CHOICES = (
         (ORDER_CREATED,   'Buyurtma yaratildi'),
@@ -532,6 +533,7 @@ class ProductContract(TimeStampedModel):
         (ZAKAZ_ORDERED,   'Zakaz yuborildi'),
         (ZAKAZ_RECEIVED,  'Zakaz qabul qilindi'),
         (ZAKAZ_CANCELLED, 'Zakaz bekor qilindi'),
+        (STOCK_IN,        'Kirim (mahsulot keldi)'),
     )
 
     product         = ForeignKey('warehouse.Product', on_delete=CASCADE,

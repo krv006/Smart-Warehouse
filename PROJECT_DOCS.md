@@ -250,6 +250,33 @@ Filtr: `?category=3` · `?purchase_price__isnull=true` · `?selling_price__isnul
 
 Mahsulot qo'shishda `quantity` + `warehouse_location` yuborilsa — Stock avtomatik yaratiladi.
 
+#### Kirim (mahsulot keldi)
+
+| Method | URL | Tavsif |
+|--------|-----|--------|
+| POST | `/warehouse/products/{id}/add-stock/` | **Omborda bor mahsulotdan yana kelganda** — hujjatli kirim |
+
+```json
+POST /warehouse/products/{id}/add-stock/
+{
+  "quantity": 20,
+  "warehouse_location": "B-2-3",
+  "asos": "Kirim orderi №77",
+  "contract_number": "SH-2026/051",
+  "faktura": "F-2026/900"
+}
+```
+
+- `quantity` + `asos` MAJBURIY (asossiz kirim yo'q); shartnoma/faktura ixtiyoriy
+- Qoldiq oshadi va **kutayotgan buyurtmalarga avtomatik bron** ajratiladi —
+  har biri buyurtma tarixiga (`allocated`) shartnoma asosida yoziladi
+- Reestrga `stock_in` yozuvi tushadi; javobda qaysi buyurtmaga qancha
+  taqsimlangani (`allocated_orders`) qaytadi
+- Low-stock bildirishnoma avtomatik yopiladi
+
+> Stock sonini qo'lda tahrirlash o'rniga har doim shu endpoint ishlatilsin —
+> hujjat (asos) va avto-taqsimot faqat shu yo'lda ishlaydi.
+
 #### Stock
 | Method | URL | Tavsif |
 |--------|-----|--------|
@@ -514,6 +541,9 @@ POST /cash/payments/{id}/pay/
 - `paid_amount` PATCH orqali o'zgartirilsa ham farq tranzaksiya bo'lib yoziladi —
   ledger doim `sum(transactions) == paid_amount`
 - API javobida `transactions` ro'yxati to'liq qaytadi
+- **Avto-sinxron (signal):** buyurtma qatori QANDAY YO'L bilan o'zgarmasin/
+  o'chirilmasin (API, admin panel, boshqa kod) — kassadagi jami summa va
+  status darhol qayta hisoblanadi; kassa hech qachon eski summada qolmaydi
 
 ---
 
