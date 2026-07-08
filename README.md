@@ -221,7 +221,7 @@ buyurtma bitta hujjat.
 | GET | `/orders/` | Ro'yxat |
 | POST | `/orders/` | Buyurtma (`items[]`) — **shartnoma raqami MAJBURIY** |
 | POST | `/orders/bulk/` | `items[]` — natija ham BITTA buyurtma (moslik uchun) |
-| PATCH | `/orders/{id}/` | Tahrirlash: qator miqdori (`items[{id,...}]`) / yangi qator / sarlavha (**asos majburiy**) |
+| PATCH | `/orders/{id}/` | Tahrirlash: qator miqdori (`items[{id,...}]`) / yangi qator / **qator o'chirish** (`{id, remove:true}`) / sarlavha (**asos majburiy**) |
 | POST | `/orders/{id}/fulfill/` | Yetkazildi (barcha qatorlar) |
 | POST | `/orders/{id}/cancel/` | Bekor qilish |
 | POST | `/orders/{id}/create-zakaz/` | Yetishmagan qatorlarga qo'lda zakaz |

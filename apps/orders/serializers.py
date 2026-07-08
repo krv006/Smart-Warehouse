@@ -5,14 +5,16 @@ from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.serializers import (ModelSerializer, Serializer,
                                         SerializerMethodField, ReadOnlyField,
-                                        ValidationError, CharField, DateField,
+                                        ValidationError, BooleanField,
+                                        CharField, DateField,
                                         DecimalField, IntegerField,
                                         PrimaryKeyRelatedField)
 
 from apps.clients.models import Client
 from apps.orders.models import (Order, OrderItem, OrderHistory,
                                 Zakaz, ZakazHistory,
-                                ProductContract, register_contract)
+                                ProductContract, register_contract,
+                                allocate_pending_orders)
 from apps.warehouse.models import Product
 
 # Buyurtma sarlavha tahririda kuzatiladigan maydonlar (tarixga yoziladi)
@@ -62,6 +64,11 @@ class OrderItemSerializer(ModelSerializer):
     """Buyurtma ichidagi bitta mahsulot qatori."""
     id               = IntegerField(required=False,
                                     help_text='Tahrirda mavjud qatorni ko\'rsatish uchun')
+    remove           = BooleanField(write_only=True, required=False, default=False,
+                                    help_text='True — qatorni buyurtmadan olib tashlash (id bilan)')
+    product          = PrimaryKeyRelatedField(queryset=Product.objects.all(),
+                                              required=False)
+    quantity         = IntegerField(required=False, min_value=1)
     product_name     = SerializerMethodField()
     total            = ReadOnlyField()
     backorder_qty    = ReadOnlyField()
@@ -69,7 +76,7 @@ class OrderItemSerializer(ModelSerializer):
 
     class Meta:
         model  = OrderItem
-        fields = ('id', 'product', 'product_name',
+        fields = ('id', 'remove', 'product', 'product_name',
                   'quantity', 'unit_price', 'total',
                   'reserved_qty', 'backorder_qty', 'has_active_zakaz',
                   'comment')
@@ -77,6 +84,17 @@ class OrderItemSerializer(ModelSerializer):
 
     def get_product_name(self, obj):
         return str(obj.product)
+
+    def validate(self, attrs):
+        # O'chirishda id shart; boshqa holatlarda product+quantity kerak
+        # (mavjud qator tahririda id bo'ladi — u yerda ham shart emas)
+        if attrs.get('remove') and not attrs.get('id'):
+            raise ValidationError('Qatorni o\'chirish uchun "id" kiritilishi shart.')
+        if (not attrs.get('remove') and not attrs.get('id')
+                and (not attrs.get('product') or not attrs.get('quantity'))):
+            raise ValidationError(
+                'Yangi qator uchun "product" va "quantity" kiritilishi shart.')
+        return attrs
 
 
 class OrderSerializer(ModelSerializer):
@@ -186,6 +204,7 @@ class OrderSerializer(ModelSerializer):
         order = Order.objects.create(**validated_data)
         for item in items_data:
             item.pop('id', None)
+            item.pop('remove', None)
             OrderItem.objects.create(order=order, **item)
 
         order.reserve()
@@ -229,7 +248,8 @@ class OrderSerializer(ModelSerializer):
 
         order = super().update(instance, validated_data)
 
-        # Qatorlarni yangilash: id bor → mavjud qator, id yo'q → yangi qator
+        # Qatorlarni yangilash: id bor → mavjud qator, id yo'q → yangi qator,
+        # remove=true → qatorni olib tashlash (mijoz fikri o'zgarishi mumkin)
         item_changes = []
 
         # Legacy: bitta qatorli buyurtmada quantity/unit_price to'g'ridan-to'g'ri
@@ -249,7 +269,30 @@ class OrderSerializer(ModelSerializer):
                      'quantity': {'old': old_qty, 'new': item.quantity}})
         if items_data:
             for d in items_data:
-                iid = d.pop('id', None)
+                iid    = d.pop('id', None)
+                remove = d.pop('remove', False)
+
+                if remove:
+                    try:
+                        item = order.items.get(pk=iid)
+                    except OrderItem.DoesNotExist:
+                        raise ValidationError(
+                            {'items': f'Qator #{iid} bu buyurtmada topilmadi.'})
+                    if order.items.count() <= 1:
+                        raise ValidationError(
+                            {'items': 'Oxirgi qatorni o\'chirib bo\'lmaydi — '
+                                      'butun buyurtmani bekor qilish uchun '
+                                      '/cancel/ dan foydalaning.'})
+                    # Bron bo'shatiladi va boshqa kutayotganlarga taqsimlanadi
+                    product = item.product
+                    item.release()
+                    item_changes.append(
+                        {'item': iid, 'product': str(product),
+                         'removed': item.quantity})
+                    item.delete()
+                    allocate_pending_orders(product)
+                    continue
+
                 if iid:
                     try:
                         item = order.items.get(pk=iid)
@@ -282,7 +325,11 @@ class OrderSerializer(ModelSerializer):
         if (order.total is not None
                 and (order.prepaid_amount or 0) > order.total):
             raise ValidationError({
-                'prepaid_amount': 'Oldindan to\'lov jami summadan oshib ketdi.'})
+                'prepaid_amount': (
+                    f'Oldindan to\'lov ({order.prepaid_amount}) yangi jami '
+                    f'summadan ({order.total}) oshib ketdi — shu so\'rovda '
+                    f'`prepaid_amount` ni ham kamaytiring (qaytarilgan pul '
+                    f'kassada korrektsiya bo\'lib yoziladi).')})
 
         # Kassa yozuvini yangilash (summa/oldindan to'lov o'zgargan bo'lishi
         # mumkin — farq alohida tranzaksiya bo'lib yoziladi)
@@ -558,9 +605,10 @@ class ZakazSerializer(ModelSerializer):
                 changes=json.dumps(changes, ensure_ascii=False),
             )
 
-        # Birinchi marta 'received' ga o'tganda ombor to'ldir
+        # Birinchi marta 'received' ga o'tganda ombor to'ldir + buyurtmalar
+        # qismini yangilash (shartnoma asosida, tarix bilan)
         if zakaz.status == Zakaz.RECEIVED and not was_received:
-            zakaz.receive()
+            zakaz.receive(user=user)
 
         return zakaz
 

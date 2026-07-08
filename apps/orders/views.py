@@ -61,10 +61,26 @@ from apps.orders.serializers import (OrderSerializer, ZakazSerializer,
     partial_update=extend_schema(
         summary="Buyurtma tahrirlash (bir necha bor mumkin, asos majburiy)",
         description=(
-            "Buyurtmani bir necha bor tahrirlash mumkin. Har tahrirda **`asos`** "
-            "(tahrir sababi) MAJBURIY — tahrir shartnoma raqami, asos va aniq "
-            "sana/vaqt bilan tarixga (`history`) yoziladi.\n\n"
-            "Miqdor o'zgartirilsa bron avtomatik qayta moslanadi. "
+            "Buyurtmani bir necha bor tahrirlash mumkin (mijoz o'zgaruvchan). "
+            "Har tahrirda **`asos`** (tahrir sababi) MAJBURIY — tahrir shartnoma "
+            "raqami, asos va aniq sana/vaqt bilan tarixga (`history`) yoziladi.\n\n"
+            "**Qatorlar bilan ishlash (`items`):**\n"
+            "```json\n"
+            "{\n"
+            '  "asos": "Mijoz fikri o\'zgardi",\n'
+            '  "items": [\n'
+            '    { "id": 5, "quantity": 12 },          // miqdorni o\'zgartirish\n'
+            '    { "id": 7, "remove": true },           // qatorni OLIB TASHLASH\n'
+            '    { "product": 9, "quantity": 3, "unit_price": "700000" }  // yangi qator\n'
+            "  ]\n"
+            "}\n"
+            "```\n\n"
+            "- O'chirilgan qatorning broni bo'shatiladi va boshqa kutayotgan "
+            "buyurtmalarga avtomatik taqsimlanadi\n"
+            "- Oxirgi qatorni o'chirib bo'lmaydi — butun buyurtma uchun `/cancel/`\n"
+            "- Kassa yozuvi (jami/to'langan) avtomatik yangilanadi; oldindan "
+            "to'lov yangi jamidan oshsa — `prepaid_amount` ni ham kamaytiring\n"
+            "- Miqdor o'zgartirilsa bron avtomatik qayta moslanadi. "
             "Tahrir Zakaz qismiga ta'sir qilmaydi."
         ),
         tags=["Orders / Bron"],

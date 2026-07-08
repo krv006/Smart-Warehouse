@@ -443,11 +443,13 @@ class Zakaz(TimeStampedModel):
                 f'[{self.get_status_display()}]')
 
     @transaction.atomic
-    def receive(self):
+    def receive(self, user=None):
         """
         Zakaz qabul qilindi:
         1. received_qty (yoki quantity) ni omborga qo'shadi.
-        2. Pending/partial orderlarga avtomatik bron ajratadi.
+        2. Pending/partial orderlarga avtomatik bron ajratadi va
+           HAR BIR yangilangan buyurtma tarixiga iz qoldiradi
+           (qaysi zakaz, qaysi shartnoma/faktura asosida).
         3. Low-stock bildirishnomalarini tekshiradi.
         """
         from apps.warehouse.models import Stock
@@ -464,8 +466,33 @@ class Zakaz(TimeStampedModel):
         stock.quantity = F('quantity') + qty
         stock.save(update_fields=['quantity'])
 
+        # Taqsimotdan OLDINGI bron holati (keyin farqni aniqlash uchun)
+        pending_items = OrderItem.objects.filter(
+            product=self.product,
+            order__status__in=(Order.PENDING, Order.PARTIAL))
+        before = {i.pk: i.reserved_qty for i in pending_items}
+
         # Pending orderlarga bron ajrat
         allocate_pending_orders(self.product)
+
+        # Buyurtmalar qismini YANGILAB, tarixга iz qoldiramiz
+        gained_by_order = {}
+        for i in (OrderItem.objects.filter(pk__in=before)
+                  .select_related('order')):
+            gained = i.reserved_qty - before[i.pk]
+            if gained > 0:
+                gained_by_order.setdefault(i.order, 0)
+                gained_by_order[i.order] += gained
+        for order, gained in gained_by_order.items():
+            # ASOS = SHARTNOMA: bron ajratish zakaz shartnomasi asosida bo'ladi
+            OrderHistory.objects.create(
+                order=order, changed_by=user,
+                action=OrderHistory.ALLOCATED,
+                contract_number=self.contract_number,
+                asos=(f'Shartnoma №{self.contract_number or "—"} asosida '
+                      f'(Zakaz #{self.pk}, faktura {self.faktura or "—"}) — '
+                      f'{gained} dona avtomatik bron ajratildi.'),
+            )
 
         # Low-stock bildirishnomani yop (agar qoldiq etarli bo'lsa)
         self.product.refresh_from_db()
@@ -568,12 +595,14 @@ class OrderHistory(models.Model):
     """
     CREATED   = 'created'
     EDITED    = 'edited'
+    ALLOCATED = 'allocated'
     FULFILLED = 'fulfilled'
     CANCELLED = 'cancelled'
 
     ACTION_CHOICES = (
         (CREATED,   'Yaratildi'),
         (EDITED,    'Tahrirlandi'),
+        (ALLOCATED, 'Bron ajratildi (zakazdan)'),
         (FULFILLED, 'Yetkazildi'),
         (CANCELLED, 'Bekor qilindi'),
     )

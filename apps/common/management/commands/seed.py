@@ -795,8 +795,9 @@ class Command(BaseCommand):
                 )
 
                 # REAL qabul: ombor to'ldiriladi + kutayotgan buyurtma
-                # qatorlariga avtomatik bron + low-stock bildirishnoma yopiladi
-                zakaz.receive()
+                # qatorlariga avtomatik bron (shartnoma asosida, tarix bilan)
+                # + low-stock bildirishnoma yopiladi
+                zakaz.receive(user=manager)
 
             made += 1
 

@@ -333,12 +333,12 @@ o'sha qator `reserved=3, backorder=7`, buyurtma status=`partial`
 > Eski format (`product` + `quantity` + `unit_price` to'g'ridan-to'g'ri) ham
 > qabul qilinadi — bitta qatorli buyurtma bo'ladi.
 
-**Tahrirlash namunalari:**
+**Tahrirlash namunalari (mijoz o'zgaruvchan — hammasi mumkin):**
 ```json
 PATCH /orders/{id}/            // qator miqdorini o'zgartirish
 {
   "asos": "Mijoz miqdorni oshirdi (tel. orqali kelishildi)",
-  "items": [ { "id": 5, "product": 12, "quantity": 12 } ]
+  "items": [ { "id": 5, "quantity": 12 } ]
 }
 
 PATCH /orders/{id}/            // yangi mahsulot qo'shish (id siz)
@@ -346,7 +346,23 @@ PATCH /orders/{id}/            // yangi mahsulot qo'shish (id siz)
   "asos": "Mijoz yana bitta mahsulot qo'shdi",
   "items": [ { "product": 9, "quantity": 3, "unit_price": "700000" } ]
 }
+
+PATCH /orders/{id}/            // mahsulotni OLIB TASHLASH
+{
+  "asos": "Mijoz bu mahsulotdan voz kechdi",
+  "items": [ { "id": 7, "remove": true } ]
+}
 ```
+
+**Qator o'chirish qoidalari:**
+- O'chirilgan qatorning broni bo'shatiladi va boshqa kutayotgan
+  buyurtmalarga avtomatik taqsimlanadi
+- **Oxirgi qatorni o'chirib bo'lmaydi** — butun buyurtmadan voz kechish
+  uchun `POST /orders/{id}/cancel/`
+- Kassa jami avtomatik yangilanadi; agar oldindan to'lov yangi jamidan
+  oshib qolsa — o'sha so'rovda `prepaid_amount` ni ham kamaytiring
+  (farq kassada manfiy korrektsiya tranzaksiyasi bo'lib yoziladi)
+- O'chirish ham tarixga (`removed`) va reestrga yoziladi — asos majburiy
 
 ---
 
@@ -581,6 +597,7 @@ Har bir buyurtma amali avtomatik yoziladi:
 |--------|--------|
 | `created` | Buyurtma yaratildi (shartnoma raqami bilan) |
 | `edited` | Har bir tahrir (**asos majburiy**, o'zgargan maydonlar JSON) |
+| `allocated` | **Zakaz qabul qilinganda buyurtmaga avtomatik bron ajratildi** — ASOS = zakaz SHARTNOMASI (raqam + faktura + zakaz raqami) |
 | `fulfilled` | Yetkazildi |
 | `cancelled` | Bekor qilindi |
 
