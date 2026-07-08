@@ -21,7 +21,7 @@ class PaymentAdmin(admin.ModelAdmin):
                        'commission', 'paid_amount_fmt', 'currency',
                        'status_badge', 'due_date')
     list_filter     = ('status', 'currency', 'due_date')
-    search_fields   = ('sale__product__name', 'order__product__name',
+    search_fields   = ('sale__product__name', 'order__items__product__name',
                        'order__contract_number', 'client__company_name', 'comment')
     readonly_fields = ('total_amount', 'commission', 'status', 'created_at', 'updated_at')
     date_hierarchy  = 'created_at'

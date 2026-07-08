@@ -69,9 +69,16 @@ class PaymentSerializer(ModelSerializer):
             return None
         return {
             'id':              o.pk,
-            'product':         str(o.product),
-            'quantity':        o.quantity,
-            'unit_price':      str(o.unit_price) if o.unit_price is not None else None,
+            'items': [
+                {
+                    'product':    str(i.product),
+                    'quantity':   i.quantity,
+                    'unit_price': str(i.unit_price) if i.unit_price is not None else None,
+                    'total':      str(i.total) if i.total is not None else None,
+                }
+                for i in o.items.all()
+            ],
+            'total_quantity':  o.total_quantity,
             'total':           str(o.total) if o.total is not None else None,
             'prepaid_amount':  str(o.prepaid_amount),
             'balance_due':     str(o.balance_due) if o.balance_due is not None else None,

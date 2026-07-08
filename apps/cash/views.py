@@ -27,12 +27,13 @@ from apps.common.permissions import IsAccountantOrManagement, IsAccountantOrRead
 )
 class PaymentViewSet(ModelViewSet):
     queryset = Payment.objects.select_related(
-        'sale__product', 'order__product', 'client'
-    ).prefetch_related('transactions__received_by')
+        'sale__product', 'order', 'client'
+    ).prefetch_related('transactions__received_by',
+                       'order__items__product')
     permission_classes  = (IsAccountantOrReadOnly,)
     filterset_fields    = ('status', 'client', 'currency', 'due_date',
                            'order', 'sale')
-    search_fields       = ('sale__product__name', 'order__product__name',
+    search_fields       = ('sale__product__name', 'order__items__product__name',
                            'order__contract_number', 'client__company_name',
                            'comment')
     ordering_fields     = ('due_date', 'created_at', 'total_amount')
