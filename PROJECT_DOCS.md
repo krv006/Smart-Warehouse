@@ -1,6 +1,9 @@
 # Smart Warehouse — To'liq loyiha hujjati (0 → 100)
 
 Django REST Framework asosida qurilgan ombor / savdo / kassa boshqaruv API'si.
+
+> 📱 **Frontchi uchun:** [FRONTEND_API.md](FRONTEND_API.md) — so'rov/javob
+> namunalari, majburiy maydonlar va checklist bilan qisqa qo'llanma.
 Uch rol (**Operator**, **Accountant**, **Management**), bron/zakaz tizimi,
 **shartnoma (dogovor) + asos + faktura audit zanjiri**, in-app bildirishnomalar
 va Excel hisobotlar bilan.

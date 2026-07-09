@@ -4,9 +4,11 @@ Django REST Framework asosida qurilgan to'liq ombor / savdo / kassa boshqaruv AP
 Uch rol (**Operator**, **Accountant**, **Management**), bron/zakaz tizimi, in-app
 bildirishnomalar va Excel hisobotlar bilan.
 
-> 📄 **To'liq hujjat (0 → 100):** [PROJECT_DOCS.md](PROJECT_DOCS.md) —
-> barcha endpointlar, Buyurtma → Zakaz oqimi (shartnoma, asos, faktura,
-> oldindan to'lov), audit/tarix tizimi va biznes qoidalar.
+> 📄 Hujjatlar:
+> - [FRONTEND_API.md](FRONTEND_API.md) — **frontchi uchun** to'liq endpoint
+>   qo'llanma (so'rov/javob namunalari, majburiy maydonlar, checklist)
+> - [PROJECT_DOCS.md](PROJECT_DOCS.md) — to'liq biznes-logika (Buyurtma → Zakaz
+>   oqimi, kassa, audit/tarix, xavfsizlik)
 
 ---
 
