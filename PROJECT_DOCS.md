@@ -318,9 +318,13 @@ Nechta mahsulot bo'lishidan qat'i nazar buyurtma bitta bo'ladi.
 | POST | `/orders/bulk/` | `items[]` bilan — natija ham **BITTA buyurtma** (moslik uchun) |
 | GET | `/orders/{id}/` | Bitta (qatorlar + to'liq `history` bilan) |
 | PATCH | `/orders/{id}/` | **Tahrirlash — `asos` majburiy, tarixga yoziladi** |
-| POST | `/orders/{id}/fulfill/` | Yetkazildi (barcha qatorlar; tarixga yoziladi) |
-| POST | `/orders/{id}/cancel/` | Bekor qilish (tarixga yoziladi) |
-| POST | `/orders/{id}/create-zakaz/` | Yetishmagan qatorlarga qo'lda zakaz (odatda avto) |
+| POST | `/orders/{id}/fulfill/` | Yetkazildi — **`contract_number` + `asos` MAJBURIY**, `faktura` ixtiyoriy |
+| POST | `/orders/{id}/cancel/` | Bekor qilish — **`contract_number` + `asos` MAJBURIY**, `faktura` ixtiyoriy |
+| POST | `/orders/{id}/create-zakaz/` | Qo'lda zakaz — **`contract_number` + `asos` MAJBURIY**, `faktura`/`supplier`/`expected_date` ixtiyoriy |
+
+> **Barcha buyurtma amallarida** (yaratish, tahrir, yetkazish, bekor, zakaz)
+> shartnoma raqami + izoh (asos) majburiy; faktura qo'shildi. Har amal
+> `history` va shartnomalar reestriga to'liq (shartnoma+izoh+faktura) yoziladi.
 
 **Order fieldlari (hujjat):**
 

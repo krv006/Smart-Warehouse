@@ -1,10 +1,31 @@
 from drf_spectacular.utils import extend_schema, extend_schema_view
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.mixins import (CreateModelMixin, ListModelMixin,
                                    RetrieveModelMixin, UpdateModelMixin)
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
+
+
+def _require_action_fields(request, *, faktura_required=False):
+    """
+    Buyurtma amallari (yetkazish/bekor/zakaz) uchun MAJBURIY maydonlar:
+    shartnoma raqami + izoh (asos). Faktura ixtiyoriy (yoki majburiy).
+    """
+    contract_number = (request.data.get('contract_number') or '').strip()
+    asos            = (request.data.get('asos') or '').strip()
+    faktura         = (request.data.get('faktura') or '').strip() or None
+    errors = {}
+    if not contract_number:
+        errors['contract_number'] = 'Shartnoma raqami kiritilishi shart.'
+    if not asos:
+        errors['asos'] = 'Izoh (asos) kiritilishi shart.'
+    if faktura_required and not faktura:
+        errors['faktura'] = 'Faktura kiritilishi shart.'
+    if errors:
+        raise ValidationError(errors)
+    return contract_number, asos, faktura
 
 from apps.common.permissions import IsOperatorOrReadOnly
 from apps.orders.models import (Order, OrderHistory, Zakaz, ZakazHistory,
@@ -150,8 +171,13 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
         summary="Buyurtmani yetkazildi deb belgilash",
         description=(
             "Bron qilingan miqdor ombor qoldiqidan ayiriladi. "
-            "Boshqa pending buyurtmalarga avtomatik bron qayta ajratiladi. "
-            "Amal tarixga yoziladi (ixtiyoriy body: `{ \"asos\": \"...\" }`)."
+            "Boshqa pending buyurtmalarga avtomatik bron qayta ajratiladi.\n\n"
+            "**MAJBURIY body:** `contract_number` (shartnoma raqami) + `asos` "
+            "(izoh). `faktura` ixtiyoriy. Hammasi tarix va reestrga yoziladi.\n\n"
+            "```json\n"
+            "{ \"contract_number\": \"SH-2026/045\", \"asos\": \"Mijozga topshirildi\", "
+            "\"faktura\": \"F-2026/900\" }\n"
+            "```"
         ),
         tags=["Orders / Bron"],
     )
@@ -173,18 +199,18 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
                 {'detail': 'Bron qilingan miqdor yo\'q. Avval omborda qoldiq bo\'lishi kerak.'},
                 status=400,
             )
+        contract_number, asos, faktura = _require_action_fields(request)
         order.fulfill()
-        asos = request.data.get('asos') or 'Buyurtma yetkazildi.'
         OrderHistory.objects.create(
             order=order, changed_by=request.user, action=OrderHistory.FULFILLED,
-            contract_number=order.contract_number,
-            asos=asos,
+            contract_number=contract_number, faktura=faktura, asos=asos,
         )
         for item in order.items.all():
             register_contract(
                 item.product, ProductContract.ORDER_FULFILLED,
-                contract_number=order.contract_number,
+                contract_number=contract_number,
                 contract_date=order.contract_date,
+                faktura=faktura,
                 asos=asos, order=order, user=request.user,
             )
         return Response(OrderSerializer(order).data)
@@ -192,8 +218,12 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
     @extend_schema(
         summary="Buyurtmani bekor qilish (bron bo'shatiladi)",
         description=(
-            "Bron bo'shatiladi va boshqa pending buyurtmalarga ajratiladi. "
-            "Amal tarixga yoziladi (ixtiyoriy body: `{ \"asos\": \"...\" }`)."
+            "Bron bo'shatiladi va boshqa pending buyurtmalarga ajratiladi.\n\n"
+            "**MAJBURIY body:** `contract_number` (shartnoma raqami) + `asos` "
+            "(izoh). `faktura` ixtiyoriy. Hammasi tarix va reestrga yoziladi.\n\n"
+            "```json\n"
+            "{ \"contract_number\": \"SH-2026/045\", \"asos\": \"Mijoz voz kechdi\" }\n"
+            "```"
         ),
         tags=["Orders / Bron"],
     )
@@ -205,21 +235,21 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
                 {'detail': f'"{order.get_status_display()}" holatidagi buyurtmani bekor qilib bo\'lmaydi.'},
                 status=400,
             )
+        contract_number, asos, faktura = _require_action_fields(request)
         order.release()
         order.status = Order.CANCELLED
         order.save(update_fields=['status'])
-        asos = request.data.get('asos') or 'Buyurtma bekor qilindi.'
         OrderHistory.objects.create(
             order=order, changed_by=request.user, action=OrderHistory.CANCELLED,
-            contract_number=order.contract_number,
-            asos=asos,
+            contract_number=contract_number, faktura=faktura, asos=asos,
         )
         for item in order.items.all():
             allocate_pending_orders(item.product)
             register_contract(
                 item.product, ProductContract.ORDER_CANCELLED,
-                contract_number=order.contract_number,
+                contract_number=contract_number,
                 contract_date=order.contract_date,
+                faktura=faktura,
                 asos=asos, order=order, user=request.user,
             )
         return Response(OrderSerializer(order).data)
@@ -231,7 +261,12 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
             "avtomatik zakaz ochilmagan/bekor qilingan holatlar uchun.\n\n"
             "Buyurtmadagi `backorder_qty` (yetishmagan miqdor) uchun Zakaz yozuvi "
             "yaratadi — buyurtma va **shartnoma raqami asosida** bog'lanadi.\n\n"
-            "Ixtiyoriy body: `{ \"supplier\": \"...\", \"expected_date\": \"2026-08-01\" }`"
+            "**MAJBURIY body:** `contract_number` + `asos` (izoh). Ixtiyoriy: "
+            "`faktura`, `supplier`, `expected_date`.\n\n"
+            "```json\n"
+            "{ \"contract_number\": \"SH-2026/045\", \"asos\": \"Yetishmaganга zakaz\", "
+            "\"supplier\": \"Xitoy\", \"expected_date\": \"2026-08-01\" }\n"
+            "```"
         ),
         request=None,
         tags=["Orders / Bron"],
@@ -245,6 +280,7 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
                 {'detail': 'Bu buyurtmada zakaz kerak bo\'lgan (yetishmagan) miqdor yo\'q.'},
                 status=400,
             )
+        contract_number, asos, faktura = _require_action_fields(request)
         zakazlar = order.create_backorder_zakaz(user=request.user)
         if not zakazlar:
             return Response(
@@ -252,19 +288,25 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
                            'faol zakaz allaqachon mavjud.'},
                 status=400,
             )
-        # Ixtiyoriy supplier/expected_date qayta yozish (hammасига)
+        # Shartnoma/izoh/faktura + ixtiyoriy supplier/expected_date yoziladi
         supplier      = request.data.get('supplier')
         expected_date = request.data.get('expected_date')
         for zakaz in zakazlar:
-            update_fields = []
+            zakaz.contract_number = contract_number
+            zakaz.asos            = asos
+            if faktura:
+                zakaz.faktura = faktura
             if supplier:
                 zakaz.supplier = supplier
-                update_fields.append('supplier')
             if expected_date:
                 zakaz.expected_date = expected_date
-                update_fields.append('expected_date')
-            if update_fields:
-                zakaz.save(update_fields=update_fields)
+            zakaz.comment = asos
+            zakaz.save()
+            ZakazHistory.objects.create(
+                zakaz=zakaz, changed_by=request.user,
+                action=ZakazHistory.EDITED,
+                contract_number=contract_number, faktura=faktura, asos=asos,
+            )
         return Response(
             {'zakazlar': ZakazSerializer(zakazlar, many=True).data},
             status=201,

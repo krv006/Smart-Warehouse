@@ -614,7 +614,8 @@ class OrderHistory(models.Model):
                                  null=True, blank=True, related_name='order_changes')
     action          = CharField(max_length=12, choices=ACTION_CHOICES)
     contract_number = CharField(max_length=100, blank=True, null=True)
-    asos            = TextField(blank=True, null=True, help_text='Tahrir/amal asosi')
+    faktura         = CharField(max_length=100, blank=True, null=True)
+    asos            = TextField(blank=True, null=True, help_text='Tahrir/amal asosi (izoh)')
     changes         = TextField(blank=True, null=True, help_text='O\'zgargan maydonlar (JSON)')
     created_at      = DateTimeField(auto_now_add=True)
 

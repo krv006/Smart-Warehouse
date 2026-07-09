@@ -48,8 +48,8 @@ class OrderHistorySerializer(ModelSerializer):
 
     class Meta:
         model  = OrderHistory
-        fields = ('id', 'action', 'action_display', 'contract_number', 'asos',
-                  'changes', 'changed_by', 'changed_by_name', 'created_at')
+        fields = ('id', 'action', 'action_display', 'contract_number', 'faktura',
+                  'asos', 'changes', 'changed_by', 'changed_by_name', 'created_at')
 
     def get_changed_by_name(self, obj):
         return str(obj.changed_by) if obj.changed_by else None
