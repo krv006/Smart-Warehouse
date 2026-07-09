@@ -335,6 +335,10 @@ class OrderSerializer(ModelSerializer):
         # mumkin — farq alohida tranzaksiya bo'lib yoziladi)
         order.sync_payment(user=user)
 
+        # Zakaz miqdorini yetishmovchilikка moslash (oshsa "yana qo'shildi",
+        # kamaysa kamayadi, kerak bo'lmasa bekor / yangi ochiladi)
+        order.sync_backorder_zakaz(user=user)
+
         # Tarix: har bir tahrir shartnoma raqami + asos + sana/vaqt bilan
         OrderHistory.objects.create(
             order=order, changed_by=user, action=OrderHistory.EDITED,

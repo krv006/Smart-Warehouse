@@ -241,6 +241,62 @@ class Order(TimeStampedModel):
             created.append(zakaz)
         return created
 
+    @transaction.atomic
+    def sync_backorder_zakaz(self, user=None):
+        """
+        Buyurtma TAHRIRLANGANDA yetishmagan (backorder) miqdorga bog'liq
+        zakazni moslaydi:
+          - Miqdor oshsa → shu buyurtmaning faol zakazi miqdori ham oshadi
+            ("yana shuncha qo'shildi"), tarixга yoziladi.
+          - Miqdor kamaysa → zakaz miqdori kamayadi.
+          - Yetishmagan qolmasa (backorder=0) va zakaz hali 'new' bo'lsa →
+            zakaz bekor qilinadi (kerak emas). 'confirmed'/'ordered' bo'lsa —
+            tegilmaydi (etkazuvchiga allaqachon berilgan).
+          - Umuman zakazi bo'lmagan yangi yetishmovchilikка yangi zakaz ochiladi.
+        """
+        for item in self.items.all():
+            need  = item.backorder_qty
+            zakaz = (self.zakazlar
+                     .filter(product=item.product,
+                             status__in=(Zakaz.NEW, Zakaz.CONFIRMED, Zakaz.ORDERED))
+                     .order_by('id').first())
+            if zakaz is None:
+                continue  # yangilar pastda create_backorder_zakaz orqali ochiladi
+
+            if need > 0 and zakaz.quantity != need:
+                old   = zakaz.quantity
+                delta = need - old
+                zakaz.quantity = need
+                zakaz.save(update_fields=['quantity'])
+                sign = f'+{delta}' if delta > 0 else str(delta)
+                ZakazHistory.objects.create(
+                    zakaz=zakaz, changed_by=user, action=ZakazHistory.EDITED,
+                    contract_number=zakaz.contract_number,
+                    contract_date=zakaz.contract_date,
+                    asos=(f'Buyurtma #{self.pk} tahrirlandi — zakaz miqdori '
+                          f'{old} → {need} ({sign} dona).'),
+                )
+            elif need <= 0 and zakaz.status == Zakaz.NEW and zakaz.received_qty == 0:
+                zakaz.status = Zakaz.CANCELLED
+                zakaz.asos   = 'Buyurtma tahriri — yetishmagan miqdor qolmadi.'
+                zakaz.save(update_fields=['status', 'asos'])
+                ZakazHistory.objects.create(
+                    zakaz=zakaz, changed_by=user,
+                    action=ZakazHistory.STATUS_CHANGED,
+                    old_status=Zakaz.NEW, new_status=Zakaz.CANCELLED,
+                    contract_number=zakaz.contract_number,
+                    asos='Buyurtma tahriri — yetishmagan miqdor qolmadi.',
+                )
+                register_contract(
+                    item.product, ProductContract.ZAKAZ_CANCELLED,
+                    contract_number=zakaz.contract_number,
+                    asos='Buyurtma tahriri — yetishmagan miqdor qolmadi.',
+                    order=self, zakaz=zakaz, user=user,
+                )
+
+        # Zakazi umuman yo'q, yangi paydo bo'lgan yetishmovchilikка yangi zakaz
+        self.create_backorder_zakaz(user=user)
+
 
 class OrderItem(TimeStampedModel):
     """
