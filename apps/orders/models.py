@@ -78,7 +78,12 @@ class Order(TimeStampedModel):
 
     @property
     def backorder_qty(self):
-        """Barcha qatorlar bo'yicha jami yetishmagan miqdor."""
+        """
+        Barcha qatorlar bo'yicha jami yetishmagan (zakaz kutilayotgan) miqdor.
+        Yetkazilgan yoki bekor qilingan buyurtmada kutiladigan narsa yo'q → 0.
+        """
+        if self.status in (self.FULFILLED, self.CANCELLED):
+            return 0
         return sum(i.backorder_qty for i in self.items.all())
 
     @property
@@ -263,7 +268,12 @@ class OrderItem(TimeStampedModel):
 
     @property
     def backorder_qty(self):
-        """Hali bronlanmagan, kelishi kutilayotgan miqdor."""
+        """
+        Hali bronlanmagan, kelishi kutilayotgan miqdor.
+        Yetkazilgan/bekor qilingan buyurtmada 0 (kutiladigan narsa yo'q).
+        """
+        if self.order.status in (Order.FULFILLED, Order.CANCELLED):
+            return 0
         return max(0, self.quantity - self.reserved_qty)
 
     @property
