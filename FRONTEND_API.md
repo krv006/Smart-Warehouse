@@ -8,6 +8,35 @@ kassa bo'lib to'lash, kirim, zakaz avtomatik moslashuvi).
 
 ---
 
+## Yangilanish — 10.07.2026 (kassa avto-sinxron)
+
+**API kontrakti O'ZGARMADI** — yangi endpoint yo'q, so'rov/javob formatlari
+avvalgidek. Backendda buyurtma ↔ kassa bog'lanishi mustahkamlandi:
+
+Buyurtma QANDAY yo'l bilan o'zgarmasin (`PATCH /orders/{id}/`, admin panel,
+ichki kod) — unga bog'liq kassa yozuvi (`/cash/payments/`) **avtomatik**
+qayta hisoblanadi:
+
+| Buyurtmada o'zgardi | Kassada avtomatik yangilanadi |
+|---------------------|-------------------------------|
+| Qator miqdori / narxi / yangi qator / qator o'chirildi | `total_amount` (jami) |
+| `prepaid_amount` (oldindan to'lov) | `paid_amount` + yangi tranzaksiya yoziladi |
+| `due_date` (yetkazish muddati) | `due_date` (to'lov muddati) |
+| `client` | `client` |
+| — har qanday o'zgarishda | `status` (`pending/partial/paid/overdue`) |
+
+**Frontend uchun YAGONA talab:** buyurtma tahriri (PATCH) muvaffaqiyatli
+bo'lgandan keyin kassa ma'lumotlarini **qayta yuklang** (refetch):
+- `GET /cash/payments/` (yoki `?order={id}`) — ro'yxat/qoldiq
+- `GET /cash/payments/summary/` — yuqoridagi kartochkalar (Yig'ilgan, Qoldiq...)
+- Tushum prognozi ham shu ma'lumotdan — birga yangilanadi
+
+React Query/SWR ishlatilsa: order mutation `onSuccess` da `payments` va
+`payments-summary` query'larini **invalidate** qiling. Kassa sahifasi ochiq
+turgan bo'lsa ham eski raqam ko'rinib qolmasligi uchun shu yetarli.
+
+---
+
 ## 0. Asoslar
 
 **Bazaviy URL:** `/api/v1/`
@@ -158,9 +187,15 @@ Status: `pending` (kutilmoqda) · `partial` (qisman bron) · `reserved` (to'liq 
 ```
 **Tahrir avtomatik:**
 - Miqdor o'zgarsa — bron qayta moslanadi
-- **Kassa jami avtomatik yangilanadi**
+- **Kassa avtomatik yangilanadi** — jami (`total_amount`), to'lov muddati,
+  mijoz, status; oldindan to'lov farqi alohida tranzaksiya bo'lib yoziladi
 - **Zakaz miqdori moslanadi** — oshsa "yana qo'shildi", kamaysa kamayadi
   (tarixда: "zakaz miqdori 10 → 15 (+5 dona)")
+
+> ⚠️ **Frontend:** PATCH muvaffaqiyatli bo'lgach kassa so'rovlarini refetch
+> qiling (`/cash/payments/`, `/cash/payments/summary/`) — aks holda sahifada
+> eski jami/qoldiq ko'rinib turadi. Batafsil: yuqoridagi "Yangilanish —
+> 10.07.2026" bo'limi.
 
 **Cheklovlar:**
 - Oxirgi qatorni o'chirib bo'lmaydi — butun buyurtma uchun `/cancel/`
