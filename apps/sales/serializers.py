@@ -11,7 +11,12 @@ from apps.warehouse.models import Stock, Product
 
 
 def _deplete_stock(product, quantity):
-    """Mahsulot qoldig'ini FIFO (id bo'yicha) tartibida kamaytiradi."""
+    """
+    Mahsulot qoldig'ini FIFO (id bo'yicha) tartibida kamaytiradi.
+    Faqat BRON QILINMAGAN (quantity - reserved_quantity) qismdan oladi —
+    buyurtmalar uchun ajratilgan bron sotuvga ketmaydi.
+    Qatorlar qulf ostida qayta tekshiriladi: yetmasa — xato (race-safe).
+    """
     remaining = quantity
     stocks = (product.stocks
               .select_for_update()
@@ -20,10 +25,36 @@ def _deplete_stock(product, quantity):
     for stock in stocks:
         if remaining <= 0:
             break
-        take = min(stock.quantity, remaining)
+        free = stock.quantity - stock.reserved_quantity
+        if free <= 0:
+            continue
+        take = min(free, remaining)
         stock.quantity = F('quantity') - take
         stock.save(update_fields=['quantity'])
         remaining -= take
+    if remaining > 0:
+        raise ValidationError({
+            'quantity': (
+                f'"{product.name}" uchun sotish mumkin bo\'lgan qoldiq '
+                f'yetarli emas ({remaining} dona yetishmayapti — qoldiq '
+                f'boshqa amal bilan band qilingan bo\'lishi mumkin).'
+            )
+        })
+
+
+def _restore_stock(product, quantity):
+    """
+    Sotuv o'chirilganda/kamaytirilganda qoldiqni omborga qaytaradi
+    (birinchi lokatsiyaga, FIFO teskarisi emas — hisob umumiy qoldiqda).
+    """
+    if quantity <= 0:
+        return
+    stock = product.stocks.select_for_update().order_by('id').first()
+    if stock is None:
+        product.stocks.create(quantity=quantity, warehouse_location='—')
+        return
+    stock.quantity = F('quantity') + quantity
+    stock.save(update_fields=['quantity'])
 
 
 class SaleSerializer(ModelSerializer):
@@ -55,6 +86,10 @@ class SaleSerializer(ModelSerializer):
         quantity  = attrs.get('quantity', getattr(self.instance, 'quantity', 0))
         # Bron qilinmagan (available) qoldiqqa qarab tekshirish
         available = product.available_quantity if product else 0
+        # Tahrirda: shu sotuvning eski miqdori allaqachon ombordan ayirilgan —
+        # mahsulot o'zgarmagan bo'lsa, u qaytariladigan hisobga qo'shiladi
+        if self.instance and product and self.instance.product_id == product.id:
+            available += self.instance.quantity
         if quantity > available:
             reserved = product.reserved_quantity if product else 0
             raise ValidationError({
@@ -70,6 +105,20 @@ class SaleSerializer(ModelSerializer):
     def create(self, validated_data):
         sale = super().create(validated_data)
         _deplete_stock(sale.product, sale.quantity)
+        return sale
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        """
+        Tahrirda ombor qoldig'i mos tuzatiladi: eski miqdor qaytariladi,
+        yangi miqdor (yangi mahsulotdan bo'lsa — undan) qayta ayiriladi.
+        """
+        old_product  = instance.product
+        old_quantity = instance.quantity
+        sale = super().update(instance, validated_data)
+        if sale.product_id != old_product.id or sale.quantity != old_quantity:
+            _restore_stock(old_product, old_quantity)
+            _deplete_stock(sale.product, sale.quantity)
         return sale
 
 

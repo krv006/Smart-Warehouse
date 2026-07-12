@@ -32,6 +32,16 @@ class IsOperatorOrReadOnly(BasePermission):
         return getattr(request.user, 'is_operator', False)
 
 
+class IsOperatorOrManagement(BasePermission):
+    """Operator yoki Management — ombor qoldig'ini siljitadigan amallar uchun
+    (buyurtmani yetkazish/bekor qilish, zakaz ochish). Accountant kirolmaydi."""
+    def has_permission(self, request, view):
+        if not (request.user and request.user.is_authenticated):
+            return False
+        return (getattr(request.user, 'is_operator', False)
+                or getattr(request.user, 'is_management', False))
+
+
 class IsAccountantOrManagement(BasePermission):
     """Accountant yoki Management."""
     def has_permission(self, request, view):

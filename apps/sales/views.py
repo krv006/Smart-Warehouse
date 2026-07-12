@@ -1,3 +1,4 @@
+from django.db import transaction
 from drf_spectacular.utils import extend_schema, extend_schema_view
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -6,7 +7,7 @@ from rest_framework.viewsets import ModelViewSet
 from apps.common.permissions import IsOperatorOrReadOnly
 from apps.sales.models import Sale
 from apps.sales.serializers import (SaleSerializer, SaleOperatorSerializer,
-                                    SaleBulkCreateSerializer)
+                                    SaleBulkCreateSerializer, _restore_stock)
 
 
 @extend_schema_view(
@@ -41,6 +42,12 @@ class SaleViewSet(ModelViewSet):
                 or getattr(user, 'is_accountant', False)):
             return SaleSerializer
         return SaleOperatorSerializer
+
+    @transaction.atomic
+    def perform_destroy(self, instance):
+        # Sotuv o'chirilsa — sotilgan miqdor omborga qaytariladi
+        _restore_stock(instance.product, instance.quantity)
+        instance.delete()
 
     @extend_schema(
         summary="Bir vaqtda bir nechta mahsulot savdosi (bulk)",

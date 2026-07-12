@@ -27,7 +27,8 @@ def _require_action_fields(request, *, faktura_required=False):
         raise ValidationError(errors)
     return contract_number, asos, faktura
 
-from apps.common.permissions import IsOperatorOrReadOnly
+from apps.common.permissions import (IsOperatorOrReadOnly,
+                                     IsOperatorOrManagement)
 from apps.orders.models import (Order, OrderHistory, Zakaz, ZakazHistory,
                                 ProductContract, register_contract,
                                 allocate_pending_orders)
@@ -181,7 +182,8 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
         ),
         tags=["Orders / Bron"],
     )
-    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
+    @action(detail=True, methods=['post'],
+            permission_classes=[IsOperatorOrManagement])
     def fulfill(self, request, pk=None):
         order = self.get_object()
         if order.status == Order.FULFILLED:
@@ -227,7 +229,8 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
         ),
         tags=["Orders / Bron"],
     )
-    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
+    @action(detail=True, methods=['post'],
+            permission_classes=[IsOperatorOrManagement])
     def cancel(self, request, pk=None):
         order = self.get_object()
         if order.status in (Order.FULFILLED, Order.CANCELLED):
@@ -272,7 +275,7 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
         tags=["Orders / Bron"],
     )
     @action(detail=True, methods=['post'], url_path='create-zakaz',
-            permission_classes=[IsAuthenticated])
+            permission_classes=[IsOperatorOrManagement])
     def create_zakaz(self, request, pk=None):
         order = self.get_object()
         if order.backorder_qty <= 0:
