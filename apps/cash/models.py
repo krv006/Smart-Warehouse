@@ -63,7 +63,19 @@ class Payment(TimeStampedModel):
             # Buyurtma to'lovi — summa buyurtmadan olinadi, buyurtma
             # tahrirlanganda kassa ham yangilanadi. Komissiya sotuvga tegishli,
             # buyurtma to'loviga qo'llanmaydi.
-            total = self.order.total
+            #
+            # MUHIM: summani `self.order.total` orqali emas, TO'G'RIDAN-TO'G'RI
+            # bazadan (aggregate) hisoblaymiz. Sabab: buyurtma tahrirlanganda
+            # xotiradagi `order` obyekti eski (prefetch keshidagi) qatorlarni
+            # ushlab turishi mumkin — u holda kassa eski summada qolib ketardi.
+            from django.db.models import Sum, F, DecimalField
+            from apps.orders.models import OrderItem
+            total = (OrderItem.objects
+                     .filter(order_id=self.order_id, unit_price__isnull=False)
+                     .aggregate(t=Sum(
+                         F('unit_price') * F('quantity'),
+                         output_field=DecimalField(max_digits=20, decimal_places=2),
+                     ))['t'])
             if total is not None:
                 self.total_amount = total
             if self.commission is None:

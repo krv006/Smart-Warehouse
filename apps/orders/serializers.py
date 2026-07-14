@@ -319,6 +319,10 @@ class OrderSerializer(ModelSerializer):
         if item_changes:
             changes['items'] = item_changes
 
+        # Qatorlar o'zgargach eski (prefetch) keshni tozalaymiz — total,
+        # holat va kassa YANGI qatorlardan qayta hisoblanishi uchun.
+        order._prefetched_objects_cache = {}
+
         order.refresh_status()
 
         # Oldindan to'lov jami summadan oshmasin (qatorlar qo'llanganidan keyin)
