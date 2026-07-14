@@ -452,20 +452,25 @@ class ZakazHistorySerializer(ModelSerializer):
 # ── Zakaz (Etkazuvchidan buyurtma) ────────────────────────────────────────────
 
 class ZakazSerializer(ModelSerializer):
-    product_name       = SerializerMethodField()
-    created_by_name    = SerializerMethodField()
-    status_display     = SerializerMethodField()
-    order_contract     = SerializerMethodField()
-    warehouse_location = CharField(required=False, allow_null=True,
-                                   allow_blank=True, max_length=255)
-    history            = ZakazHistorySerializer(many=True, read_only=True)
+    product_name        = SerializerMethodField()
+    created_by_name     = SerializerMethodField()
+    status_display      = SerializerMethodField()
+    type_display        = SerializerMethodField()
+    payment_status_display = SerializerMethodField()
+    total               = ReadOnlyField()   # unit_price × quantity (avtomatik)
+    order_contract      = SerializerMethodField()
+    warehouse_location  = CharField(required=False, allow_null=True,
+                                    allow_blank=True, max_length=255)
+    history             = ZakazHistorySerializer(many=True, read_only=True)
 
     class Meta:
         model  = Zakaz
         fields = (
-            'id', 'order', 'order_contract',
+            'id', 'zakaz_type', 'type_display', 'order', 'order_contract',
             'product', 'product_name',
             'quantity', 'received_qty',
+            'unit_price', 'currency', 'total',
+            'payment_status', 'payment_status_display',
             'supplier', 'status', 'status_display',
             'contract_number', 'contract_date', 'confirmed_at',
             'asos', 'faktura',
@@ -474,7 +479,9 @@ class ZakazSerializer(ModelSerializer):
             'comment', 'created_at',
             'history',
         )
-        read_only_fields = ('created_by', 'confirmed_at', 'created_at')
+        # zakaz_type — yaratishda o'rnatiladi, keyin o'zgarmaydi (audit)
+        read_only_fields = ('created_by', 'confirmed_at', 'created_at',
+                            'zakaz_type')
 
     def get_product_name(self, obj):
         return str(obj.product)
@@ -485,6 +492,12 @@ class ZakazSerializer(ModelSerializer):
     def get_status_display(self, obj):
         return obj.get_status_display()
 
+    def get_type_display(self, obj):
+        return obj.get_zakaz_type_display()
+
+    def get_payment_status_display(self, obj):
+        return obj.get_payment_status_display()
+
     def get_order_contract(self, obj):
         """Manba buyurtmaning shartnoma raqami (asos zanjiri)."""
         if obj.order_id:
@@ -493,9 +506,27 @@ class ZakazSerializer(ModelSerializer):
                     'contract_date': str(obj.order.contract_date)}
         return None
 
+    def validate(self, attrs):
+        # Yaratish: API orqali ochilgan zakaz MUSTAQIL (manual) hisoblanadi —
+        # unda narx (unit_price) MAJBURIY (summa avtomatik hisoblanadi).
+        if self.instance is None:
+            if attrs.get('unit_price') in (None, ''):
+                raise ValidationError({
+                    'unit_price': 'Mustaqil zakaz uchun narx (unit_price) '
+                                  'kiritilishi shart.'})
+        else:
+            # Qabul qilingan/bekor qilingan zakazda miqdor va narx qotib qoladi
+            locked = self.instance.status in (Zakaz.RECEIVED, Zakaz.CANCELLED)
+            if locked and ('quantity' in attrs or 'unit_price' in attrs):
+                raise ValidationError(
+                    f'"{self.instance.get_status_display()}" holatidagi zakazda '
+                    f'miqdor yoki narxni o\'zgartirib bo\'lmaydi.')
+        return attrs
+
     def create(self, validated_data):
-        # Status har doim 'new' dan boshlanadi
+        # Status har doim 'new' dan boshlanadi; API orqali — MUSTAQIL zakaz
         validated_data['status']     = Zakaz.NEW
+        validated_data['zakaz_type'] = Zakaz.MANUAL
         validated_data['created_by'] = self.context['request'].user
         zakaz = super().create(validated_data)
         ZakazHistory.objects.create(
@@ -516,7 +547,6 @@ class ZakazSerializer(ModelSerializer):
     # Har bir status o'zgarishi → reestrga qaysi turda yozilishi
     _CONTRACT_SOURCE = {
         Zakaz.CONFIRMED: ProductContract.ZAKAZ_CONFIRMED,
-        Zakaz.ORDERED:   ProductContract.ZAKAZ_ORDERED,
         Zakaz.RECEIVED:  ProductContract.ZAKAZ_RECEIVED,
         Zakaz.CANCELLED: ProductContract.ZAKAZ_CANCELLED,
     }
@@ -545,8 +575,8 @@ class ZakazSerializer(ModelSerializer):
                 errors['asos'] = (f'"{dict(Zakaz.STATUS_CHOICES).get(new_status, new_status)}" '
                                   f'holatiga o\'tish uchun asos kiritilishi shart.')
 
-            # HAR BIR ish holati (tasdiqlash/yuborish/qabul) uchun SHARTNOMA majburiy
-            if new_status in (Zakaz.CONFIRMED, Zakaz.ORDERED, Zakaz.RECEIVED):
+            # HAR BIR ish holati (tasdiqlash/qabul) uchun SHARTNOMA majburiy
+            if new_status in (Zakaz.CONFIRMED, Zakaz.RECEIVED):
                 contract = validated_data.get('contract_number') or instance.contract_number
                 if not contract:
                     errors['contract_number'] = (
@@ -564,7 +594,7 @@ class ZakazSerializer(ModelSerializer):
 
             # Sana: yangi shartnoma bo'lsa — bugungi kun (Tashkent);
             # buyurtmadan kelgan (eski) shartnoma bo'lsa — o'sha kun saqlanadi
-            if new_status in (Zakaz.CONFIRMED, Zakaz.ORDERED, Zakaz.RECEIVED):
+            if new_status in (Zakaz.CONFIRMED, Zakaz.RECEIVED):
                 if not (validated_data.get('contract_date') or instance.contract_date):
                     validated_data['contract_date'] = timezone.localdate()
             if new_status == Zakaz.CONFIRMED:
@@ -618,9 +648,11 @@ class ZakazSerializer(ModelSerializer):
 
 
 class ZakazItemSerializer(Serializer):
-    """Bulk zakaz ichidagi bitta mahsulot qatori."""
+    """Bulk zakaz ichidagi bitta mahsulot qatori (mustaqil zakaz)."""
     product       = PrimaryKeyRelatedField(queryset=Product.objects.all())
     quantity      = IntegerField(min_value=1)
+    unit_price    = DecimalField(max_digits=14, decimal_places=2)  # narx majburiy
+    currency      = CharField(required=False, allow_blank=True, allow_null=True)
     supplier      = CharField(required=False, allow_blank=True, allow_null=True)
     expected_date = DateField(required=False, allow_null=True)
     comment       = CharField(required=False, allow_blank=True, allow_null=True)
@@ -656,7 +688,7 @@ class ZakazBulkCreateSerializer(Serializer):
         for item in value:
             product = item['product']
             has_active = product.zakazlar.filter(
-                status__in=(Zakaz.NEW, Zakaz.CONFIRMED, Zakaz.ORDERED)
+                status__in=Zakaz.ACTIVE_STATUSES
             ).exists()
             if has_active:
                 errors.append(
@@ -678,7 +710,10 @@ class ZakazBulkCreateSerializer(Serializer):
         for item in items:
             zakaz = Zakaz.objects.create(
                 product=item['product'],
+                zakaz_type=Zakaz.MANUAL,
                 quantity=item['quantity'],
+                unit_price=item['unit_price'],
+                currency=item.get('currency') or Zakaz.UZS,
                 supplier=item.get('supplier') or common_supplier,
                 expected_date=item.get('expected_date') or common_expected,
                 contract_number=contract_number,

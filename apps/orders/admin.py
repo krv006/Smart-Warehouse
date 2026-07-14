@@ -126,10 +126,12 @@ class OrderAdmin(admin.ModelAdmin):
 
 @admin.register(Zakaz)
 class ZakazAdmin(admin.ModelAdmin):
-    list_display    = ('id', 'contract_number', 'product', 'quantity', 'received_qty_col',
-                       'supplier', 'faktura', 'status_badge', 'expected_date',
-                       'order', 'created_by', 'created_at')
-    list_filter     = ('status', 'expected_date', 'contract_date')
+    list_display    = ('id', 'zakaz_type', 'contract_number', 'product', 'quantity',
+                       'unit_price', 'total_col', 'received_qty_col',
+                       'supplier', 'faktura', 'status_badge', 'payment_status',
+                       'expected_date', 'order', 'created_by', 'created_at')
+    list_filter     = ('status', 'zakaz_type', 'payment_status',
+                       'expected_date', 'contract_date')
     search_fields   = ('contract_number', 'faktura', 'product__name',
                        'product__serial_number', 'supplier', 'comment',
                        'created_by__username')
@@ -142,10 +144,15 @@ class ZakazAdmin(admin.ModelAdmin):
     _STATUS_COLORS = {
         Zakaz.NEW:       ('#0d6efd', 'Yangi'),
         Zakaz.CONFIRMED: ('#6610f2', 'Tasdiqlandi'),
-        Zakaz.ORDERED:   ('#fd7e14', 'Yuborildi'),
         Zakaz.RECEIVED:  ('#198754', 'Qabul qilindi'),
         Zakaz.CANCELLED: ('#6c757d', 'Bekor'),
     }
+
+    @admin.display(description='Summa')
+    def total_col(self, obj):
+        if obj.total is None:
+            return format_html('<span style="color:#6c757d">—</span>')
+        return format_html('<b>{} {}</b>', obj.total, obj.currency)
 
     @admin.display(description='Qabul qilingan')
     def received_qty_col(self, obj):

@@ -216,6 +216,7 @@ class Order(TimeStampedModel):
                 continue
             zakaz = Zakaz.objects.create(
                 order=self,
+                zakaz_type=Zakaz.BACKORDER,
                 product=item.product,
                 quantity=item.backorder_qty,
                 contract_number=self.contract_number,
@@ -250,7 +251,7 @@ class Order(TimeStampedModel):
             ("yana shuncha qo'shildi"), tarixга yoziladi.
           - Miqdor kamaysa → zakaz miqdori kamayadi.
           - Yetishmagan qolmasa (backorder=0) va zakaz hali 'new' bo'lsa →
-            zakaz bekor qilinadi (kerak emas). 'confirmed'/'ordered' bo'lsa —
+            zakaz bekor qilinadi (kerak emas). 'confirmed' bo'lsa —
             tegilmaydi (etkazuvchiga allaqachon berilgan).
           - Umuman zakazi bo'lmagan yangi yetishmovchilikка yangi zakaz ochiladi.
         """
@@ -258,7 +259,7 @@ class Order(TimeStampedModel):
             need  = item.backorder_qty
             zakaz = (self.zakazlar
                      .filter(product=item.product,
-                             status__in=(Zakaz.NEW, Zakaz.CONFIRMED, Zakaz.ORDERED))
+                             status__in=Zakaz.ACTIVE_STATUSES)
                      .order_by('id').first())
             if zakaz is None:
                 continue  # yangilar pastda create_backorder_zakaz orqali ochiladi
@@ -343,7 +344,7 @@ class OrderItem(TimeStampedModel):
     def has_active_zakaz(self):
         """Shu mahsulot uchun faol (yakunlanmagan) zakaz bormi?"""
         return self.product.zakazlar.filter(
-            status__in=(Zakaz.NEW, Zakaz.CONFIRMED, Zakaz.ORDERED)
+            status__in=Zakaz.ACTIVE_STATUSES
         ).exists()
 
     @transaction.atomic
@@ -434,34 +435,73 @@ class Zakaz(TimeStampedModel):
     """
     Etkazuvchidan mahsulot zakaz qilish (procurement order).
 
-    Yaratish: operator yoki manager (status avtomatik 'new'), yoki buyurtmadagi
-    yetishmagan qator uchun avtomatik.
+    IKKI XIL zakaz bo'ladi (`zakaz_type`):
+      1. BACKORDER — buyurtma berilganda ombordagi qoldiq yetmay qolsa
+         AVTOMATIK ochiladi (`order` to'ldiriladi). Narx yuritilmaydi —
+         pul mijoz buyurtmasi (Payment) tomonida hisoblanadi. Qabul
+         qilinganda bog'liq buyurtma "qisman bron" → "bron qilingan" ga
+         avtomatik o'tadi.
+      2. MANUAL — operator/manager o'zi biror mahsulotni zakaz qiladi
+         (`order` bo'sh). Bunda NARX (unit_price), VALYUTA, UMUMIY SUMMA
+         (avtomatik), TO'LOV HOLATI yuritiladi. Bu summa faqat zakazda
+         ko'rinadi, kassaga (Payment) yozilmaydi.
+
+    Yaratish: operator yoki manager (status avtomatik 'new').
     Status o'zgartirish: FAQAT manager.
 
     Muhim qoidalar:
         - HAR BIR holat o'zgarishida asos MAJBURIY.
-        - confirmed / ordered / received — shartnoma raqami MAJBURIY.
+        - confirmed / received — shartnoma raqami MAJBURIY.
         - Tasdiqlashda sana bo'sh bo'lsa avtomatik bugungi kun (Asia/Tashkent).
         - Qabul qilishda (received) qo'shimcha faktura MAJBURIY.
+        - Miqdor (quantity) qabul qilingunga qadar har doim o'zgartirilishi
+          mumkin; MANUAL zakazda umumiy summa avtomatik qayta hisoblanadi.
 
     Holat oqimi:
-        new → confirmed → ordered → received → (avtomatik ombor to'ldiriladi)
+        new → confirmed → received → (avtomatik ombor to'ldiriladi)
         har qanday → cancelled
     """
     NEW       = 'new'
     CONFIRMED = 'confirmed'
-    ORDERED   = 'ordered'
     RECEIVED  = 'received'
     CANCELLED = 'cancelled'
 
     STATUS_CHOICES = (
         (NEW,       'Yangi'),
         (CONFIRMED, 'Tasdiqlandi'),
-        (ORDERED,   'Etkazuvchiga yuborildi'),
         (RECEIVED,  'Qabul qilindi'),
         (CANCELLED, 'Bekor qilindi'),
     )
 
+    # Faol (yakunlanmagan) holatlar — takror zakaz bermaslik uchun
+    ACTIVE_STATUSES = (NEW, CONFIRMED)
+
+    # ── Zakaz turi ────────────────────────────────────────────────────────────
+    BACKORDER = 'backorder'
+    MANUAL    = 'manual'
+    TYPE_CHOICES = (
+        (BACKORDER, 'Buyurtmadan (yetishmagan)'),
+        (MANUAL,    'Mustaqil zakaz'),
+    )
+
+    # ── To'lov holati (faqat MANUAL zakaz uchun) ────────────────────────────────
+    UNPAID  = 'unpaid'
+    PARTIAL = 'partial'
+    PAID    = 'paid'
+    PAYMENT_STATUS_CHOICES = (
+        (UNPAID,  'To\'lanmagan (qarz)'),
+        (PARTIAL, 'Qisman to\'landi'),
+        (PAID,    'To\'landi'),
+    )
+
+    UZS = 'UZS'
+    USD = 'USD'
+    CURRENCY_CHOICES = ((UZS, 'UZS'), (USD, 'USD'))
+
+    zakaz_type         = CharField(max_length=10, choices=TYPE_CHOICES,
+                                   default=MANUAL,
+                                   help_text='backorder — buyurtmadan avtomatik; '
+                                             'manual — mustaqil zakaz')
     order              = ForeignKey('orders.Order', on_delete=SET_NULL,
                                     null=True, blank=True, related_name='zakazlar',
                                     verbose_name='Manba buyurtma')
@@ -471,6 +511,17 @@ class Zakaz(TimeStampedModel):
     received_qty       = PositiveIntegerField(
                              default=0,
                              help_text='Qabul qilingan miqdor (status=received da kiritiladi)')
+
+    # Narx / summa — faqat MANUAL zakaz uchun (kassaga yozilmaydi)
+    unit_price         = DecimalField(max_digits=14, decimal_places=2,
+                                      null=True, blank=True,
+                                      help_text='Birlik narxi (mustaqil zakaz uchun)')
+    currency           = CharField(max_length=3, choices=CURRENCY_CHOICES, default=UZS,
+                                   help_text='Zakaz valyutasi (mustaqil zakaz)')
+    payment_status     = CharField(max_length=10, choices=PAYMENT_STATUS_CHOICES,
+                                   default=UNPAID,
+                                   help_text='Etkazuvchiga to\'lov holati (mustaqil zakaz)')
+
     supplier           = CharField(max_length=255, blank=True, null=True,
                                    help_text='Etkazuvchi nomi / manzili')
     status             = CharField(max_length=12, choices=STATUS_CHOICES, default=NEW)
@@ -507,6 +558,22 @@ class Zakaz(TimeStampedModel):
     def __str__(self):
         return (f'Zakaz #{self.pk} — {self.product.name} x{self.quantity} '
                 f'[{self.get_status_display()}]')
+
+    @property
+    def is_backorder(self):
+        """Buyurtmadagi yetishmovchilikdan kelib chiqqan zakazmi?"""
+        return self.zakaz_type == self.BACKORDER or self.order_id is not None
+
+    @property
+    def total(self):
+        """
+        Umumiy summa (unit_price × quantity) — MANUAL zakaz uchun avtomatik.
+        Miqdor yoki narx o'zgarsa doim yangi qiymat qaytadi. BACKORDER
+        zakazda narx bo'lmaydi → None (pul buyurtma/Payment tomonida).
+        """
+        if self.unit_price is None:
+            return None
+        return self.unit_price * self.quantity
 
     @transaction.atomic
     def receive(self, user=None):

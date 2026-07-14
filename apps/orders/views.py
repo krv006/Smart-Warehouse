@@ -373,6 +373,8 @@ class ZakazViewSet(CreateModelMixin, ListModelMixin,
     permission_classes = (IsAuthenticated,)
     filterset_fields   = {
         'status':          ['exact'],
+        'zakaz_type':      ['exact'],
+        'payment_status':  ['exact'],
         'product':         ['exact'],
         'order':           ['exact'],
         'contract_number': ['exact'],
