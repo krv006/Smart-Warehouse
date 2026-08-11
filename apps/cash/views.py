@@ -68,7 +68,12 @@ class ExchangeRateViewSet(ModelViewSet):
 @extend_schema_view(
     list=extend_schema(
         summary="Toʻlovlar roʻyxati",
-        description="Filtr: `?status=pending`, `?status=overdue`, `?client=1`, `?currency=UZS`",
+        description=(
+            "Standart roʻyxat faqat faol to‘lovlarni qaytaradi "
+            "(kutilmoqda, qisman, kechikkan). To‘liq to‘langanlar "
+            "ko‘rinmaydi. Filtr: `?status=paid`, `?include_paid=true`, "
+            "`?status=overdue`, `?client=1`, `?currency=UZS`"
+        ),
         tags=["Cash / Kassa"],
     ),
     retrieve=extend_schema(summary="Toʻlov", tags=["Cash / Kassa"]),
@@ -78,10 +83,7 @@ class ExchangeRateViewSet(ModelViewSet):
     destroy=extend_schema(summary="Toʻlov oʻchirish (Management)", tags=["Cash / Kassa"]),
 )
 class PaymentViewSet(ModelViewSet):
-    queryset = Payment.objects.select_related(
-        'sale__product', 'order', 'client'
-    ).prefetch_related('transactions__received_by',
-                       'order__items__product')
+    queryset = Payment.objects.all()
     # Operator kirolmaydi — to'lovlarda narx/summa/komissiya bor
     permission_classes  = (IsAccountantWithManagementRead,)
     filterset_fields    = ('status', 'client', 'currency', 'due_date',
@@ -90,6 +92,22 @@ class PaymentViewSet(ModelViewSet):
                            'order__contract_number', 'client__company_name',
                            'comment')
     ordering_fields     = ('due_date', 'created_at', 'total_amount')
+
+    def get_queryset(self):
+        qs = Payment.objects.select_related(
+            'sale__product', 'order', 'client',
+        ).prefetch_related(
+            'transactions__received_by',
+            'order__items__product',
+        )
+        if self.action == 'list':
+            include_paid = self.request.query_params.get(
+                'include_paid', '',
+            ).lower() in {'1', 'true', 'yes'}
+            status = self.request.query_params.get('status')
+            if not include_paid and not status:
+                qs = qs.exclude(status=Payment.PAID)
+        return qs
 
     def get_serializer_class(self):
         if self.action in ('update', 'partial_update'):

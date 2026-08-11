@@ -19,7 +19,9 @@ def user_abilities(user):
         'orders_view': True,
         'orders_manage': is_operator or is_management,
         'warehouse_view': True,
-        'warehouse_manage': is_operator,
+        'warehouse_manage': is_operator or is_management,
+        'prices_view': is_accountant or is_management,
+        'prices_manage': is_management,
         'clients_view': can_view_clients,
         'clients_manage': can_view_clients,
         'sales_view': True,
@@ -50,6 +52,7 @@ def user_session_payload(user):
         'can_view_clients': user.can_view_clients,
         'is_staff': user.is_staff,
         'is_superuser': user.is_superuser,
+        'is_management': bool(getattr(user, 'is_management', False)),
         'abilities': user_abilities(user),
     }
 

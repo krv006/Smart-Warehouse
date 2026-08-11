@@ -24,7 +24,7 @@ class StockInline(admin.TabularInline):
 class ProductAdmin(admin.ModelAdmin):
     list_display    = ('id', 'name', 'model', 'serial_number', 'category',
                        'source', 'purchase_price_fmt', 'selling_price_fmt',
-                       'min_quantity', 'stock_badge', 'created_at')
+                       'unit', 'min_quantity', 'stock_badge', 'created_at')
     search_fields   = ('name', 'model', 'serial_number', 'source')
     list_filter     = ('created_at', 'category')
     ordering        = ('-created_at',)
@@ -34,7 +34,7 @@ class ProductAdmin(admin.ModelAdmin):
     inlines         = (StockInline,)
 
     fieldsets = (
-        ('Asosiy', {'fields': ('category', 'name', 'model', 'serial_number', 'source')}),
+        ('Asosiy', {'fields': ('category', 'name', 'model', 'serial_number', 'source', 'unit')}),
         ('Narx',   {'fields': ('purchase_price', 'selling_price')}),
         ('Qoldiq', {'fields': ('min_quantity',)}),
         ('Vaqt',   {'fields': ('created_at', 'updated_at'), 'classes': ('collapse',)}),
@@ -56,9 +56,9 @@ class ProductAdmin(admin.ModelAdmin):
     def stock_badge(self, obj):
         qty = obj.quantity_in_stock
         color = '#dc3545' if qty == 0 else ('#ffc107' if qty < 5 else '#28a745')
-        icon  = '❌' if qty == 0 else ('⚠️' if qty < 5 else '✅')
-        return format_html('<span style="color:{};font-weight:600">{} {} dona</span>',
-                           color, icon, qty)
+        icon  = 'x' if qty == 0 else ('!' if qty < 5 else 'ok')
+        return format_html('<span style="color:{};font-weight:600">{} {} {}</span>',
+                           color, icon, qty, obj.get_unit_display())
 
 
 @admin.register(Stock)
@@ -73,5 +73,5 @@ class StockAdmin(admin.ModelAdmin):
     @admin.display(description='Miqdor', ordering='quantity')
     def quantity_colored(self, obj):
         color = '#dc3545' if obj.quantity == 0 else ('#fd7e14' if obj.quantity < 5 else '#28a745')
-        return format_html('<span style="color:{};font-weight:700">{} dona</span>',
-                           color, obj.quantity)
+        return format_html('<span style="color:{};font-weight:700">{} {}</span>',
+                           color, obj.quantity, obj.product.get_unit_display())

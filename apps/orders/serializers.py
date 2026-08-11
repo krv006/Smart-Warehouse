@@ -29,6 +29,23 @@ _ZAKAZ_TRACKED_FIELDS = ('quantity', 'received_qty', 'supplier',
                          'expected_date', 'warehouse_location', 'comment')
 
 
+def _can_manage_prices(user):
+    return bool(getattr(user, 'is_management', False)
+                or getattr(user, 'is_superuser', False))
+
+
+def _can_view_prices(user):
+    return _can_manage_prices(user) or bool(getattr(user, 'is_accountant', False))
+
+
+def _strip_item_prices(items_data):
+    if not items_data:
+        return items_data
+    for item in items_data:
+        item.pop('unit_price', None)
+    return items_data
+
+
 def _diff(instance, validated_data, fields):
     """Eski → yangi qiymatlar lug'ati (faqat o'zgarganlar)."""
     changes = {}
@@ -212,9 +229,14 @@ class OrderSerializer(ModelSerializer):
         product    = validated_data.pop('product', None)
         quantity   = validated_data.pop('quantity', None)
         unit_price = validated_data.pop('unit_price', None)
+        if not _can_manage_prices(user):
+            validated_data['prepaid_amount'] = 0
+            unit_price = None
         if not items_data:
             items_data = [{'product': product, 'quantity': quantity or 1,
                            'unit_price': unit_price}]
+        elif not _can_manage_prices(user):
+            items_data = _strip_item_prices(items_data)
 
         order = Order.objects.create(**validated_data)
         for item in items_data:
@@ -258,6 +280,10 @@ class OrderSerializer(ModelSerializer):
         legacy_qty   = validated_data.pop('quantity', None)
         legacy_price = validated_data.pop('unit_price', None)
         validated_data.pop('product', None)
+        if not _can_manage_prices(user):
+            legacy_price = None
+            if items_data:
+                items_data = _strip_item_prices(items_data)
 
         changes = _diff(instance, validated_data, _ORDER_TRACKED_FIELDS)
 
@@ -374,6 +400,32 @@ class OrderSerializer(ModelSerializer):
                 asos=asos, order=order, user=user,
             )
         return order
+
+
+class OrderItemOperatorSerializer(OrderItemSerializer):
+    """Operator uchun — narx va summa yashirin."""
+
+    class Meta(OrderItemSerializer.Meta):
+        fields = ('id', 'remove', 'product', 'product_name',
+                  'quantity', 'reserved_qty', 'backorder_qty',
+                  'has_active_zakaz', 'comment')
+
+
+class OrderOperatorSerializer(OrderSerializer):
+    """Operator uchun — moliyaviy maydonlar yashirin."""
+    items = OrderItemOperatorSerializer(many=True, required=False)
+
+    class Meta(OrderSerializer.Meta):
+        fields = (
+            'id', 'client', 'client_name',
+            'items',
+            'total_quantity',
+            'contract_number', 'contract_date', 'contract_file',
+            'reserved_qty', 'backorder_qty',
+            'has_active_zakaz',
+            'due_date', 'status', 'comment', 'created_at',
+            'asos', 'history',
+        )
 
 
 class OrderBulkCreateSerializer(Serializer):
@@ -535,13 +587,18 @@ class ZakazSerializer(ModelSerializer):
         return value
 
     def validate(self, attrs):
-        # Yaratish: API orqali ochilgan zakaz MUSTAQIL (manual) hisoblanadi —
-        # unda narx (unit_price) MAJBURIY (summa avtomatik hisoblanadi).
+        # Yaratish: mustaqil (manual) import uchun narx faqat Management kiritadi.
+        user = self.context['request'].user
         if self.instance is None:
-            if attrs.get('unit_price') in (None, ''):
-                raise ValidationError({
-                    'unit_price': 'Mustaqil zakaz uchun narx (unit_price) '
-                                  'kiritilishi shart.'})
+            if _can_manage_prices(user):
+                if attrs.get('unit_price') in (None, ''):
+                    raise ValidationError({
+                        'unit_price': 'Mustaqil import uchun narx (unit_price) '
+                                      'kiritilishi shart.'})
+            else:
+                attrs.pop('unit_price', None)
+                attrs.pop('currency', None)
+                attrs.pop('payment_status', None)
         else:
             # Qabul qilingan/bekor qilingan zakazda miqdor va narx qotib qoladi
             locked = self.instance.status in (Zakaz.RECEIVED, Zakaz.CANCELLED)
@@ -700,6 +757,24 @@ class ZakazSerializer(ModelSerializer):
             zakaz.receive(user=user)
 
         return zakaz
+
+
+class ZakazOperatorSerializer(ZakazSerializer):
+    """Operator uchun — import narxi va to'lov holati yashirin."""
+
+    class Meta(ZakazSerializer.Meta):
+        fields = (
+            'id', 'zakaz_type', 'type_display', 'order', 'order_contract',
+            'product', 'product_name',
+            'quantity', 'received_qty',
+            'supplier', 'status', 'status_display',
+            'contract_number', 'contract_date', 'confirmed_at',
+            'asos', 'faktura',
+            'expected_date', 'warehouse_location',
+            'created_by', 'created_by_name',
+            'comment', 'created_at',
+            'history',
+        )
 
 
 class ZakazItemSerializer(Serializer):

@@ -126,23 +126,33 @@ class SaleSerializer(ModelSerializer):
 class SaleOperatorSerializer(SaleSerializer):
     """
     Operator uchun — sotuv narxi, jami summa va foyda YASHIRIN.
-    Biznes qoidasi: operator sotuv summalarini/narxlarni ko'rmaydi.
-    sold_price yozishда kerak, shuning uchun write_only qilinadi.
+    Narx mahsulotning selling_price maydonidan avtomatik olinadi.
     """
-    sold_price = DecimalField(max_digits=14, decimal_places=2, min_value=0,
-                              write_only=True)
-
     class Meta(SaleSerializer.Meta):
         fields = ('id', 'product', 'product_name', 'client', 'client_name',
-                  'quantity', 'sold_price',
-                  'sold_to', 'destination', 'sold_date', 'comment', 'created_at')
+                  'quantity', 'sold_to', 'destination', 'sold_date',
+                  'comment', 'created_at')
+
+    @transaction.atomic
+    def create(self, validated_data):
+        product = validated_data['product']
+        validated_data['sold_price'] = product.selling_price or 0
+        sale = super(SaleSerializer, self).create(validated_data)
+        _deplete_stock(sale.product, sale.quantity)
+        return sale
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        validated_data.pop('sold_price', None)
+        return super().update(instance, validated_data)
 
 
 class SaleItemSerializer(Serializer):
     """Bulk savdo ichidagi bitta mahsulot qatori."""
     product    = PrimaryKeyRelatedField(queryset=Product.objects.all())
     quantity   = DecimalField(max_digits=12, decimal_places=0, min_value=1)
-    sold_price = DecimalField(max_digits=14, decimal_places=2, min_value=0)
+    sold_price = DecimalField(max_digits=14, decimal_places=2, min_value=0,
+                              required=False, allow_null=True)
     comment    = CharField(required=False, allow_blank=True, allow_null=True)
 
 
@@ -200,11 +210,14 @@ class SaleBulkCreateSerializer(Serializer):
 
         created = []
         for item in items:
+            sold_price = item.get('sold_price')
+            if sold_price is None:
+                sold_price = item['product'].selling_price or 0
             sale = Sale.objects.create(
                 product=item['product'],
                 client=client,
                 quantity=int(item['quantity']),
-                sold_price=item['sold_price'],
+                sold_price=sold_price,
                 sold_to=sold_to,
                 destination=destination,
                 sold_date=sold_date,

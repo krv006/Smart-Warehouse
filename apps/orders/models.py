@@ -125,9 +125,18 @@ class Order(TimeStampedModel):
     @transaction.atomic
     def reserve(self):
         """Barcha qatorlarga ombordagi mavjud qoldiqdan FIFO bron ajratadi."""
+        products = []
         for item in self.items.select_for_update():
             item.reserve()
+            products.append(item.product)
         self.refresh_status()
+        from apps.notifications.models import Notification
+        seen = set()
+        for product in products:
+            if product.id in seen:
+                continue
+            seen.add(product.id)
+            Notification.check_product_stock_level(product)
 
     @transaction.atomic
     def release(self):

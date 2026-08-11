@@ -30,6 +30,7 @@ class ProductSerializer(ModelSerializer):
     available_quantity = IntegerField(read_only=True)
     stock_status       = SerializerMethodField()
     category_name      = SerializerMethodField()
+    unit_display       = SerializerMethodField()
     quantity            = IntegerField(write_only=True, required=False, min_value=1)
     warehouse_location  = CharField(write_only=True, required=False,
                                     allow_blank=True, max_length=255)
@@ -38,7 +39,8 @@ class ProductSerializer(ModelSerializer):
         model  = Product
         fields = ('id', 'category', 'category_name', 'name', 'model',
                   'serial_number', 'purchase_price', 'selling_price', 'source',
-                  'min_quantity', 'quantity_in_stock', 'reserved_quantity',
+                  'unit', 'unit_display', 'min_quantity',
+                  'quantity_in_stock', 'reserved_quantity',
                   'available_quantity', 'stock_status',
                   'quantity', 'warehouse_location', 'created_at')
         read_only_fields = ('created_at',)
@@ -48,6 +50,9 @@ class ProductSerializer(ModelSerializer):
 
     def get_category_name(self, obj):
         return str(obj.category) if obj.category else None
+
+    def get_unit_display(self, obj):
+        return obj.get_unit_display()
 
     def validate(self, attrs):
         return _validate_stock_fields(attrs)
@@ -70,9 +75,10 @@ class ProductSerializer(ModelSerializer):
         if product.purchase_price is not None:
             Notification.resolve_price_notifications(product)
         # low_stock check after min_quantity may have changed
-        if product.quantity_in_stock <= product.min_quantity and product.quantity_in_stock > 0:
+        avail = product.available_quantity
+        if 0 < avail <= product.min_quantity:
             Notification.notify_low_stock(product)
-        elif product.quantity_in_stock > product.min_quantity:
+        elif avail > product.min_quantity:
             Notification.resolve_low_stock_notifications(product)
         return product
 
@@ -84,6 +90,7 @@ class ProductOperatorSerializer(ModelSerializer):
     available_quantity = IntegerField(read_only=True)
     stock_status       = SerializerMethodField()
     category_name      = SerializerMethodField()
+    unit_display       = SerializerMethodField()
     quantity            = IntegerField(write_only=True, required=False, min_value=1)
     warehouse_location  = CharField(write_only=True, required=False,
                                     allow_blank=True, max_length=255)
@@ -91,16 +98,20 @@ class ProductOperatorSerializer(ModelSerializer):
     class Meta:
         model  = Product
         fields = ('id', 'category', 'category_name', 'name', 'model',
-                  'serial_number', 'source', 'min_quantity', 'quantity_in_stock',
-                  'reserved_quantity', 'available_quantity', 'stock_status',
-                  'quantity', 'warehouse_location', 'created_at')
-        read_only_fields = ('created_at',)
+                  'serial_number', 'source', 'unit', 'unit_display',
+                  'min_quantity', 'quantity_in_stock', 'reserved_quantity',
+                  'available_quantity', 'stock_status', 'quantity',
+                  'warehouse_location', 'created_at')
+        read_only_fields = ('created_at', 'min_quantity')
 
     def get_stock_status(self, obj):
         return obj.stock_status
 
     def get_category_name(self, obj):
         return str(obj.category) if obj.category else None
+
+    def get_unit_display(self, obj):
+        return obj.get_unit_display()
 
     def validate(self, attrs):
         return _validate_stock_fields(attrs)
@@ -128,12 +139,14 @@ class StockSerializer(ModelSerializer):
     product_model     = SerializerMethodField()
     min_quantity      = SerializerMethodField()
     stock_status      = SerializerMethodField()
+    unit              = SerializerMethodField()
+    unit_display      = SerializerMethodField()
 
     class Meta:
         model  = Stock
         fields = ('id', 'product', 'product_name', 'product_model',
                   'quantity', 'reserved_quantity', 'warehouse_location',
-                  'min_quantity', 'stock_status')
+                  'min_quantity', 'stock_status', 'unit', 'unit_display')
         # reserved_quantity faqat buyurtma (bron) mexanizmi orqali o'zgaradi —
         # qo'lda o'zgartirish order.reserved_qty bilan mosligini buzadi
         read_only_fields = ('reserved_quantity',)
@@ -149,6 +162,12 @@ class StockSerializer(ModelSerializer):
 
     def get_stock_status(self, obj):
         return obj.product.stock_status
+
+    def get_unit(self, obj):
+        return obj.product.unit
+
+    def get_unit_display(self, obj):
+        return obj.product.get_unit_display()
 
     @transaction.atomic
     def update(self, instance, validated_data):

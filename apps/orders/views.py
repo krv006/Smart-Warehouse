@@ -1,5 +1,7 @@
 from django.db import transaction
 import json
+from django.utils import timezone
+from django.utils.dateparse import parse_date
 from drf_spectacular.utils import extend_schema, extend_schema_view
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
@@ -34,8 +36,9 @@ from apps.common.permissions import (IsOperatorOrReadOnly,
                                      IsOperatorOrManagement)
 from apps.orders.models import (Order, OrderHistory, Zakaz, ZakazHistory,
                                 ProductContract, register_contract,
-                                allocate_pending_orders)
-from apps.orders.serializers import (OrderSerializer, ZakazSerializer,
+                                allocate_pending_orders, build_contract_number)
+from apps.orders.serializers import (OrderSerializer, OrderOperatorSerializer,
+                                     ZakazSerializer, ZakazOperatorSerializer,
                                      OrderBulkCreateSerializer,
                                      ZakazBulkCreateSerializer,
                                      ProductContractSerializer)
@@ -136,6 +139,15 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
     ordering_fields    = ('due_date', 'created_at', 'status')
     http_method_names  = ('get', 'post', 'patch', 'head', 'options')
 
+    def get_serializer_class(self):
+        user = self.request.user
+        if user.is_authenticated and (
+                getattr(user, 'is_management', False)
+                or getattr(user, 'is_accountant', False)
+                or getattr(user, 'is_superuser', False)):
+            return OrderSerializer
+        return OrderOperatorSerializer
+
     def create(self, request, *args, **kwargs):
         data = request.data.copy() if hasattr(request.data, 'copy') else request.data
         if isinstance(data.get('items'), str):
@@ -148,6 +160,27 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
         else:
             request.data = data
         return super().create(request, *args, **kwargs)
+
+    @extend_schema(
+        summary="Keyingi avtomatik shartnoma raqami",
+        description=(
+            "`contract_date` berilsa o'sha sana bo'yicha, berilmasa bugungi "
+            "Tashkent sanasi bo'yicha keyingi raqam qaytariladi."
+        ),
+        tags=["Orders / Bron"],
+    )
+    @action(detail=False, methods=['get'], url_path='next-contract-number')
+    def next_contract_number(self, request):
+        date_value = parse_date(request.query_params.get('contract_date') or '')
+        if date_value is None:
+            date_value = timezone.localdate()
+        return Response({
+            'contract_number': build_contract_number(
+                client=True,
+                contract_date=date_value,
+            ),
+            'contract_date': date_value,
+        })
 
     @extend_schema(
         summary="Bir nechta mahsulotli buyurtma (bulk) — natija BITTA buyurtma",
@@ -414,6 +447,15 @@ class ZakazViewSet(CreateModelMixin, ListModelMixin,
                           'supplier', 'contract_number', 'faktura', 'comment')
     ordering_fields    = ('expected_date', 'created_at', 'status')
     http_method_names  = ('get', 'post', 'patch', 'head', 'options')
+
+    def get_serializer_class(self):
+        user = self.request.user
+        if user.is_authenticated and (
+                getattr(user, 'is_management', False)
+                or getattr(user, 'is_accountant', False)
+                or getattr(user, 'is_superuser', False)):
+            return ZakazSerializer
+        return ZakazOperatorSerializer
 
     @extend_schema(
         summary="Bir vaqtda bir nechta mahsulot uchun zakaz (bulk)",

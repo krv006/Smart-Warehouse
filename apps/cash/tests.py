@@ -83,3 +83,29 @@ class PaymentOperatorAccessTests(TestCase):
         self.api.force_authenticate(self.accountant)
         res = self.api.get('/api/v1/cash/payments/')
         self.assertEqual(res.status_code, 200)
+
+
+class PaymentListFilterTests(TestCase):
+    def setUp(self):
+        self.api = APIClient()
+        self.accountant = User.objects.create_user(
+            'acc_list', password='x', role=User.ACCOUNTANT)
+        self.api.force_authenticate(self.accountant)
+        self.pending = _make_sale_payment()
+        self.paid = _make_sale_payment()
+        self.paid.paid_amount = self.paid.total_amount
+        self.paid.status = Payment.PAID
+        self.paid.save()
+
+    def test_list_hides_paid_by_default(self):
+        res = self.api.get('/api/v1/cash/payments/')
+        self.assertEqual(res.status_code, 200)
+        ids = {row['id'] for row in res.data['results']}
+        self.assertIn(self.pending.id, ids)
+        self.assertNotIn(self.paid.id, ids)
+
+    def test_list_can_include_paid_with_filter(self):
+        res = self.api.get('/api/v1/cash/payments/?status=paid')
+        self.assertEqual(res.status_code, 200)
+        ids = {row['id'] for row in res.data['results']}
+        self.assertIn(self.paid.id, ids)
