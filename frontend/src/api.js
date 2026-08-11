@@ -108,6 +108,24 @@ async function fetchRequest(path, options, token) {
   return fetch(`${API_ROOT}${path}`, { ...options, headers })
 }
 
+export async function download(path, filename = 'export.xlsx') {
+  const token = localStorage.getItem(ACCESS_KEY)
+  const response = await fetchRequest(path, {}, token)
+  if (!response.ok) {
+    const data = await readResponse(response)
+    throw new ApiError(errorMessage(data), response.status)
+  }
+  const blob = await response.blob()
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
 export async function request(path, options = {}) {
   const { skipAuth = false, retry = true, ...fetchOptions } = options
   let token = skipAuth ? null : localStorage.getItem(ACCESS_KEY)
@@ -137,16 +155,27 @@ export const api = {
   me: () => request('/auth/me/'),
   reports: () => Promise.all([request('/reports/summary/'), request('/reports/warehouse/'), request('/reports/cash/'), request('/reports/top-products/')]),
   orders: (params = {}) => request(`/orders/${toQuery({ page_size: 20, ...params })}`),
+  ordersBulk: (payload) => request('/orders/bulk/', { method: 'POST', body: JSON.stringify(payload) }),
   order: (id) => request(`/orders/${id}/`),
+  zakaz: (params = {}) => request(`/orders/zakaz/${toQuery({ page_size: 50, ...params })}`),
+  zakazBulk: (payload) => request('/orders/zakaz/bulk/', { method: 'POST', body: JSON.stringify(payload) }),
+  contracts: (params = {}) => request(`/orders/contracts/${toQuery({ page_size: 50, ...params })}`),
+  productContracts: (id) => request(`/warehouse/products/${id}/contracts/`),
+  categories: (params = {}) => request(`/warehouse/categories/${toQuery({ page_size: 100, ...params })}`),
+  stocks: (params = {}) => request(`/warehouse/stocks/${toQuery({ page_size: 100, ...params })}`),
   products: (params = {}) => request(`/warehouse/products/${toQuery({ page_size: 50, ...params })}`),
   clients: (params = {}) => request(`/clients/${toQuery({ page_size: 50, ...params })}`),
+  users: (params = {}) => request(`/auth/users/${toQuery({ page_size: 50, ...params })}`),
+  registerUser: (payload) => request('/auth/register/', { method: 'POST', body: JSON.stringify(payload) }),
   notifications: (params = {}) => request(`/notifications/${toQuery({ page_size: 50, ...params })}`),
   notificationsMarkRead: (id) => request(`/notifications/${id}/mark_read/`, { method: 'POST' }),
   notificationsMarkAllRead: () => request('/notifications/mark_all_read/', { method: 'POST' }),
   payments: (params = {}) => request(`/cash/payments/${toQuery({ page_size: 50, ...params })}`),
   paymentsSummary: () => request('/cash/payments/summary/'),
   sales: (params = {}) => request(`/sales/${toQuery({ page_size: 50, ...params })}`),
+  salesBulk: (payload) => request('/sales/bulk/', { method: 'POST', body: JSON.stringify(payload) }),
   expenses: (params = {}) => request(`/expenses/expenses/${toQuery({ page_size: 50, ...params })}`),
+  expensesSummary: () => request('/expenses/summary/'),
   expenseTypes: () => request('/expenses/expense-types/?page_size=50'),
   expenseSubtypes: () => request('/expenses/expense-subtypes/?page_size=100'),
   exchangeRateLatest: (refresh = false) => request(`/cash/exchange-rates/latest/?refresh=${refresh ? 'true' : 'false'}`),
@@ -161,4 +190,8 @@ export const api = {
   cancelOrder: (id, payload) => request(`/orders/${id}/cancel/`, { method: 'POST', body: JSON.stringify(payload) }),
   createOrderZakaz: (id, payload) => request(`/orders/${id}/create-zakaz/`, { method: 'POST', body: JSON.stringify(payload) }),
   addStock: (id, payload) => request(`/warehouse/products/${id}/add-stock/`, { method: 'POST', body: JSON.stringify(payload) }),
+  exportSales: () => download('/reports/excel/sales/', 'sales.xlsx'),
+  exportStock: () => download('/reports/excel/stock/', 'stock.xlsx'),
+  exportExpenses: () => download('/reports/excel/expenses/', 'expenses.xlsx'),
+  exportPayments: () => download('/reports/excel/payments/', 'payments.xlsx'),
 }

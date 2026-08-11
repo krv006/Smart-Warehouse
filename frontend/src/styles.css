@@ -703,6 +703,12 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .report-table td:last-child,
 .report-table th:last-child { text-align: right; }
 
+.export-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(140px, 1fr));
+  gap: 12px;
+}
+
 .row-actions {
   display: flex;
   justify-content: flex-end;
@@ -780,6 +786,47 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   inset: 0;
   opacity: 0;
   cursor: pointer;
+}
+
+.line-items {
+  display: grid;
+  gap: 10px;
+}
+.line-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.line-head b {
+  font-size: 13px;
+  font-weight: 800;
+}
+.line-item {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 90px 140px auto;
+  gap: 8px;
+  align-items: center;
+}
+.line-item select,
+.line-item input {
+  min-width: 0;
+}
+.check-field {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-direction: row;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0 12px;
+  background: #fff;
+  color: var(--text);
+}
+.check-field input {
+  width: 16px;
+  height: 16px;
 }
 
 .modal-backdrop {

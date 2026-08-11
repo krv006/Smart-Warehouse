@@ -1,20 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Warehouse, Bell, Buildings, CaretDown, ChartLineUp,
-  ClipboardText, CurrencyCircleDollar, FileText, Funnel, House, MagnifyingGlass,
-  Package, PencilSimple, Plus, SignOut, SpinnerGap, TrendDown, TrendUp, Users, WarningCircle, X, XCircle,
+  ClipboardText, CurrencyCircleDollar, DownloadSimple, FileText, Funnel, House, MagnifyingGlass,
+  Package, PencilSimple, Plus, SignOut, SpinnerGap, Stack, Tag, TrendDown, TrendUp, Truck, UserGear, Users, WarningCircle, X, XCircle,
 } from '@phosphor-icons/react'
 import { api, clearStoredSession, refreshAccessToken, saveSession, setAuthFailureHandler, tokenExpiresAt } from './api'
 
 const navigation = [
   ['Bosh sahifa', House, 'dashboard'],
   ['Buyurtmalar', FileText, 'orders_view'],
+  ['Zakazlar', Truck, 'procurement_view'],
+  ['Shartnomalar', ClipboardText, 'contracts_view'],
   ['Ombor', Package, 'warehouse_view'],
+  ['Kategoriyalar', Tag, 'categories_view'],
+  ['Qoldiqlar', Stack, 'stocks_view'],
   ['Mijozlar', Users, 'clients_view'],
   ['Sotuvlar', TrendUp, 'sales_view'],
   ['Kassa', CurrencyCircleDollar, 'cash_view'],
   ['Xarajatlar', ClipboardText, 'expenses_view'],
   ['Hisobotlar', ChartLineUp, 'reports_view'],
+  ['Foydalanuvchilar', UserGear, 'users_view'],
   ['Bildirishnomalar', Bell, 'notifications_view'],
 ]
 
@@ -73,6 +78,9 @@ function formatError(message) {
   if (/permission|forbidden|403/i.test(message)) return 'Bu amalni bajarish uchun ruxsatingiz yo‘q.'
   return message
 }
+
+const asText = (value, fallback = '—') => value === undefined || value === null || value === '' ? fallback : value
+const todayValue = () => new Date().toISOString().slice(0, 10)
 
 function ToastStack({ toasts, dismiss }) {
   return (
@@ -489,13 +497,20 @@ function Dashboard({ data, loading, onCreateOrder, onNavigate, session }) {
 function ReportsPage({ notify }) {
   const [tab, setTab] = useState('moliyaviy')
   const [data, setData] = useState(null)
+  const [extra, setExtra] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [exporting, setExporting] = useState('')
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
     try {
-      const [summary, warehouse, cash, topProducts] = await api.reports()
+      const [[summary, warehouse, cash, topProducts], expensesSummary, paymentsSummary] = await Promise.all([
+        api.reports(),
+        api.expensesSummary(),
+        api.paymentsSummary(),
+      ])
       setData({ summary, warehouse, cash, topProducts })
+      setExtra({ expensesSummary, paymentsSummary })
     } catch (err) {
       if (!silent) notify(err.message)
     } finally {
@@ -510,12 +525,28 @@ function ReportsPage({ notify }) {
   const warehouse = data?.warehouse || {}
   const cash = data?.cash || {}
   const products = data?.topProducts || []
+  const expensesSummary = extra?.expensesSummary || {}
+  const paymentsSummary = extra?.paymentsSummary || {}
 
   const tabs = [
     ['moliyaviy', 'Moliyaviy', CurrencyCircleDollar],
     ['ombor', 'Ombor', Package],
     ['sotuv', 'Sotuvlar', TrendUp],
+    ['xarajat', 'Xarajatlar', ClipboardText],
+    ['export', 'Excel', DownloadSimple],
   ]
+
+  const exportFile = async (key, fn) => {
+    setExporting(key)
+    try {
+      await fn()
+      notify('Excel fayl yuklandi.', 'success')
+    } catch (err) {
+      notify(err.message)
+    } finally {
+      setExporting('')
+    }
+  }
 
   return (
     <div className="page">
@@ -539,6 +570,7 @@ function ReportsPage({ notify }) {
           <div className="report-grid">
             <div className="report-stat"><span>Jami savdo daromadi</span><b>{money(summary.sales_revenue_total)} so‘m</b></div>
             <div className="report-stat"><span>Kassaga tushgan</span><b>{money(cash.sum_paid_uzs)} so‘m</b></div>
+            <div className="report-stat"><span>Payment summary</span><b>{money(paymentsSummary.sum_paid_uzs)} so‘m</b></div>
             <div className="report-stat"><span>Kechikkan to‘lovlar</span><b>{summary.overdue_payments_count || 0} ta</b></div>
           </div>
           <section className="data-panel">
@@ -567,6 +599,39 @@ function ReportsPage({ notify }) {
             )}
           </section>
         </>
+      )}
+
+      {tab === 'xarajat' && (
+        <>
+          <div className="report-grid">
+            <div className="report-stat"><span>Jami UZS xarajat</span><b>{money(expensesSummary.total_uzs)} so‘m</b></div>
+            <div className="report-stat"><span>Jami USD xarajat</span><b>{money(expensesSummary.total_usd)} USD</b></div>
+            <div className="report-stat"><span>Yozuvlar soni</span><b>{expensesSummary.count || 0}</b></div>
+          </div>
+          <section className="data-panel">
+            <div className="panel-head"><div><p className="eyebrow">XARAJATLAR</p><h3>Toifalar bo‘yicha</h3></div></div>
+            {list(expensesSummary.by_type).length ? (
+              <table className="report-table">
+                <thead><tr><th>Toifa</th><th>UZS</th><th>USD</th></tr></thead>
+                <tbody>{list(expensesSummary.by_type).map((item) => (
+                  <tr key={item.expense_type}><td>{item.name}</td><td>{money(item.total_uzs)} so‘m</td><td>{money(item.total_usd)} USD</td></tr>
+                ))}</tbody>
+              </table>
+            ) : <Empty label="Xarajat summary ma’lumotlari yo‘q" />}
+          </section>
+        </>
+      )}
+
+      {tab === 'export' && (
+        <section className="data-panel">
+          <div className="panel-head"><div><p className="eyebrow">EXCEL EXPORT</p><h3>Hisobot fayllari</h3></div></div>
+          <div className="export-grid">
+            <button className="secondary-button" disabled={exporting === 'sales'} onClick={() => exportFile('sales', api.exportSales)}><DownloadSimple size={17} />Sotuvlar</button>
+            <button className="secondary-button" disabled={exporting === 'stock'} onClick={() => exportFile('stock', api.exportStock)}><DownloadSimple size={17} />Ombor</button>
+            <button className="secondary-button" disabled={exporting === 'expenses'} onClick={() => exportFile('expenses', api.exportExpenses)}><DownloadSimple size={17} />Xarajatlar</button>
+            <button className="secondary-button" disabled={exporting === 'payments'} onClick={() => exportFile('payments', api.exportPayments)}><DownloadSimple size={17} />To‘lovlar</button>
+          </div>
+        </section>
       )}
 
       {tab === 'ombor' && (
@@ -651,12 +716,42 @@ function Empty({ label }) {
 
 const resources = {
   'Buyurtmalar': { load: api.orders, path: '/orders/' },
+  'Zakazlar': { load: api.zakaz, path: '/orders/zakaz/' },
+  'Shartnomalar': { load: api.contracts, path: '/orders/contracts/', readonly: true },
   'Ombor': { load: api.products, path: '/warehouse/products/' },
+  'Kategoriyalar': { load: api.categories, path: '/warehouse/categories/' },
+  'Qoldiqlar': { load: api.stocks, path: '/warehouse/stocks/' },
   'Mijozlar': { load: api.clients, path: '/clients/' },
   'Sotuvlar': { load: api.sales, path: '/sales/' },
   'Kassa': { load: api.payments, path: '/cash/payments/' },
   'Xarajatlar': { load: api.expenses, path: '/expenses/expenses/' },
+  'Foydalanuvchilar': { load: api.users, path: '/auth/users/' },
   'Bildirishnomalar': { load: api.notifications, path: '/notifications/' },
+}
+
+function rowTitle(title, row) {
+  if (title === 'Shartnomalar') return row.contract_number || `Reestr #${row.id}`
+  if (title === 'Zakazlar') return row.product_name || `Zakaz #${row.id}`
+  if (title === 'Qoldiqlar') return row.product_name || row.product || `Qoldiq #${row.id}`
+  if (title === 'Foydalanuvchilar') return row.username
+  return row.company_name || row.full_name || row.client_name || row.name || `Hujjat #${row.id}`
+}
+
+function rowMeta(title, row) {
+  if (title === 'Shartnomalar') return [row.product_name, row.source_type_display, row.asos].filter(Boolean).join(' • ') || row.created_at || '—'
+  if (title === 'Zakazlar') return [row.status_display || row.status, row.supplier, row.expected_date].filter(Boolean).join(' • ') || '—'
+  if (title === 'Qoldiqlar') return [row.warehouse_location, `bron: ${row.reserved_quantity || 0}`].filter(Boolean).join(' • ')
+  if (title === 'Foydalanuvchilar') return [row.role, row.is_active ? 'faol' : 'bloklangan'].filter(Boolean).join(' • ')
+  if (title === 'Mijozlar') return [row.phone, row.passport_number, row.inn].filter(Boolean).join(' • ') || row.created_at || '—'
+  return row.serial_number || row.status || row.phone || row.created_at || '—'
+}
+
+function rowValue(title, row) {
+  if (title === 'Zakazlar') return row.total ? `${money(row.total)} ${row.currency || ''}` : `${row.quantity || 0} dona`
+  if (title === 'Qoldiqlar') return `${row.quantity || 0} dona`
+  if (title === 'Shartnomalar') return row.contract_date || '—'
+  if (title === 'Foydalanuvchilar') return row.can_view_clients ? 'Mijoz: bor' : 'Mijoz: yo‘q'
+  return row.total_amount ? `${money(row.total_amount)} so‘m` : (row.available_quantity ?? row.total ?? '—')
 }
 
 function ResourcePage({ title, notify, reloadKey = 0, session }) {
@@ -687,14 +782,18 @@ function ResourcePage({ title, notify, reloadKey = 0, session }) {
 
   const manageAbilities = {
     'Buyurtmalar': 'orders_manage',
+    'Zakazlar': 'procurement_manage',
     'Ombor': 'warehouse_manage',
+    'Kategoriyalar': 'warehouse_manage',
+    'Qoldiqlar': 'warehouse_manage',
     'Mijozlar': 'clients_manage',
     'Sotuvlar': 'sales_manage',
     'Kassa': 'cash_manage',
     'Xarajatlar': 'expenses_manage',
+    'Foydalanuvchilar': 'users_manage',
   }
   const canManage = can(session, manageAbilities[title])
-  const canCreate = canManage && ['Mijozlar', 'Ombor', 'Buyurtmalar', 'Sotuvlar', 'Xarajatlar'].includes(title)
+  const canCreate = canManage && ['Mijozlar', 'Ombor', 'Buyurtmalar', 'Zakazlar', 'Kategoriyalar', 'Qoldiqlar', 'Sotuvlar', 'Xarajatlar', 'Foydalanuvchilar'].includes(title)
 
   const handleMarkRead = async (id) => {
     try {
@@ -774,15 +873,13 @@ function ResourcePage({ title, notify, reloadKey = 0, session }) {
                 ) : (
                   <>
                     <div className="product-name">
-                      <b>{row.company_name || row.full_name || row.client_name || row.name || `Hujjat #${row.id}`}</b>
-                      <small>{title === 'Mijozlar'
-                        ? [row.phone, row.passport_number, row.inn].filter(Boolean).join(' • ') || row.created_at || '—'
-                        : row.serial_number || row.status || row.phone || row.created_at || '—'}</small>
+                      <b>{rowTitle(title, row)}</b>
+                      <small>{rowMeta(title, row)}</small>
                     </div>
                     <span className="bar"><i style={{ width: '58%' }} /></span>
-                    <b>{row.total_amount ? `${money(row.total_amount)} so‘m` : (row.available_quantity ?? row.total ?? '—')}</b>
+                    <b>{rowValue(title, row)}</b>
                     <div className="row-actions">
-                      {canManage && <button className="row-action" disabled={opening} onClick={() => handleEdit(row)} aria-label="Tahrirlash"><PencilSimple size={17} /></button>}
+                      {canManage && !resources[title].readonly && <button className="row-action" disabled={opening} onClick={() => handleEdit(row)} aria-label="Tahrirlash"><PencilSimple size={17} /></button>}
                       {can(session, 'orders_manage') && title === 'Buyurtmalar' && !['fulfilled', 'cancelled'].includes(row.status) && (
                         <>
                           <button className="row-action" onClick={() => setOrderAction({ row, action: 'fulfill' })}>Yetkazish</button>
@@ -794,6 +891,12 @@ function ResourcePage({ title, notify, reloadKey = 0, session }) {
                       {can(session, 'cash_manage') && title === 'Kassa' && row.remaining !== '0' && (
                         <button className="row-action" onClick={() => setPaying(row)} aria-label="To‘lov qabul qilish"><CurrencyCircleDollar size={17} /></button>
                       )}
+                      {title === 'Ombor' && <button className="row-action" onClick={async () => {
+                        try {
+                          const rows = list(await api.productContracts(row.id))
+                          notify(rows.length ? `${rows.length} ta shartnoma reestri yozuvi topildi.` : 'Bu mahsulotda shartnoma reestri yo‘q.', rows.length ? 'success' : 'warning')
+                        } catch (err) { notify(err.message) }
+                      }}>Reestr</button>}
                     </div>
                   </>
                 )}
@@ -804,8 +907,12 @@ function ResourcePage({ title, notify, reloadKey = 0, session }) {
       </section>
       {editing && (title === 'Buyurtmalar'
         ? <OrderEditor item={editing.id ? editing : null} close={() => setEditing(null)} done={() => { setEditing(null); load() }} notify={notify} />
+        : title === 'Zakazlar'
+          ? <ZakazEditor item={editing.id ? editing : null} close={() => setEditing(null)} done={() => { setEditing(null); load() }} notify={notify} />
         : title === 'Sotuvlar'
           ? <SaleEditor item={editing.id ? editing : null} close={() => setEditing(null)} done={() => { setEditing(null); load() }} notify={notify} />
+          : title === 'Foydalanuvchilar'
+            ? <UserEditor item={editing.id ? editing : null} close={() => setEditing(null)} done={() => { setEditing(null); load() }} notify={notify} />
           : title === 'Xarajatlar'
             ? <ExpenseEditor item={editing.id ? editing : null} close={() => setEditing(null)} done={() => { setEditing(null); load() }} notify={notify} />
             : <Editor title={title} item={editing} path={resources[title].path} close={() => setEditing(null)} done={() => { setEditing(null); load() }} notify={notify} />
@@ -819,6 +926,8 @@ function ResourcePage({ title, notify, reloadKey = 0, session }) {
 
 const fields = {
   Ombor: [['name', 'Mahsulot nomi', true], ['model', 'Model'], ['serial_number', 'Seriya raqami', true], ['source', 'Manba / yetkazuvchi'], ['min_quantity', 'Minimal qoldiq'], ['quantity', 'Boshlang‘ich miqdor'], ['warehouse_location', 'Ombordagi joy']],
+  Kategoriyalar: [['name', 'Kategoriya nomi', true], ['parent', 'Parent ID']],
+  Qoldiqlar: [['product', 'Mahsulot ID', true], ['quantity', 'Miqdor', true], ['reserved_quantity', 'Bron miqdor'], ['warehouse_location', 'Ombordagi joy', true]],
 }
 
 function Editor({ title, item, path, close, done, notify }) {
@@ -832,6 +941,14 @@ function Editor({ title, item, path, close, done, notify }) {
     if (title === 'Ombor') {
       if (payload.min_quantity) payload.min_quantity = Number(payload.min_quantity)
       if (payload.quantity) payload.quantity = Number(payload.quantity)
+    }
+    if (title === 'Qoldiqlar') {
+      if (payload.product) payload.product = Number(payload.product)
+      if (payload.quantity) payload.quantity = Number(payload.quantity)
+      if (payload.reserved_quantity) payload.reserved_quantity = Number(payload.reserved_quantity)
+    }
+    if (title === 'Kategoriyalar') {
+      if (payload.parent) payload.parent = Number(payload.parent)
     }
     if (title === 'Mijozlar') {
       if (payload.client_type === 'individual') {
@@ -917,6 +1034,7 @@ function SaleEditor({ close, done, notify, item = null }) {
   const [products, setProducts] = useState([])
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState(() => ({ client: item?.client || '', product: item?.product || '', quantity: item?.quantity || '1', sold_price: item?.sold_price || '', sold_to: item?.sold_to || '', destination: item?.destination || '', sold_date: item?.sold_date || new Date().toISOString().slice(0, 10), comment: item?.comment || '' }))
+  const [items, setItems] = useState([{ product: '', quantity: '1', sold_price: '', comment: '' }])
 
   useEffect(() => {
     Promise.all([api.clients(), api.products()])
@@ -939,7 +1057,15 @@ function SaleEditor({ close, done, notify, item = null }) {
         comment: form.comment || '',
       }
       if (item?.id) await api.update('/sales/', item.id, payload)
-      else await api.create('/sales/', payload)
+      else if (items.length > 1 || items[0].product) {
+        await api.salesBulk({
+          client: form.client || null,
+          sold_to: form.sold_to || '',
+          destination: form.destination || '',
+          sold_date: form.sold_date || new Date().toISOString().slice(0, 10),
+          items: items.filter((row) => row.product).map((row) => ({ product: Number(row.product), quantity: Number(row.quantity), sold_price: row.sold_price, comment: row.comment || '' })),
+        })
+      } else await api.create('/sales/', payload)
       notify(item?.id ? 'Sotuv yangilandi.' : 'Sotuv saqlandi.', 'success')
       done()
     } catch (err) {
@@ -958,9 +1084,25 @@ function SaleEditor({ close, done, notify, item = null }) {
         </div>
         <div className="form-grid">
           <label>Mijoz<select value={form.client} onChange={(event) => setForm({ ...form, client: event.target.value })}><option value="">Mijoz tanlanmagan</option>{clients.map((client) => <option value={client.id} key={client.id}>{client.company_name || client.full_name}</option>)}</select></label>
-          <label>Mahsulot<select required value={form.product} onChange={(event) => setForm({ ...form, product: event.target.value })}><option value="">Mahsulotni tanlang</option>{products.map((product) => <option value={product.id} key={product.id}>{product.name} — {product.serial_number}</option>)}</select></label>
-          <label>Miqdor<input required min="1" type="number" value={form.quantity} onChange={(event) => setForm({ ...form, quantity: event.target.value })} /></label>
-          <label>Sotuv narxi<input required min="0" step="0.01" type="number" value={form.sold_price} onChange={(event) => setForm({ ...form, sold_price: event.target.value })} /></label>
+          {item?.id ? (
+            <>
+              <label>Mahsulot<select required value={form.product} onChange={(event) => setForm({ ...form, product: event.target.value })}><option value="">Mahsulotni tanlang</option>{products.map((product) => <option value={product.id} key={product.id}>{product.name} — {product.serial_number}</option>)}</select></label>
+              <label>Miqdor<input required min="1" type="number" value={form.quantity} onChange={(event) => setForm({ ...form, quantity: event.target.value })} /></label>
+              <label>Sotuv narxi<input required min="0" step="0.01" type="number" value={form.sold_price} onChange={(event) => setForm({ ...form, sold_price: event.target.value })} /></label>
+            </>
+          ) : (
+            <div className="full-width line-items">
+              <div className="line-head"><b>Mahsulotlar</b><button type="button" className="secondary-button" onClick={() => setItems([...items, { product: '', quantity: '1', sold_price: '', comment: '' }])}><Plus size={16} />Qator</button></div>
+              {items.map((row, index) => (
+                <div className="line-item" key={index}>
+                  <select required value={row.product} onChange={(event) => setItems(items.map((itemRow, i) => i === index ? { ...itemRow, product: event.target.value } : itemRow))}><option value="">Mahsulot</option>{products.map((product) => <option value={product.id} key={product.id}>{product.name} — {product.serial_number}</option>)}</select>
+                  <input required min="1" type="number" value={row.quantity} onChange={(event) => setItems(items.map((itemRow, i) => i === index ? { ...itemRow, quantity: event.target.value } : itemRow))} />
+                  <input required min="0" step="0.01" type="number" placeholder="Narx" value={row.sold_price} onChange={(event) => setItems(items.map((itemRow, i) => i === index ? { ...itemRow, sold_price: event.target.value } : itemRow))} />
+                  <button type="button" className="row-action" disabled={items.length === 1} onClick={() => setItems(items.filter((_, i) => i !== index))}>O‘chirish</button>
+                </div>
+              ))}
+            </div>
+          )}
           <label>Sotuvchi/kimga<select value={form.sold_to} onChange={(event) => setForm({ ...form, sold_to: event.target.value })}><option value="">Tanlanmagan</option><option value="Mijoz">Mijoz</option><option value="Operator">Operator</option><option value="Boshqa">Boshqa</option></select></label>
           <label>Manzil<input value={form.destination} onChange={(event) => setForm({ ...form, destination: event.target.value })} /></label>
           <label>Sana<input type="date" value={form.sold_date} onChange={(event) => setForm({ ...form, sold_date: event.target.value })} /></label>
@@ -1052,6 +1194,7 @@ function OrderEditor({ close, done, notify, item = null }) {
   const [saving, setSaving] = useState(false)
   const [file, setFile] = useState(null)
   const [form, setForm] = useState({ client: '', contract_number: '', contract_date: new Date().toISOString().slice(0, 10), due_date: '', prepaid_amount: '0', product: '', itemId: null, quantity: '1', unit_price: '', comment: '', asos: '' })
+  const [items, setItems] = useState([{ product: '', quantity: '1', unit_price: '' }])
 
   const updateContractNumber = (value) => {
     setForm({ ...form, contract_number: value.replace(/[^\d/]/g, '') })
@@ -1066,6 +1209,7 @@ function OrderEditor({ close, done, notify, item = null }) {
   useEffect(() => {
     if (!item) {
       setForm({ client: '', contract_number: '', contract_date: new Date().toISOString().slice(0, 10), due_date: '', prepaid_amount: '0', product: '', itemId: null, quantity: '1', unit_price: '', comment: '', asos: '' })
+      setItems([{ product: '', quantity: '1', unit_price: '' }])
       return
     }
     setForm({
@@ -1111,7 +1255,7 @@ function OrderEditor({ close, done, notify, item = null }) {
         if (form.due_date) payload.append('due_date', form.due_date)
         payload.append('prepaid_amount', form.prepaid_amount || '0')
         payload.append('comment', form.comment || '')
-        payload.append('items', JSON.stringify([{ product: Number(form.product), quantity: Number(form.quantity), unit_price: form.unit_price || null }]))
+        payload.append('items', JSON.stringify(items.filter((row) => row.product).map((row) => ({ product: Number(row.product), quantity: Number(row.quantity), unit_price: row.unit_price || null }))))
         if (file) payload.append('contract_file', file)
         const created = await api.createForm('/orders/', payload)
         const number = created?.contract_number || form.contract_number || 'avtomatik'
@@ -1136,9 +1280,25 @@ function OrderEditor({ close, done, notify, item = null }) {
           <label>Mijoz<select value={form.client} onChange={(event) => setForm({ ...form, client: event.target.value })}><option value="">Mijoz tanlanmagan</option>{clients.map((client) => <option value={client.id} key={client.id}>{client.company_name || client.full_name}</option>)}</select></label>
           <label>Shartnoma raqami<input value={form.contract_number} onChange={(event) => updateContractNumber(event.target.value)} placeholder="Masalan: 12/1108" inputMode="numeric" pattern="[0-9/]*" /></label>
           <label>Shartnoma sanasi<input type="date" value={form.contract_date} onChange={(event) => setForm({ ...form, contract_date: event.target.value })} /></label>
-          <label>Mahsulot<select required value={form.product} onChange={(event) => setForm({ ...form, product: event.target.value })}><option value="">Mahsulotni tanlang</option>{products.map((product) => <option value={product.id} key={product.id}>{product.name} — {product.serial_number}</option>)}</select></label>
-          <label>Miqdor<input required min="1" type="number" value={form.quantity} onChange={(event) => setForm({ ...form, quantity: event.target.value })} /></label>
-          <label>Birlik narxi<input type="number" min="0" step="0.01" value={form.unit_price} onChange={(event) => setForm({ ...form, unit_price: event.target.value })} /></label>
+          {item?.id ? (
+            <>
+              <label>Mahsulot<select required value={form.product} onChange={(event) => setForm({ ...form, product: event.target.value })}><option value="">Mahsulotni tanlang</option>{products.map((product) => <option value={product.id} key={product.id}>{product.name} — {product.serial_number}</option>)}</select></label>
+              <label>Miqdor<input required min="1" type="number" value={form.quantity} onChange={(event) => setForm({ ...form, quantity: event.target.value })} /></label>
+              <label>Birlik narxi<input type="number" min="0" step="0.01" value={form.unit_price} onChange={(event) => setForm({ ...form, unit_price: event.target.value })} /></label>
+            </>
+          ) : (
+            <div className="full-width line-items">
+              <div className="line-head"><b>Mahsulotlar</b><button type="button" className="secondary-button" onClick={() => setItems([...items, { product: '', quantity: '1', unit_price: '' }])}><Plus size={16} />Qator</button></div>
+              {items.map((row, index) => (
+                <div className="line-item" key={index}>
+                  <select required value={row.product} onChange={(event) => setItems(items.map((itemRow, i) => i === index ? { ...itemRow, product: event.target.value } : itemRow))}><option value="">Mahsulot</option>{products.map((product) => <option value={product.id} key={product.id}>{product.name} — {product.serial_number}</option>)}</select>
+                  <input required min="1" type="number" value={row.quantity} onChange={(event) => setItems(items.map((itemRow, i) => i === index ? { ...itemRow, quantity: event.target.value } : itemRow))} />
+                  <input type="number" min="0" step="0.01" placeholder="Birlik narxi" value={row.unit_price} onChange={(event) => setItems(items.map((itemRow, i) => i === index ? { ...itemRow, unit_price: event.target.value } : itemRow))} />
+                  <button type="button" className="row-action" disabled={items.length === 1} onClick={() => setItems(items.filter((_, i) => i !== index))}>O‘chirish</button>
+                </div>
+              ))}
+            </div>
+          )}
           <label>Oldindan to‘lov<input type="number" min="0" step="0.01" value={form.prepaid_amount} onChange={(event) => setForm({ ...form, prepaid_amount: event.target.value })} /></label>
           <label>Yetkazish muddati<input type="date" value={form.due_date} onChange={(event) => setForm({ ...form, due_date: event.target.value })} /></label>
           {item?.id && <label className="full-width">Tahrirlash sababi<input required value={form.asos} onChange={(event) => setForm({ ...form, asos: event.target.value })} placeholder="Nima uchun o‘zgartirilayotganini yozing" /></label>}
@@ -1194,6 +1354,121 @@ function OrderActionEditor({ item, action, close, done, notify }) {
           {action === 'zakaz' && <><label>Yetkazuvchi<input value={form.supplier} onChange={(event) => setForm({ ...form, supplier: event.target.value })} /></label><label>Kutilgan sana<input type="date" value={form.expected_date} onChange={(event) => setForm({ ...form, expected_date: event.target.value })} /></label></>}
         </div>
         <div className="editor-actions"><button type="button" className="secondary-button" onClick={close}>Bekor qilish</button><button className="primary-button" disabled={saving}>{saving ? <SpinnerGap size={18} className="spin" /> : labels[action]}</button></div>
+      </form>
+    </div>
+  )
+}
+
+function ZakazEditor({ close, done, notify, item = null }) {
+  const [products, setProducts] = useState([])
+  const [saving, setSaving] = useState(false)
+  const [form, setForm] = useState(() => ({
+    product: item?.product || '',
+    quantity: item?.quantity || '1',
+    received_qty: item?.received_qty || '0',
+    unit_price: item?.unit_price || '',
+    currency: item?.currency || 'UZS',
+    supplier: item?.supplier || '',
+    status: item?.status || 'new',
+    payment_status: item?.payment_status || 'unpaid',
+    contract_number: item?.contract_number || '',
+    contract_date: item?.contract_date || todayValue(),
+    faktura: item?.faktura || '',
+    expected_date: item?.expected_date || '',
+    warehouse_location: item?.warehouse_location || '',
+    asos: item?.asos || '',
+    comment: item?.comment || '',
+  }))
+
+  useEffect(() => {
+    api.products().then((data) => setProducts(list(data))).catch((err) => notify(err.message))
+  }, [notify])
+
+  const submit = async (event) => {
+    event.preventDefault()
+    setSaving(true)
+    try {
+      const payload = Object.fromEntries(Object.entries(form).filter(([, value]) => value !== '' && value !== null))
+      if (payload.product) payload.product = Number(payload.product)
+      if (payload.quantity) payload.quantity = Number(payload.quantity)
+      if (payload.received_qty) payload.received_qty = Number(payload.received_qty)
+      if (item?.id) await api.update('/orders/zakaz/', item.id, payload)
+      else await api.create('/orders/zakaz/', payload)
+      notify(item?.id ? 'Zakaz yangilandi.' : 'Zakaz yaratildi.', 'success')
+      done()
+    } catch (err) {
+      notify(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <form className="editor" onSubmit={submit}>
+        <div className="editor-head"><div><p className="eyebrow">{item?.id ? 'ZAKAZ TAHRIRI' : 'YANGI ZAKAZ'}</p><h3>Yetkazuvchidan buyurtma</h3></div><button type="button" className="icon-button" onClick={close} aria-label="Yopish"><X size={20} /></button></div>
+        <div className="form-grid">
+          <label>Mahsulot<select required disabled={Boolean(item?.order_contract)} value={form.product} onChange={(event) => setForm({ ...form, product: event.target.value })}><option value="">Mahsulotni tanlang</option>{products.map((product) => <option value={product.id} key={product.id}>{product.name} — {product.serial_number}</option>)}</select></label>
+          <label>Miqdor<input required min="1" type="number" value={form.quantity} onChange={(event) => setForm({ ...form, quantity: event.target.value })} /></label>
+          <label>Qabul qilingan<input min="0" type="number" value={form.received_qty} onChange={(event) => setForm({ ...form, received_qty: event.target.value })} /></label>
+          <label>Narx<input required={!item?.id} min="0" step="0.01" type="number" value={form.unit_price} onChange={(event) => setForm({ ...form, unit_price: event.target.value })} /></label>
+          <label>Valyuta<select value={form.currency} onChange={(event) => setForm({ ...form, currency: event.target.value })}><option value="UZS">UZS</option><option value="USD">USD</option></select></label>
+          <label>Status<select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value })}><option value="new">Yangi</option><option value="confirmed">Tasdiqlandi</option><option value="received">Qabul qilindi</option><option value="cancelled">Bekor qilindi</option></select></label>
+          <label>To‘lov statusi<select value={form.payment_status} onChange={(event) => setForm({ ...form, payment_status: event.target.value })}><option value="unpaid">To‘lanmagan</option><option value="partial">Qisman</option><option value="paid">To‘langan</option></select></label>
+          <label>Yetkazuvchi<input value={form.supplier} onChange={(event) => setForm({ ...form, supplier: event.target.value })} /></label>
+          <label>Shartnoma raqami<input value={form.contract_number} onChange={(event) => setForm({ ...form, contract_number: event.target.value.replace(/[^\d/]/g, '') })} placeholder="12/1108" /></label>
+          <label>Shartnoma sanasi<input type="date" value={form.contract_date} onChange={(event) => setForm({ ...form, contract_date: event.target.value })} /></label>
+          <label>Faktura<input value={form.faktura} onChange={(event) => setForm({ ...form, faktura: event.target.value })} /></label>
+          <label>Kutilgan sana<input type="date" value={form.expected_date} onChange={(event) => setForm({ ...form, expected_date: event.target.value })} /></label>
+          <label>Ombor joyi<input value={form.warehouse_location} onChange={(event) => setForm({ ...form, warehouse_location: event.target.value })} /></label>
+          <label className="full-width">Asos<textarea required={item?.id && form.status !== item.status} rows="3" value={form.asos} onChange={(event) => setForm({ ...form, asos: event.target.value })} /></label>
+          <label className="full-width">Izoh<textarea rows="3" value={form.comment} onChange={(event) => setForm({ ...form, comment: event.target.value })} /></label>
+        </div>
+        <div className="editor-actions"><button type="button" className="secondary-button" onClick={close}>Bekor qilish</button><button className="primary-button" disabled={saving}>{saving ? <SpinnerGap size={18} className="spin" /> : 'Saqlash'}</button></div>
+      </form>
+    </div>
+  )
+}
+
+function UserEditor({ close, done, notify, item = null }) {
+  const [saving, setSaving] = useState(false)
+  const [form, setForm] = useState(() => ({ username: item?.username || '', password: '', first_name: item?.first_name || '', last_name: item?.last_name || '', role: item?.role || 'OPERATOR', phone: item?.phone || '', telegram_id: item?.telegram_id || '', can_view_clients: Boolean(item?.can_view_clients), is_active: item?.is_active ?? true }))
+  const submit = async (event) => {
+    event.preventDefault()
+    setSaving(true)
+    try {
+      const payload = { ...form }
+      if (item?.id) {
+        delete payload.password
+        await api.update('/auth/users/', item.id, payload)
+      } else {
+        delete payload.is_active
+        await api.registerUser(payload)
+      }
+      notify(item?.id ? 'Foydalanuvchi yangilandi.' : 'Foydalanuvchi yaratildi.', 'success')
+      done()
+    } catch (err) {
+      notify(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <form className="editor" onSubmit={submit}>
+        <div className="editor-head"><div><p className="eyebrow">{item?.id ? 'USER TAHRIRI' : 'YANGI USER'}</p><h3>Foydalanuvchi ruxsatlari</h3></div><button type="button" className="icon-button" onClick={close} aria-label="Yopish"><X size={20} /></button></div>
+        <div className="form-grid">
+          <label>Username<input required value={form.username} onChange={(event) => setForm({ ...form, username: event.target.value })} /></label>
+          {!item?.id && <label>Parol<input required minLength="8" type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></label>}
+          <label>Ism<input value={form.first_name} onChange={(event) => setForm({ ...form, first_name: event.target.value })} /></label>
+          <label>Familiya<input value={form.last_name} onChange={(event) => setForm({ ...form, last_name: event.target.value })} /></label>
+          <label>Rol<select value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value })}><option value="OPERATOR">Operator</option><option value="ACCOUNTANT">Accountant</option><option value="MANAGEMENT">Management</option></select></label>
+          <label>Telefon<input value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></label>
+          <label>Telegram ID<input value={form.telegram_id} onChange={(event) => setForm({ ...form, telegram_id: event.target.value })} /></label>
+          <label className="check-field"><input type="checkbox" checked={form.can_view_clients} onChange={(event) => setForm({ ...form, can_view_clients: event.target.checked })} />Mijozlarni ko‘rish</label>
+          <label className="check-field"><input type="checkbox" checked={form.is_active} onChange={(event) => setForm({ ...form, is_active: event.target.checked })} />Faol</label>
+        </div>
+        <div className="editor-actions"><button type="button" className="secondary-button" onClick={close}>Bekor qilish</button><button className="primary-button" disabled={saving}>{saving ? <SpinnerGap size={18} className="spin" /> : 'Saqlash'}</button></div>
       </form>
     </div>
   )

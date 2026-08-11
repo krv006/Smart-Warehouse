@@ -30,6 +30,13 @@ def user_abilities(user):
         'expenses_manage': is_accountant or is_management,
         'reports_view': is_accountant or is_management,
         'notifications_view': True,
+        'procurement_view': True,
+        'procurement_manage': is_operator or is_management,
+        'contracts_view': True,
+        'categories_view': True,
+        'stocks_view': True,
+        'users_view': is_management,
+        'users_manage': is_management,
     }
 
 
@@ -77,7 +84,7 @@ class RegisterOperatorSerializer(ModelSerializer):
     class Meta:
         model = User
         fields = ('id', 'username', 'password', 'first_name', 'last_name',
-                  'role', 'phone', 'telegram_id')
+                  'role', 'phone', 'telegram_id', 'can_view_clients')
         read_only_fields = ('id',)
 
     def validate_password(self, value):
