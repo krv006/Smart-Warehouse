@@ -158,6 +158,16 @@ function formatPeriodRange(period) {
 }
 
 const CALENDAR_WEEKDAYS = ['Du', 'Se', 'Cho', 'Pa', 'Ju', 'Sha', 'Ya']
+const UZBEK_MONTHS = ['Yanvar', 'Fevral', 'Mart', 'Aprel', 'May', 'Iyun', 'Iyul', 'Avgust', 'Sentabr', 'Oktabr', 'Noyabr', 'Dekabr']
+const CALENDAR_YEAR_SPAN = 10
+
+function calendarYearOptions(centerYear = new Date().getFullYear()) {
+  const years = []
+  for (let year = centerYear - CALENDAR_YEAR_SPAN; year <= centerYear + CALENDAR_YEAR_SPAN; year += 1) {
+    years.push(year)
+  }
+  return years
+}
 
 function parseIsoDate(value) {
   if (!value) return null
@@ -190,37 +200,103 @@ function buildMonthGrid(viewYear, viewMonth) {
   return cells
 }
 
-function FilterCalendar({ label, value, onChange, min, max }) {
-  const selected = parseIsoDate(value)
-  const [viewDate, setViewDate] = useState(() => selected || new Date())
+function FilterDateRangeCalendar({ dateFrom, dateTo, onChange }) {
+  const [viewDate, setViewDate] = useState(() => parseIsoDate(dateFrom) || new Date())
+  const [pickPhase, setPickPhase] = useState('start')
+  const [anchor, setAnchor] = useState(null)
+  const [yearDropdownOpen, setYearDropdownOpen] = useState(false)
+  const yearDropdownRef = useRef(null)
 
   useEffect(() => {
-    if (value) {
-      const parsed = parseIsoDate(value)
-      if (parsed) setViewDate(parsed)
+    const parsed = parseIsoDate(dateFrom)
+    if (parsed) setViewDate(parsed)
+  }, [dateFrom])
+
+  useEffect(() => {
+    if (!yearDropdownOpen) return undefined
+    const handleClickOutside = (event) => {
+      if (yearDropdownRef.current && !yearDropdownRef.current.contains(event.target)) {
+        setYearDropdownOpen(false)
+      }
     }
-  }, [value])
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [yearDropdownOpen])
 
   const viewYear = viewDate.getFullYear()
   const viewMonth = viewDate.getMonth()
-  const monthLabel = new Intl.DateTimeFormat('uz-UZ', { month: 'long', year: 'numeric' }).format(viewDate)
+  const yearOptions = useMemo(() => calendarYearOptions(new Date().getFullYear()), [])
   const cells = useMemo(() => buildMonthGrid(viewYear, viewMonth), [viewYear, viewMonth])
   const todayIso = todayValue()
 
-  const isDisabled = (iso) => (min && iso < min) || (max && iso > max)
+  const highlightFrom = dateFrom
+  const highlightTo = dateTo
+  const rangeLabel = dateFrom && dateTo
+    ? (dateFrom === dateTo ? dateFrom : `${dateFrom} — ${dateTo}`)
+    : 'Sanani tanlang'
+
+  const handleDayClick = (iso) => {
+    if (pickPhase === 'start') {
+      setAnchor(iso)
+      setPickPhase('end')
+      onChange({ date_from: iso, date_to: iso })
+      return
+    }
+    let from = anchor || dateFrom
+    let to = iso
+    if (from > to) [from, to] = [to, from]
+    setPickPhase('start')
+    setAnchor(null)
+    onChange({ date_from: from, date_to: to })
+  }
 
   return (
-    <div className="filter-calendar" role="group" aria-label={label}>
+    <div className="filter-calendar filter-date-range-calendar" role="group" aria-label="Davr">
       <div className="filter-calendar-header">
-        <span className="filter-calendar-label">{label}</span>
-        {value && <span className="filter-calendar-value">{value}</span>}
+        <span className="filter-calendar-label">Davr</span>
+        <span className="filter-calendar-value">{rangeLabel}</span>
       </div>
       <div className="filter-calendar-widget">
         <div className="filter-calendar-nav">
           <button type="button" className="filter-calendar-nav-btn" onClick={() => setViewDate(new Date(viewYear, viewMonth - 1, 1))} aria-label="Oldingi oy">
             <CaretLeft size={16} />
           </button>
-          <span className="filter-calendar-month">{monthLabel}</span>
+          <div className="filter-calendar-nav-title">
+            <span className="filter-calendar-month-name">{UZBEK_MONTHS[viewMonth]}</span>
+            <div className="filter-calendar-year-wrap" ref={yearDropdownRef}>
+              <button
+                type="button"
+                className="filter-calendar-year-btn"
+                onClick={() => setYearDropdownOpen((open) => !open)}
+                aria-expanded={yearDropdownOpen}
+                aria-haspopup="listbox"
+                aria-label={`Yil: ${viewYear}`}
+              >
+                {viewYear}
+                <CaretDown size={12} aria-hidden="true" />
+              </button>
+              {yearDropdownOpen && (
+                <ul className="filter-calendar-year-dropdown" role="listbox" aria-label="Yilni tanlang">
+                  {yearOptions.map((year) => (
+                    <li key={year}>
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={year === viewYear}
+                        className={year === viewYear ? 'is-active' : undefined}
+                        onClick={() => {
+                          setViewDate(new Date(year, viewMonth, 1))
+                          setYearDropdownOpen(false)
+                        }}
+                      >
+                        {year}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
           <button type="button" className="filter-calendar-nav-btn" onClick={() => setViewDate(new Date(viewYear, viewMonth + 1, 1))} aria-label="Keyingi oy">
             <CaretRight size={16} />
           </button>
@@ -232,24 +308,28 @@ function FilterCalendar({ label, value, onChange, min, max }) {
         </div>
         <div className="filter-calendar-days" role="grid">
           {cells.map((cell) => {
-            const isSelected = value === cell.iso
+            const isStart = highlightFrom === cell.iso
+            const isEnd = highlightTo === cell.iso
+            const isInRange = highlightFrom && highlightTo
+              && cell.iso > highlightFrom && cell.iso < highlightTo
             const isToday = cell.iso === todayIso
-            const disabled = isDisabled(cell.iso)
             return (
               <button
-                key={`${cell.iso}-${label}`}
+                key={cell.iso}
                 type="button"
                 role="gridcell"
-                disabled={disabled}
                 className={[
                   'filter-calendar-day',
                   !cell.inMonth && 'is-outside',
-                  isSelected && 'is-selected',
+                  isInRange && 'is-in-range',
+                  isStart && 'is-range-start',
+                  isEnd && 'is-range-end',
+                  (isStart || isEnd) && 'is-selected',
                   isToday && 'is-today',
                 ].filter(Boolean).join(' ')}
-                onClick={() => onChange(cell.iso)}
+                onClick={() => handleDayClick(cell.iso)}
                 aria-label={cell.iso}
-                aria-selected={isSelected}
+                aria-selected={isStart || isEnd}
               >
                 {cell.date.getDate()}
               </button>
@@ -1102,15 +1182,11 @@ function DashboardFiltersMenu({ filters, onChange }) {
     onChange({ preset: 'custom', date_from, date_to })
   }, [onChange])
 
-  const handleFromChange = (date_from) => {
+  const handleRangeChange = useCallback(({ date_from, date_to }) => {
     setCustomFrom(date_from)
-    applyDateRange(date_from, customTo)
-  }
-
-  const handleToChange = (date_to) => {
     setCustomTo(date_to)
-    applyDateRange(customFrom, date_to)
-  }
+    applyDateRange(date_from, date_to)
+  }, [applyDateRange])
 
   const applyCurrency = (currency) => onChange({ currency })
 
@@ -1194,17 +1270,10 @@ function DashboardFiltersMenu({ filters, onChange }) {
               <div className="filter-panel">
                 <div className="filter-panel-dates" aria-labelledby="filter-davr">
                   <span className="visually-hidden" id="filter-davr">Davr</span>
-                  <FilterCalendar
-                    label="Dan"
-                    value={customFrom}
-                    max={customTo || undefined}
-                    onChange={handleFromChange}
-                  />
-                  <FilterCalendar
-                    label="Gacha"
-                    value={customTo}
-                    min={customFrom || undefined}
-                    onChange={handleToChange}
+                  <FilterDateRangeCalendar
+                    dateFrom={customFrom}
+                    dateTo={customTo}
+                    onChange={handleRangeChange}
                   />
                 </div>
 
