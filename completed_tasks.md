@@ -194,3 +194,20 @@ Bu ishlar orqali loyiha oldingi oddiy funksionallikdan chiqib, buyurtma, shartno
 
 ### Tekshiruv natijalari
 - `npm run build` → muvaffaqiyatli.
+
+## 13. Popup formalar va file input UI yaxshilandi
+
+### Qaysi fayllar?
+- [frontend/src/App.jsx](frontend/src/App.jsx)
+- [frontend/src/styles.css](frontend/src/styles.css)
+- [completed_tasks.md](completed_tasks.md)
+
+### Nima qilindi?
+- Popup oynalar eni `640px` dan `980px` gacha kengaytirildi.
+- Buyurtma va sotuv formalaridagi `+ Qator` tugmasi `Mahsulot qo‘shish` deb o‘zgartirildi.
+- `Mahsulot qo‘shish` tugmasi mahsulot qatorlari ostiga ko‘chirildi.
+- Rasxod formadagi oddiy browser file input chiroyli custom file-picker ko‘rinishiga o‘tkazildi.
+- Checkbox maydonlari ixchamroq va tartibliroq ko‘rinadigan qilindi.
+
+### Tekshiruv natijalari
+- `npm run build` → muvaffaqiyatli.

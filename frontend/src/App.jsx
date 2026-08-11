@@ -1123,7 +1123,7 @@ function SaleEditor({ close, done, notify, item = null }) {
             </>
           ) : (
             <div className="full-width line-items">
-              <div className="line-head"><b>Mahsulotlar</b><button type="button" className="secondary-button" onClick={() => setItems([...items, { product: '', quantity: '1', sold_price: '', comment: '' }])}><Plus size={16} />Qator</button></div>
+              <div className="line-head"><b>Mahsulotlar</b></div>
               {items.map((row, index) => (
                 <div className="line-item" key={index}>
                   <select required value={row.product} onChange={(event) => setItems(items.map((itemRow, i) => i === index ? { ...itemRow, product: event.target.value } : itemRow))}><option value="">Mahsulot</option>{products.map((product) => <option value={product.id} key={product.id}>{product.name} — {product.serial_number}</option>)}</select>
@@ -1132,6 +1132,7 @@ function SaleEditor({ close, done, notify, item = null }) {
                   <button type="button" className="row-action" disabled={items.length === 1} onClick={() => setItems(items.filter((_, i) => i !== index))}>O‘chirish</button>
                 </div>
               ))}
+              <button type="button" className="secondary-button add-line-button" onClick={() => setItems([...items, { product: '', quantity: '1', sold_price: '', comment: '' }])}><Plus size={16} />Mahsulot qo‘shish</button>
             </div>
           )}
           <label>Sotuvchi/kimga<select value={form.sold_to} onChange={(event) => setForm({ ...form, sold_to: event.target.value })}><option value="">Tanlanmagan</option><option value="Mijoz">Mijoz</option><option value="Operator">Operator</option><option value="Boshqa">Boshqa</option></select></label>
@@ -1207,7 +1208,13 @@ function ExpenseEditor({ close, done, notify, item = null }) {
           <label>Summa<input required min="0" step="0.01" type="number" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
           <label>Valyuta<select value={form.currency} onChange={(event) => setForm({ ...form, currency: event.target.value })}><option value="UZS">UZS</option><option value="USD">USD</option></select></label>
           <label>Sana<input type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /></label>
-          <label className="full-width">Fayl<input type="file" onChange={(event) => setFile(event.target.files?.[0] || null)} /></label>
+          <label className="full-width file-field">Fayl
+            <span className="file-picker">
+              <span><FileText size={18} />{file?.name || 'Hujjat yoki rasm fayl tanlang'}</span>
+              <b>Tanlash</b>
+              <input type="file" onChange={(event) => setFile(event.target.files?.[0] || null)} />
+            </span>
+          </label>
           <label className="full-width">Izoh<textarea value={form.comment} onChange={(event) => setForm({ ...form, comment: event.target.value })} rows="3" /></label>
         </div>
         <div className="editor-actions">
@@ -1319,7 +1326,7 @@ function OrderEditor({ close, done, notify, item = null }) {
             </>
           ) : (
             <div className="full-width line-items">
-              <div className="line-head"><b>Mahsulotlar</b><button type="button" className="secondary-button" onClick={() => setItems([...items, { product: '', quantity: '1', unit_price: '' }])}><Plus size={16} />Qator</button></div>
+              <div className="line-head"><b>Mahsulotlar</b></div>
               {items.map((row, index) => (
                 <div className="line-item" key={index}>
                   <select required value={row.product} onChange={(event) => setItems(items.map((itemRow, i) => i === index ? { ...itemRow, product: event.target.value } : itemRow))}><option value="">Mahsulot</option>{products.map((product) => <option value={product.id} key={product.id}>{product.name} — {product.serial_number}</option>)}</select>
@@ -1328,6 +1335,7 @@ function OrderEditor({ close, done, notify, item = null }) {
                   <button type="button" className="row-action" disabled={items.length === 1} onClick={() => setItems(items.filter((_, i) => i !== index))}>O‘chirish</button>
                 </div>
               ))}
+              <button type="button" className="secondary-button add-line-button" onClick={() => setItems([...items, { product: '', quantity: '1', unit_price: '' }])}><Plus size={16} />Mahsulot qo‘shish</button>
             </div>
           )}
           <label>Oldindan to‘lov<input type="number" min="0" step="0.01" value={form.prepaid_amount} onChange={(event) => setForm({ ...form, prepaid_amount: event.target.value })} /></label>

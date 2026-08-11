@@ -844,10 +844,10 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   backdrop-filter: blur(6px);
 }
 .editor {
-  width: min(100%, 640px);
+  width: min(100%, 980px);
   max-height: min(720px, calc(100dvh - 40px));
   overflow: auto;
-  padding: 28px;
+  padding: 34px;
   border: 1px solid var(--border);
   border-radius: 18px;
   background: var(--surface);
@@ -898,6 +898,24 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .form-grid textarea:focus {
   border-color: var(--primary);
   box-shadow: 0 0 0 3px rgba(91, 79, 207, 0.15);
+}
+.form-grid .check-field {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 54px;
+  padding: 0 16px;
+}
+.form-grid .check-field input {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+}
+.add-line-button {
+  width: max-content;
+  min-height: 44px;
+  padding: 0 16px;
+  justify-self: start;
 }
 .full-width { grid-column: 1 / -1; }
 .fx-card {
