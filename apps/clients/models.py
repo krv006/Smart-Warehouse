@@ -32,6 +32,16 @@ class Client(TimeStampedModel):
     company_name = CharField(max_length=512, blank=True, null=True)
     inn          = TextField(blank=True, null=True,
                              help_text='Shifrlangan (Fernet)')
+    # Yuridik shaxs — rahbar va bank rekvizitlari
+    director_jshshr = TextField(blank=True, null=True,
+                                help_text='Rahbar JSHSHIR (shifrlangan)')
+    director_fish   = TextField(blank=True, null=True,
+                                help_text='Rahbar F.I.Sh. (shifrlangan)')
+    mfo             = CharField(max_length=10, blank=True, null=True)
+    oked            = CharField(max_length=20, blank=True, null=True)
+    bank_name       = CharField(max_length=255, blank=True, null=True)
+    bank_account    = TextField(blank=True, null=True,
+                                help_text='Hisob raqami (shifrlangan)')
     passport_number = TextField(blank=True, null=True, help_text='Shifrlangan (Fernet)')
     phone        = TextField(blank=True, null=True, help_text='Shifrlangan (Fernet)')
     email        = EmailField(blank=True, null=True)

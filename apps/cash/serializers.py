@@ -6,7 +6,7 @@ from rest_framework.serializers import (ModelSerializer, Serializer,
                                         ValidationError, ReadOnlyField,
                                         DecimalField, CharField)
 
-from apps.cash.models import ExchangeRate, Payment, PaymentTransaction
+from apps.cash.models import ExchangeRate, ExchangeRateSettings, Payment, PaymentTransaction
 
 
 class ExchangeRateSerializer(ModelSerializer):
@@ -21,6 +21,13 @@ class ExchangeRateSerializer(ModelSerializer):
         if attrs.get('mb_rate') is not None and attrs['mb_rate'] < 0:
             raise ValidationError({'mb_rate': 'Kurs manfiy bo‘lishi mumkin emas.'})
         return attrs
+
+
+class ExchangeRateSettingsSerializer(ModelSerializer):
+    class Meta:
+        model = ExchangeRateSettings
+        fields = ('auto_fetch_enabled', 'updated_at')
+        read_only_fields = ('updated_at',)
 
 
 class PaymentTransactionSerializer(ModelSerializer):
@@ -140,6 +147,80 @@ class PaymentSerializer(ModelSerializer):
             except ValueError as exc:
                 raise ValidationError({'paid_amount': str(exc)})
         return payment
+
+
+class PaymentTransactionOperatorSerializer(ModelSerializer):
+    """Operator uchun — tranzaksiya summasi yashirin."""
+    received_by_name = SerializerMethodField()
+
+    class Meta:
+        model  = PaymentTransaction
+        fields = ('id', 'received_by', 'received_by_name', 'comment', 'created_at')
+
+    def get_received_by_name(self, obj):
+        return str(obj.received_by) if obj.received_by else None
+
+
+class PaymentOperatorSerializer(ModelSerializer):
+    """Operator uchun — moliyaviy summalar va narxlar yashirin."""
+    sale_info    = SerializerMethodField()
+    order_info   = SerializerMethodField()
+    client_name  = SerializerMethodField()
+    source       = SerializerMethodField()
+    transactions = PaymentTransactionOperatorSerializer(many=True, read_only=True)
+
+    class Meta:
+        model  = Payment
+        fields = (
+            'id', 'source',
+            'sale', 'sale_info',
+            'order', 'order_info',
+            'client', 'client_name',
+            'currency', 'due_date',
+            'status', 'comment', 'created_at',
+            'transactions',
+        )
+        read_only_fields = fields
+
+    def get_source(self, obj):
+        if obj.order_id:
+            return 'order'
+        if obj.sale_id:
+            return 'sale'
+        return None
+
+    def get_sale_info(self, obj):
+        s = obj.sale
+        if s is None:
+            return None
+        return {
+            'id':       s.pk,
+            'product':  str(s.product),
+            'quantity': s.quantity,
+            'sold_date': s.sold_date,
+        }
+
+    def get_order_info(self, obj):
+        o = obj.order
+        if o is None:
+            return None
+        return {
+            'id':              o.pk,
+            'items': [
+                {
+                    'product':  str(i.product),
+                    'quantity': i.quantity,
+                }
+                for i in o.items.all()
+            ],
+            'total_quantity':  o.total_quantity,
+            'contract_number': o.contract_number,
+            'contract_date':   o.contract_date,
+            'status':          o.status,
+        }
+
+    def get_client_name(self, obj):
+        return str(obj.client) if obj.client else None
 
 
 class PaymentUpdateSerializer(ModelSerializer):

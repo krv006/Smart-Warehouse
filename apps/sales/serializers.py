@@ -228,4 +228,12 @@ class SaleBulkCreateSerializer(Serializer):
         return created
 
     def to_representation(self, instance):
-        return {'sales': SaleSerializer(instance, many=True).data}
+        request = self.context.get('request')
+        user = getattr(request, 'user', None) if request else None
+        if user and user.is_authenticated and (
+                getattr(user, 'is_management', False)
+                or getattr(user, 'is_accountant', False)):
+            serializer_class = SaleSerializer
+        else:
+            serializer_class = SaleOperatorSerializer
+        return {'sales': serializer_class(instance, many=True).data}

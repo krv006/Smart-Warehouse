@@ -123,7 +123,7 @@ class Notification(TimeStampedModel):
         from django.contrib.auth import get_user_model
         if not zakaz.expected_date or zakaz.status in (zakaz.RECEIVED, zakaz.CANCELLED):
             return
-        if zakaz.expected_date >= zakaz.created_at.date():
+        if zakaz.expected_date >= timezone.localdate():
             return
         User = get_user_model()
         recipients = User.objects.filter(is_active=True)

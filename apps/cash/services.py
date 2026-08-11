@@ -6,7 +6,7 @@ import urllib3
 
 from django.utils import timezone
 
-from apps.cash.models import ExchangeRate
+from apps.cash.models import ExchangeRate, ExchangeRateSettings
 
 
 INFINBANK_EXCHANGE_RATES_URL = 'https://www.infinbank.com/uz/private/exchange-rates/'
@@ -100,8 +100,14 @@ def _request_infinbank(verify=True):
     )
 
 
-def sync_today_usd_rate():
+def sync_today_usd_rate(*, force=False):
     today = timezone.localdate()
+    settings = ExchangeRateSettings.get_settings()
+    if not force and not settings.auto_fetch_enabled:
+        latest = ExchangeRate.get_latest(ExchangeRate.USD)
+        if latest:
+            return latest, False
+        raise ExchangeRateFetchError('Avtomatik kurs olish o\'chirilgan.')
     manual_rate = (
         ExchangeRate.objects
         .filter(currency=ExchangeRate.USD, rate_date=today, manual_override=True)

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Warehouse, Bell, Buildings, CaretDown, ChartLineUp,
   ClipboardText, CurrencyCircleDollar, DownloadSimple, Eye, FileText, Funnel, House, MagnifyingGlass,
-  Package, PencilSimple, Plus, SignOut, SpinnerGap, Stack, Tag, TrendDown, TrendUp, Truck, UserGear, Users, WarningCircle, X, XCircle, DotsThree, CaretLeft, CaretRight, CheckCircle,
+  Package, PencilSimple, Plus, SignOut, SpinnerGap, Stack, Tag, Trash, TrendDown, TrendUp, Truck, UserGear, Users, WarningCircle, X, XCircle, DotsThree, CaretLeft, CaretRight, CheckCircle,
 } from '@phosphor-icons/react'
 import { api, clearStoredSession, refreshAccessToken, saveSession, setAuthFailureHandler, tokenExpiresAt } from './api'
 
@@ -19,6 +19,7 @@ const navigation = [
   ['Kassa', CurrencyCircleDollar, 'cash_view'],
   ['Xarajatlar', ClipboardText, 'expenses_view'],
   ['Hisobotlar', ChartLineUp, 'reports_view'],
+  ['Elektron faktura', FileText, 'einvoice_view'],
   ['Foydalanuvchilar', UserGear, 'users_view'],
   ['Bildirishnomalar', Bell, 'notifications_view'],
 ]
@@ -56,23 +57,112 @@ const workspace = 'Asosiy ombor'
 const productUnits = [
   ['piece', 'dona'],
   ['kg', 'kg'],
-  ['gram', 'gram'],
+  ['liter', 'l'],
+  ['meter', 'm'],
+  ['sqm', 'm²'],
+  ['cbm', 'm³'],
+  ['barrel', 'bochka'],
   ['ton', 'tonna'],
-  ['meter', 'metr'],
+  ['set', 'komplekt'],
+  ['gram', 'gram'],
   ['cm', 'sm'],
   ['mm', 'mm'],
-  ['liter', 'litr'],
   ['ml', 'ml'],
   ['box', 'quti'],
   ['pack', 'pachka'],
-  ['set', 'komplekt'],
   ['pair', 'juft'],
   ['roll', 'rulon'],
   ['bag', 'qop'],
   ['sheet', 'list'],
 ]
+const eInvoiceUnits = productUnits.filter(([key]) => (
+  ['piece', 'kg', 'liter', 'meter', 'sqm', 'cbm', 'barrel', 'ton', 'set'].includes(key)
+))
 const unitLabel = (value) => productUnits.find(([key]) => key === value)?.[1] || value || 'dona'
+const vatOptions = [
+  ['none', 'QQS siz'],
+  ['0', '0%'],
+  ['6', '6%'],
+  ['12', '12%'],
+  ['15', '15%'],
+]
+const vatLabel = (value) => vatOptions.find(([key]) => key === value)?.[1] || value || 'QQS siz'
 const quantityWithUnit = (value, row = {}) => `${money(value)} ${row.unit_display || unitLabel(row.unit)}`
+
+const documentTypeLabels = {
+  contract_sk: 'Shartnoma (SK)',
+  invoice: 'Hisob-faktura',
+  act: 'Dalolatnoma',
+}
+const documentTypeLabel = (value) => documentTypeLabels[value] || value || 'Hujjat'
+
+const formatDateUz = (iso) => {
+  if (!iso) return '—'
+  const [year, month, day] = String(iso).slice(0, 10).split('-')
+  if (!year || !month || !day) return iso
+  return `${day}.${month}.${year}`
+}
+
+const UZ_ONES = ['', 'bir', 'ikki', 'uch', "to'rt", 'besh', 'olti', 'yetti', 'sakkiz', "to'qqiz"]
+const UZ_TEENS = ["o'n", "o'n bir", "o'n ikki", "o'n uch", "o'n to'rt", "o'n besh", "o'n olti", "o'n yetti", "o'n sakkiz", "o'n to'qqiz"]
+const UZ_TENS = ['', "o'n", 'yigirma', "o'ttiz", 'qirq', 'ellik', 'oltmish', 'yetmish', 'sakson', "to'qson"]
+
+function threeDigitsToWordsUz(num) {
+  const n = Number(num) || 0
+  if (!n) return ''
+  const hundreds = Math.floor(n / 100)
+  const rest = n % 100
+  const parts = []
+  if (hundreds) {
+    parts.push(hundreds === 1 ? 'bir yuz' : `${UZ_ONES[hundreds]} yuz`)
+  }
+  if (rest > 0) {
+    if (rest < 10) parts.push(UZ_ONES[rest])
+    else if (rest < 20) parts.push(UZ_TEENS[rest - 10])
+    else {
+      const tens = Math.floor(rest / 10)
+      const ones = rest % 10
+      parts.push(UZ_TENS[tens])
+      if (ones) parts.push(UZ_ONES[ones])
+    }
+  }
+  return parts.join(' ').trim()
+}
+
+function integerToWordsUz(value) {
+  const num = Math.floor(Math.abs(Number(value) || 0))
+  if (num === 0) return 'nol'
+  const scales = [
+    [1_000_000_000, 'milliard'],
+    [1_000_000, 'million'],
+    [1_000, 'ming'],
+  ]
+  let rest = num
+  const parts = []
+  for (const [scale, label] of scales) {
+    const chunk = Math.floor(rest / scale)
+    if (chunk) {
+      parts.push(`${threeDigitsToWordsUz(chunk)} ${label}`.trim())
+      rest %= scale
+    }
+  }
+  if (rest) parts.push(threeDigitsToWordsUz(rest))
+  return parts.join(' ').replace(/\s+/g, ' ').trim()
+}
+
+function numberToWordsUzbek(value) {
+  const amount = Math.round(Number(value || 0) * 100) / 100
+  const sum = Math.floor(amount)
+  const tiyin = Math.round((amount - sum) * 100)
+  return {
+    sumWords: integerToWordsUz(sum),
+    tiyinWords: integerToWordsUz(tiyin),
+    sum,
+    tiyin,
+  }
+}
+
+const moneyDecimal = (value) => new Intl.NumberFormat('uz-UZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(value || 0))
 
 function useClickOutside(ref, onClose, active) {
   useEffect(() => {
@@ -600,31 +690,6 @@ function NotificationDropdown({ onViewAll, notify, onRequestPermission, browserP
   )
 }
 
-function ProfileDropdown({ session, onLogout }) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef(null)
-  useClickOutside(ref, () => setOpen(false), open)
-
-  return (
-    <div className="dropdown profile-dropdown" ref={ref}>
-      <button type="button" className="profile dropdown-trigger" onClick={() => setOpen((v) => !v)} aria-expanded={open} aria-haspopup="menu">
-        <span>{session.username.slice(0, 1).toUpperCase()}</span>
-        <div><b>{session.username}</b><small>{session.role}</small></div>
-        <CaretDown size={15} className={open ? 'caret-open' : ''} />
-      </button>
-      {open && (
-        <ul className="dropdown-menu profile-menu" role="menu">
-          <li className="dropdown-meta">
-            <b>{session.username}</b>
-            <small>{session.role}</small>
-          </li>
-          <li><button type="button" role="menuitem" onClick={() => { onLogout(); setOpen(false) }}><SignOut size={17} />Chiqish</button></li>
-        </ul>
-      )}
-    </div>
-  )
-}
-
 function can(session, ability) {
   if (!ability) return true
   if (session?.is_superuser) return true
@@ -635,6 +700,139 @@ function allowedNavigation(session) {
   return navigation.filter(([, , ability]) => can(session, ability))
 }
 
+const emptyCompanyProfile = () => ({
+  stir: '',
+  name: '',
+  director_jshshr: '',
+  director_fish: '',
+  mfo: '',
+  bank_name: '',
+  oked: '',
+  bank_account: '',
+  address: '',
+  phone: '',
+})
+
+function CompanyProfileModal({ close, notify, session }) {
+  const canEdit = can(session, 'users_manage')
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [form, setForm] = useState(emptyCompanyProfile)
+
+  useEffect(() => {
+    let cancelled = false
+    api.companyProfile()
+      .then((data) => {
+        if (!cancelled) {
+          setForm({
+            stir: data.stir || '',
+            name: data.name || '',
+            director_jshshr: data.director_jshshr || '',
+            director_fish: data.director_fish || '',
+            mfo: data.mfo || '',
+            bank_name: data.bank_name || '',
+            oked: data.oked || '',
+            bank_account: data.bank_account || '',
+            address: data.address || '',
+            phone: data.phone || '',
+          })
+        }
+      })
+      .catch((err) => notify(err.message))
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [notify])
+
+  const submit = async (event) => {
+    event.preventDefault()
+    if (!canEdit) return
+    setSaving(true)
+    try {
+      await api.updateCompanyProfile(form)
+      notify('Korxona profili saqlandi.', 'success')
+      close()
+    } catch (err) {
+      notify(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <form className="editor company-profile-editor" onSubmit={submit}>
+        <div className="editor-head">
+          <div>
+            <p className="eyebrow">PROFIL</p>
+            <h3>Yuridik shaxs ma’lumotlari</h3>
+          </div>
+          <button type="button" className="icon-button" onClick={close} aria-label="Yopish"><X size={20} /></button>
+        </div>
+        {loading ? <SkeletonRows /> : (
+          <>
+            <p className="muted company-profile-note">
+              Elektron faktura va hujjatlarda «Sizning ma’lumotlaringiz» sifatida ishlatiladi.
+              {!canEdit && ' Faqat ko‘rish rejimi.'}
+            </p>
+            <div className="form-grid">
+              <label>STIR / INN<input value={form.stir} onChange={(e) => setForm({ ...form, stir: e.target.value })} disabled={!canEdit} /></label>
+              <label className="full-width">Nomi<input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} disabled={!canEdit} /></label>
+              <label>Rahbar JSHSHIR<input value={form.director_jshshr} onChange={(e) => setForm({ ...form, director_jshshr: e.target.value })} disabled={!canEdit} maxLength={14} /></label>
+              <label>Rahbar F.I.Sh.<input value={form.director_fish} onChange={(e) => setForm({ ...form, director_fish: e.target.value })} disabled={!canEdit} /></label>
+              <label>MFO<input value={form.mfo} onChange={(e) => setForm({ ...form, mfo: e.target.value })} disabled={!canEdit} /></label>
+              <label>Bank nomi<input value={form.bank_name} onChange={(e) => setForm({ ...form, bank_name: e.target.value })} disabled={!canEdit} /></label>
+              <label>OKED<input value={form.oked} onChange={(e) => setForm({ ...form, oked: e.target.value })} disabled={!canEdit} /></label>
+              <label>Hisob raqami<input value={form.bank_account} onChange={(e) => setForm({ ...form, bank_account: e.target.value })} disabled={!canEdit} /></label>
+              <label className="full-width">Manzil<textarea rows="2" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} disabled={!canEdit} /></label>
+              <label>Telefon<input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} disabled={!canEdit} /></label>
+            </div>
+          </>
+        )}
+        <div className="editor-actions">
+          <button type="button" className="secondary-button" onClick={close}>Yopish</button>
+          {canEdit && <button className="primary-button" disabled={saving || loading}>{saving ? <SpinnerGap size={18} className="spin" /> : 'Saqlash'}</button>}
+        </div>
+      </form>
+    </div>
+  )
+}
+
+function ProfileDropdown({ session, onLogout, notify }) {
+  const [open, setOpen] = useState(false)
+  const [companyOpen, setCompanyOpen] = useState(false)
+  const ref = useRef(null)
+  useClickOutside(ref, () => setOpen(false), open)
+
+  return (
+    <>
+      <div className="dropdown profile-dropdown" ref={ref}>
+        <button type="button" className="profile dropdown-trigger" onClick={() => setOpen((v) => !v)} aria-expanded={open} aria-haspopup="menu">
+          <span>{session.username.slice(0, 1).toUpperCase()}</span>
+          <div><b>{session.username}</b><small>{session.role}</small></div>
+          <CaretDown size={15} className={open ? 'caret-open' : ''} />
+        </button>
+        {open && (
+          <ul className="dropdown-menu profile-menu" role="menu">
+            <li className="dropdown-meta">
+              <b>{session.username}</b>
+              <small>{session.role}</small>
+            </li>
+            <li>
+              {can(session, 'users_manage') && (
+                <button type="button" role="menuitem" onClick={() => { setCompanyOpen(true); setOpen(false) }}>
+                  <Buildings size={17} />Korxona profili
+                </button>
+              )}
+            </li>
+            <li><button type="button" role="menuitem" onClick={() => { onLogout(); setOpen(false) }}><SignOut size={17} />Chiqish</button></li>
+          </ul>
+        )}
+      </div>
+      {companyOpen && <CompanyProfileModal close={() => setCompanyOpen(false)} notify={notify} session={session} />}
+    </>
+  )
+}
+
 function App() {
   const [session, setSession] = useState(() => JSON.parse(localStorage.getItem('warehouse_user') || 'null'))
   const [active, setActive] = useState('Bosh sahifa')
@@ -642,6 +840,7 @@ function App() {
   const [loading, setLoading] = useState(false)
   const [fxRate, setFxRate] = useState(null)
   const [fxDraft, setFxDraft] = useState('')
+  const [fxAutoFetch, setFxAutoFetch] = useState(true)
   const [fxSaving, setFxSaving] = useState(false)
   const [notificationPermission, setNotificationPermission] = useState(() => (typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'default'))
   const [orderModalOpen, setOrderModalOpen] = useState(false)
@@ -745,10 +944,14 @@ function App() {
     let cancelled = false
     const loadRate = async () => {
       try {
-        const rate = await api.exchangeRateLatest()
+        const [rate, settings] = await Promise.all([
+          api.exchangeRateLatest(),
+          api.exchangeRateSettings().catch(() => ({ auto_fetch_enabled: true })),
+        ])
         if (!cancelled) {
           setFxRate(rate)
           setFxDraft(rate?.mb_rate ?? '')
+          setFxAutoFetch(settings?.auto_fetch_enabled !== false)
         }
       } catch (err) {
         if (!cancelled) notify(err.message)
@@ -777,8 +980,24 @@ function App() {
     }
   }, [notify])
 
+  const toggleFxAutoFetch = async () => {
+    if (!can(session, 'users_manage')) {
+      notify('Avtomatik kursni faqat boshqaruv yoqishi/o‘chirishi mumkin.', 'warning')
+      return
+    }
+    try {
+      const next = !fxAutoFetch
+      await api.updateExchangeRateSettings({ auto_fetch_enabled: next })
+      setFxAutoFetch(next)
+      notify(next ? 'Avtomatik kurs yoqildi.' : 'Avtomatik kurs o‘chirildi.', 'success')
+    } catch (err) {
+      notify(err.message)
+    }
+  }
+
   const saveFxRate = async (event) => {
     event.preventDefault()
+    if (!can(session, 'users_manage')) return
     if (!fxDraft) return
     setFxSaving(true)
     try {
@@ -838,13 +1057,27 @@ function App() {
         <header className="topbar">
           <div className="crumb"><span>Smart ombor</span><span>/</span><b>{active}</b></div>
           <div className="top-actions">
-            <form className="fx-card" onSubmit={saveFxRate}>
+            <div className="fx-card">
               <span>USD MB kurs</span>
-              <div>
-                <input type="number" min="0" step="0.01" value={fxDraft} onChange={(event) => setFxDraft(event.target.value)} />
-                <button type="submit" disabled={fxSaving}>{fxSaving ? '…' : 'Saqlash'}</button>
-              </div>
-            </form>
+              {can(session, 'users_manage') ? (
+                <form className="fx-rate-form" onSubmit={saveFxRate}>
+                  <input type="number" min="0" step="0.01" value={fxDraft} onChange={(event) => setFxDraft(event.target.value)} aria-label="USD MB kursi" />
+                  <button type="submit" disabled={fxSaving}>{fxSaving ? '…' : 'Saqlash'}</button>
+                </form>
+              ) : (
+                <strong className="fx-rate-readonly">{fxRate?.mb_rate ?? fxDraft ?? '—'}</strong>
+              )}
+              {can(session, 'users_manage') && (
+                <button
+                  type="button"
+                  className={`fx-toggle${fxAutoFetch ? ' is-on' : ''}`}
+                  onClick={toggleFxAutoFetch}
+                  title="Infin Bank avtomatik kurs olish"
+                >
+                  Avto yangilash: {fxAutoFetch ? 'Yoq' : 'O‘ch'}
+                </button>
+              )}
+            </div>
             <button className="icon-button" aria-label="Qidiruv" title="Buyurtmalarni qidirish" onClick={() => navigate('Buyurtmalar')}><MagnifyingGlass size={20} /></button>
             <NotificationDropdown
               browserPermission={notificationPermission}
@@ -852,7 +1085,7 @@ function App() {
               onViewAll={() => { if (can(session, 'notifications_view')) navigate('Bildirishnomalar') }}
               notify={notify}
             />
-            <ProfileDropdown session={session} onLogout={logout} />
+            <ProfileDropdown session={session} onLogout={logout} notify={notify} />
           </div>
         </header>
         {active === 'Bosh sahifa' && can(session, 'dashboard') && (
@@ -866,9 +1099,12 @@ function App() {
             session={session}
           />
         )}
-        {active === 'Hisobotlar' && <ReportsPage notify={notify} />}
-        {active !== 'Bosh sahifa' && active !== 'Hisobotlar' && <ResourcePage title={active} notify={notify} reloadKey={resourceReloadKey} session={session} onDataChange={() => loadDashboard(true)} onNavigate={navigate} />}
-        {orderModalOpen && (
+        {active === 'Hisobotlar' && can(session, 'reports_view') && <ReportsPage notify={notify} />}
+        {active === 'Elektron faktura' && can(session, 'einvoice_view') && (
+          <EInvoicePage notify={notify} session={session} />
+        )}
+        {active !== 'Bosh sahifa' && active !== 'Hisobotlar' && active !== 'Elektron faktura' && navItems.some(([label]) => label === active) && <ResourcePage title={active} notify={notify} reloadKey={resourceReloadKey} session={session} onDataChange={() => loadDashboard(true)} onNavigate={navigate} />}
+        {orderModalOpen && can(session, 'orders_manage') && (
           <OrderEditor
             close={() => setOrderModalOpen(false)}
             done={() => {
@@ -1985,8 +2221,13 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
     'Xarajatlar': 'expenses_manage',
     'Foydalanuvchilar': 'users_manage',
   }
+  const createAbilities = {
+    'Ombor': 'warehouse_create',
+  }
   const canManage = can(session, manageAbilities[title])
-  const canCreate = canManage && ['Mijozlar', 'Ombor', 'Buyurtmalar', 'Import', 'Kategoriyalar', 'Qoldiqlar', 'Sotuvlar', 'Xarajatlar', 'Foydalanuvchilar'].includes(title)
+  const canCreate = (can(session, createAbilities[title] || manageAbilities[title]))
+    && ['Mijozlar', 'Ombor', 'Buyurtmalar', 'Import', 'Kategoriyalar', 'Qoldiqlar', 'Sotuvlar', 'Xarajatlar', 'Foydalanuvchilar'].includes(title)
+  const canEditRows = canManage && !resources[title]?.readonly
 
   const handleMarkRead = async (id) => {
     try {
@@ -2095,7 +2336,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
                     <span className="bar"><i style={{ width: '58%' }} /></span>
                     <b>{rowValue(title, row, session)}</b>
                     <div className="row-actions">
-            {canManage && !resources[title].readonly && <button className="row-action" disabled={opening} onClick={() => handleEdit(row)} aria-label="Tahrirlash"><PencilSimple size={18} /></button>}
+            {canEditRows && <button className="row-action" disabled={opening} onClick={() => handleEdit(row)} aria-label="Tahrirlash"><PencilSimple size={18} /></button>}
                       {can(session, 'orders_manage') && title === 'Buyurtmalar' && !['fulfilled', 'cancelled'].includes(row.status) && (
                         <>
                           <button className="row-action" onClick={() => setOrderAction({ row, action: 'fulfill' })}>Yetkazish</button>
@@ -2191,7 +2432,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
 }
 
 const fields = {
-  Ombor: [['name', 'Mahsulot nomi', true], ['model', 'Model'], ['serial_number', 'Seriya raqami', true], ['source', 'Manba / yetkazuvchi'], ['unit', 'O‘lchov birligi'], ['min_quantity', 'Minimal qoldiq'], ['purchase_price', 'Kelish narxi'], ['selling_price', 'Sotuv narxi'], ['quantity', 'Boshlang‘ich miqdor'], ['warehouse_location', 'Ombordagi joy']],
+  Ombor: [['name', 'Mahsulot nomi', true], ['model', 'Model'], ['serial_number', 'Seriya raqami', true], ['barcode', 'Shtrix kod'], ['source', 'Manba / yetkazuvchi'], ['unit', 'O‘lchov birligi'], ['min_quantity', 'Minimal qoldiq'], ['purchase_price', 'Kelish narxi'], ['selling_price', 'Sotuv narxi'], ['delivery_price', 'Yetkazish narxi'], ['vat_percent', 'QQS %'], ['quantity', 'Boshlang‘ich miqdor'], ['warehouse_location', 'Ombordagi joy']],
   Kategoriyalar: [['name', 'Kategoriya nomi', true], ['parent', 'Ota kategoriya']],
   Qoldiqlar: [['product', 'Mahsulot ID', true], ['quantity', 'Miqdor', true], ['reserved_quantity', 'Bron miqdor'], ['warehouse_location', 'Ombordagi joy', true]],
 }
@@ -2219,7 +2460,8 @@ function Editor({ title, item, path, close, done, notify, session }) {
   }, [title, categories, item?.id])
   const visibleFields = title === 'Ombor'
     ? fields[title].filter(([key]) => {
-      if (key === 'purchase_price' || key === 'selling_price' || key === 'min_quantity') return canManagePrices
+      if (key === 'purchase_price' || key === 'selling_price' || key === 'min_quantity' || key === 'delivery_price') return canManagePrices
+      if (key === 'vat_percent') return can(session, 'prices_view')
       return true
     })
     : fields[title]
@@ -2291,7 +2533,13 @@ function Editor({ title, item, path, close, done, notify, session }) {
               {form.client_type === 'legal' ? (
                 <>
                   <label>Korxona nomi<input required value={form.company_name ?? ''} onChange={(event) => setForm({ ...form, company_name: event.target.value })} /></label>
-                  <label>INN<input value={form.inn ?? ''} onChange={(event) => setForm({ ...form, inn: event.target.value })} /></label>
+                  <label>INN (STIR)<input value={form.inn ?? ''} onChange={(event) => setForm({ ...form, inn: event.target.value })} /></label>
+                  <label>Rahbar JSHSHIR<input value={form.director_jshshr ?? ''} onChange={(event) => setForm({ ...form, director_jshshr: event.target.value })} /></label>
+                  <label>Rahbar F.I.Sh.<input value={form.director_fish ?? ''} onChange={(event) => setForm({ ...form, director_fish: event.target.value })} /></label>
+                  <label>MFO<input value={form.mfo ?? ''} onChange={(event) => setForm({ ...form, mfo: event.target.value })} /></label>
+                  <label>OKED<input value={form.oked ?? ''} onChange={(event) => setForm({ ...form, oked: event.target.value })} /></label>
+                  <label>Bank nomi<input value={form.bank_name ?? ''} onChange={(event) => setForm({ ...form, bank_name: event.target.value })} /></label>
+                  <label>Hisob raqami<input value={form.bank_account ?? ''} onChange={(event) => setForm({ ...form, bank_account: event.target.value })} /></label>
                   <label>Telefon<input required value={form.phone ?? ''} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></label>
                   <label>E-mail<input type="email" value={form.email ?? ''} onChange={(event) => setForm({ ...form, email: event.target.value })} /></label>
                   <label>Manzil<input value={form.address ?? ''} onChange={(event) => setForm({ ...form, address: event.target.value })} /></label>
@@ -2315,6 +2563,10 @@ function Editor({ title, item, path, close, done, notify, session }) {
                 <select required value={form.unit || 'piece'} onChange={(event) => setForm({ ...form, unit: event.target.value })}>
                   {productUnits.map(([value, name]) => <option value={value} key={value}>{name}</option>)}
                 </select>
+              ) : key === 'vat_percent' ? (
+                <select value={form.vat_percent || 'none'} onChange={(event) => setForm({ ...form, vat_percent: event.target.value })}>
+                  {vatOptions.map(([value, name]) => <option value={value} key={value}>{name}</option>)}
+                </select>
               ) : key === 'parent' ? (
                 <select value={form.parent ?? ''} onChange={(event) => setForm({ ...form, parent: event.target.value })}>
                   <option value="">Asosiy kategoriya (yuqori daraja)</option>
@@ -2323,7 +2575,7 @@ function Editor({ title, item, path, close, done, notify, session }) {
                   ))}
                 </select>
               ) : (
-                <input required={required} value={form[key] ?? ''} type={key === 'email' ? 'email' : ['min_quantity', 'quantity', 'purchase_price', 'selling_price'].includes(key) ? 'number' : 'text'} step={['purchase_price', 'selling_price'].includes(key) ? '0.01' : undefined} min={['min_quantity', 'quantity'].includes(key) ? '0' : undefined} onChange={(event) => setForm({ ...form, [key]: event.target.value })} />
+                <input required={required} value={form[key] ?? ''} type={key === 'email' ? 'email' : ['min_quantity', 'quantity', 'purchase_price', 'selling_price', 'delivery_price'].includes(key) ? 'number' : 'text'} step={['purchase_price', 'selling_price', 'delivery_price'].includes(key) ? '0.01' : undefined} min={['min_quantity', 'quantity'].includes(key) ? '0' : undefined} onChange={(event) => setForm({ ...form, [key]: event.target.value })} />
               )}
             </label>
           ))}
@@ -2541,7 +2793,7 @@ function OrderEditor({ close, done, notify, item = null, session }) {
       client: item.client || '',
       contract_number: item.contract_number || '',
       contract_date: item.contract_date || todayValue(),
-      due_date: item.due_date || '',
+      due_date: item.due_date || currentYearEndValue(),
       prepaid_amount: item.prepaid_amount ?? '0',
       product: item.items?.[0]?.product || '',
       itemId: item.items?.[0]?.id || null,
@@ -2573,7 +2825,7 @@ function OrderEditor({ close, done, notify, item = null, session }) {
           client: form.client || null,
           contract_number: form.contract_number || '',
           contract_date: form.contract_date || null,
-          due_date: form.due_date || null,
+          due_date: currentYearEndValue(),
           prepaid_amount: showPrices ? Number(form.prepaid_amount || 0) : 0,
           comment: form.comment || '',
           asos: form.asos,
@@ -2589,7 +2841,7 @@ function OrderEditor({ close, done, notify, item = null, session }) {
         if (form.client) payload.append('client', form.client)
         if (form.contract_number) payload.append('contract_number', form.contract_number)
         if (form.contract_date) payload.append('contract_date', form.contract_date)
-        if (form.due_date) payload.append('due_date', form.due_date)
+        payload.append('due_date', currentYearEndValue())
         if (showPrices) payload.append('prepaid_amount', form.prepaid_amount || '0')
         payload.append('comment', form.comment || '')
         payload.append('items', JSON.stringify(items.filter((row) => row.product).map((row) => ({
@@ -2621,7 +2873,7 @@ function OrderEditor({ close, done, notify, item = null, session }) {
           <label>Mijoz<select value={form.client} onChange={(event) => setForm({ ...form, client: event.target.value })}><option value="">Mijoz tanlanmagan</option>{clients.map((client) => <option value={client.id} key={client.id}>{client.company_name || client.full_name}</option>)}</select></label>
           <label>Shartnoma raqami<input value={form.contract_number} onChange={(event) => updateContractNumber(event.target.value)} placeholder="Masalan: 12/1108" inputMode="numeric" pattern="[0-9/]*" /></label>
           <label>Shartnoma tuzilgan sana<input type="date" value={form.contract_date} onChange={(event) => setForm({ ...form, contract_date: event.target.value })} /></label>
-          <label>Yetkazish muddati<input type="date" value={form.due_date} onChange={(event) => setForm({ ...form, due_date: event.target.value })} /></label>
+          <label>Yetkazish muddati<input type="date" readOnly value={form.due_date || currentYearEndValue()} title="Joriy yil 31-dekabr — o‘zgartirib bo‘lmaydi" /></label>
           {item?.id ? (
             <>
               <label>Mahsulot<select required value={form.product} onChange={(event) => setForm({ ...form, product: event.target.value })}><option value="">Mahsulotni tanlang</option>{products.map((product) => <option value={product.id} key={product.id}>{product.name} — {product.serial_number} ({product.unit_display || unitLabel(product.unit)})</option>)}</select></label>
@@ -2701,12 +2953,33 @@ function OrderActionEditor({ item, action, close, done, notify }) {
   )
 }
 
+const emptyManualImportLine = () => ({
+  name: '',
+  serial_number: '',
+  barcode: '',
+  unit: 'piece',
+  quantity: '1',
+  unit_price: '',
+  vat_percent: 'none',
+  delivery_amount: 0,
+  vat_amount: 0,
+  total_amount: 0,
+})
+
 function ZakazEditor({ close, done, notify, item = null, session }) {
   const showPrices = can(session, 'prices_manage')
-  const isManagement = can(session, 'prices_manage')
+  const isManagement = can(session, 'order_status_manage')
+  const canAddProduct = can(session, 'warehouse_create')
   const isBackorder = item?.zakaz_type === 'backorder'
+  const isNew = !item?.id
+  const productLocked = Boolean(item?.order_contract)
   const [products, setProducts] = useState([])
   const [saving, setSaving] = useState(false)
+  const [entryMode, setEntryMode] = useState('select')
+  const [showNewProduct, setShowNewProduct] = useState(false)
+  const [newProductSaving, setNewProductSaving] = useState(false)
+  const [newProduct, setNewProduct] = useState({ name: '', serial_number: '', barcode: '', unit: 'piece', vat_percent: 'none' })
+  const [manualLine, setManualLine] = useState(emptyManualImportLine)
   const [form, setForm] = useState(() => ({
     product: item?.product || '',
     quantity: item?.quantity || '1',
@@ -2729,18 +3002,75 @@ function ZakazEditor({ close, done, notify, item = null, session }) {
     api.products().then((data) => setProducts(list(data))).catch((err) => notify(err.message))
   }, [notify])
 
+  const manualTotals = useMemo(() => calcInvoiceLine({
+    ...manualLine,
+    quantity: manualLine.quantity,
+    unit_price: manualLine.unit_price,
+    vat_percent: manualLine.vat_percent,
+  }, false), [manualLine])
+
+  const updateManualLine = (patch) => {
+    setManualLine((current) => {
+      const next = { ...current, ...patch }
+      return calcInvoiceLine(next, false)
+    })
+  }
+
+  const createInlineProduct = async () => {
+    if (!newProduct.name.trim()) return notify('Mahsulot nomi kiritilishi shart.')
+    setNewProductSaving(true)
+    try {
+      const payload = {
+        name: newProduct.name.trim(),
+        serial_number: newProduct.serial_number.trim() || undefined,
+        barcode: newProduct.barcode.trim() || undefined,
+        unit: newProduct.unit,
+        vat_percent: newProduct.vat_percent,
+      }
+      const created = await api.create('/warehouse/products/', payload)
+      setProducts((current) => [...current, created])
+      setForm((current) => ({ ...current, product: String(created.id) }))
+      setShowNewProduct(false)
+      setNewProduct({ name: '', serial_number: '', barcode: '', unit: 'piece', vat_percent: 'none' })
+      notify('Yangi mahsulot qo‘shildi.', 'success')
+    } catch (err) {
+      notify(err.message)
+    } finally {
+      setNewProductSaving(false)
+    }
+  }
+
   const submit = async (event) => {
     event.preventDefault()
     setSaving(true)
     try {
       const payload = Object.fromEntries(Object.entries(form).filter(([, value]) => value !== '' && value !== null))
-      if (payload.product) payload.product = Number(payload.product)
-      if (payload.quantity) payload.quantity = Number(payload.quantity)
+      if (entryMode === 'manual' && isNew && !isBackorder) {
+        if (!manualLine.name.trim()) throw new Error('Tovar nomi kiritilishi shart.')
+        payload.new_product = {
+          name: manualLine.name.trim(),
+          serial_number: manualLine.serial_number.trim(),
+          barcode: manualLine.barcode.trim() || null,
+          unit: manualLine.unit,
+          vat_percent: manualLine.vat_percent || 'none',
+        }
+        if (showPrices) {
+          payload.new_product.purchase_price = manualLine.unit_price || null
+          payload.new_product.delivery_price = manualTotals.delivery_amount || null
+        }
+        payload.quantity = Number(manualLine.quantity || 1)
+        if (showPrices) payload.unit_price = Number(manualLine.unit_price || 0)
+        delete payload.product
+      } else {
+        if (payload.product) payload.product = Number(payload.product)
+        if (payload.quantity) payload.quantity = Number(payload.quantity)
+      }
       if (payload.received_qty) payload.received_qty = Number(payload.received_qty)
       if (!showPrices || isBackorder) {
         delete payload.unit_price
         delete payload.currency
         delete payload.payment_status
+        delete payload.new_product
       }
       if (item?.id) await api.update('/orders/zakaz/', item.id, payload)
       else await api.create('/orders/zakaz/', payload)
@@ -2755,16 +3085,97 @@ function ZakazEditor({ close, done, notify, item = null, session }) {
 
   return (
     <div className="modal-backdrop" role="presentation">
-      <form className="editor" onSubmit={submit}>
+      <form className="editor import-editor" onSubmit={submit}>
         <div className="editor-head"><div><p className="eyebrow">{item?.id ? 'IMPORT TAHRIRI' : 'YANGI IMPORT'}</p><h3>Yetkazuvchidan import</h3></div><button type="button" className="icon-button" onClick={close} aria-label="Yopish"><X size={20} /></button></div>
         <div className="form-grid">
-          <div className={`import-top-row${isManagement ? ' has-received' : ''}`}>
-            <label className="field-product">Mahsulot<select required disabled={Boolean(item?.order_contract)} value={form.product} onChange={(event) => setForm({ ...form, product: event.target.value })}><option value="">Mahsulotni tanlang</option>{products.map((product) => <option value={product.id} key={product.id}>{product.name} — {product.serial_number} ({product.unit_display || unitLabel(product.unit)})</option>)}</select></label>
-            <label className="field-qty">Miqdor<input required min="1" type="number" value={form.quantity} onChange={(event) => setForm({ ...form, quantity: event.target.value })} disabled={isBackorder && !isManagement} /></label>
-            {isManagement && <label className="field-received">Qabul qilingan<input min="0" type="number" value={form.received_qty} onChange={(event) => setForm({ ...form, received_qty: event.target.value })} /></label>}
-          </div>
-          {showPrices && !isBackorder && <>
+          {isNew && !isBackorder && !productLocked && (
+            <div className="full-width import-mode-tabs">
+              <button type="button" className={entryMode === 'select' ? 'is-active' : ''} onClick={() => setEntryMode('select')}>Ro‘yxatdan tanlash</button>
+              <button type="button" className={entryMode === 'manual' ? 'is-active' : ''} onClick={() => setEntryMode('manual')}>Qo‘lda kiritish</button>
+            </div>
+          )}
+
+          {entryMode === 'manual' && isNew && !isBackorder ? (
+            <div className="full-width import-manual-block">
+              <div className="import-top-row">
+                <label className="field-product">Tovar nomi<input required value={manualLine.name} onChange={(e) => updateManualLine({ name: e.target.value })} /></label>
+                <label>Mahsulot raqami<input value={manualLine.serial_number} onChange={(e) => updateManualLine({ serial_number: e.target.value })} placeholder="Avtomatik" /></label>
+                <label>Shtrix kod<input value={manualLine.barcode} onChange={(e) => updateManualLine({ barcode: e.target.value })} /></label>
+                <label>O‘lchov birligi
+                  <select value={manualLine.unit} onChange={(e) => updateManualLine({ unit: e.target.value })}>
+                    {productUnits.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+                  </select>
+                </label>
+                <label className="field-qty">Soni<input required min="1" type="number" value={manualLine.quantity} onChange={(e) => updateManualLine({ quantity: e.target.value })} /></label>
+                {showPrices && <>
+                  <label>Narx<input required min="0" step="0.01" type="number" value={manualLine.unit_price} onChange={(e) => updateManualLine({ unit_price: e.target.value })} /></label>
+                  <label>QQS %
+                    <select value={manualLine.vat_percent} onChange={(e) => updateManualLine({ vat_percent: e.target.value })}>
+                      {vatOptions.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+                    </select>
+                  </label>
+                  <label>Yetkazish<input readOnly value={moneyDecimal(manualTotals.delivery_amount)} /></label>
+                  <label>QQS miqdori<input readOnly value={moneyDecimal(manualTotals.vat_amount)} /></label>
+                  <label>JAMI<input readOnly value={moneyDecimal(manualTotals.total_amount)} /></label>
+                </>}
+              </div>
+              <p className="muted import-manual-note">Mahsulot import bilan birga ombor ro‘yxatiga qo‘shiladi.</p>
+            </div>
+          ) : (
+            <>
+              <div className={`import-top-row${isManagement ? ' has-received' : ''}`}>
+                <label className="field-product">
+                  Mahsulot
+                  <div className="import-product-row">
+                    <select required disabled={productLocked} value={form.product} onChange={(event) => setForm({ ...form, product: event.target.value })}>
+                      <option value="">Mahsulotni tanlang</option>
+                      {products.map((product) => <option value={product.id} key={product.id}>{product.name} — {product.serial_number} ({product.unit_display || unitLabel(product.unit)})</option>)}
+                    </select>
+                    {isNew && !productLocked && canAddProduct && (
+                      <button type="button" className="secondary-button import-add-product" onClick={() => setShowNewProduct((v) => !v)}>
+                        <Plus size={16} />Yangi mahsulot
+                      </button>
+                    )}
+                  </div>
+                </label>
+                <label className="field-qty">Miqdor<input required min="1" type="number" value={form.quantity} onChange={(event) => setForm({ ...form, quantity: event.target.value })} disabled={isBackorder && !isManagement} /></label>
+                {isManagement && <label className="field-received">Qabul qilingan<input min="0" type="number" value={form.received_qty} onChange={(event) => setForm({ ...form, received_qty: event.target.value })} /></label>}
+              </div>
+              {showNewProduct && canAddProduct && (
+                <div className="full-width import-new-product">
+                  <p className="eyebrow">YANGI MAHSULOT</p>
+                  <div className="form-grid">
+                    <label>Tovar nomi<input required value={newProduct.name} onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value })} /></label>
+                    <label>Mahsulot raqami<input value={newProduct.serial_number} onChange={(e) => setNewProduct({ ...newProduct, serial_number: e.target.value })} placeholder="Avtomatik" /></label>
+                    <label>Shtrix kod<input value={newProduct.barcode} onChange={(e) => setNewProduct({ ...newProduct, barcode: e.target.value })} /></label>
+                    <label>O‘lchov birligi
+                      <select value={newProduct.unit} onChange={(e) => setNewProduct({ ...newProduct, unit: e.target.value })}>
+                        {productUnits.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+                      </select>
+                    </label>
+                    <label>QQS %
+                      <select value={newProduct.vat_percent} onChange={(e) => setNewProduct({ ...newProduct, vat_percent: e.target.value })}>
+                        {vatOptions.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+                      </select>
+                    </label>
+                  </div>
+                  <div className="import-new-product-actions">
+                    <button type="button" className="secondary-button" onClick={() => setShowNewProduct(false)}>Bekor qilish</button>
+                    <button type="button" className="primary-button" disabled={newProductSaving} onClick={createInlineProduct}>
+                      {newProductSaving ? <SpinnerGap size={18} className="spin" /> : 'Saqlash va tanlash'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {showPrices && !isBackorder && entryMode !== 'manual' && <>
             <label>Narx<input required={!item?.id && showPrices} min="0" step="0.01" type="number" value={form.unit_price} onChange={(event) => setForm({ ...form, unit_price: event.target.value })} /></label>
+            <label>Valyuta<select value={form.currency} onChange={(event) => setForm({ ...form, currency: event.target.value })}><option value="UZS">UZS</option><option value="USD">USD</option></select></label>
+            <label>To‘lov statusi<select value={form.payment_status} onChange={(event) => setForm({ ...form, payment_status: event.target.value })}><option value="unpaid">To‘lanmagan</option><option value="partial">Qisman</option><option value="paid">To‘langan</option></select></label>
+          </>}
+          {entryMode === 'manual' && showPrices && !isBackorder && <>
             <label>Valyuta<select value={form.currency} onChange={(event) => setForm({ ...form, currency: event.target.value })}><option value="UZS">UZS</option><option value="USD">USD</option></select></label>
             <label>To‘lov statusi<select value={form.payment_status} onChange={(event) => setForm({ ...form, payment_status: event.target.value })}><option value="unpaid">To‘lanmagan</option><option value="partial">Qisman</option><option value="paid">To‘langan</option></select></label>
           </>}
@@ -2894,6 +3305,644 @@ function PaymentEditor({ item, close, done, notify }) {
           <button className="primary-button" disabled={saving}>{saving ? <SpinnerGap size={18} className="spin" /> : 'To‘lovni qabul qilish'}</button>
         </div>
       </form>
+    </div>
+  )
+}
+
+function calcInvoiceLine(line, reverse) {
+  const qty = Number(line.quantity || 0)
+  const price = Number(line.unit_price || 0)
+  const vatRate = line.vat_percent === 'none' || !line.vat_percent ? 0 : Number(line.vat_percent)
+  if (reverse) {
+    const delivery = Number(line.delivery_amount || 0)
+    const vat = Number(line.vat_amount || 0)
+    const total = Number(line.total_amount || 0) || delivery + vat
+    return { ...line, delivery_amount: delivery, vat_amount: vat, total_amount: total }
+  }
+  const delivery = Math.round(qty * price * 100) / 100
+  const vat = Math.round(delivery * vatRate) / 100
+  const total = Math.round((delivery + vat) * 100) / 100
+  return { ...line, delivery_amount: delivery, vat_amount: vat, total_amount: total }
+}
+
+function emptyInvoiceLine(num = 1) {
+  return { line_number: num, product: '', product_name: '', identification_code: '', barcode: '', unit: 'piece', quantity: '1', unit_price: '', delivery_amount: 0, vat_percent: 'none', vat_amount: 0, total_amount: 0 }
+}
+
+function DocumentPreviewModal({ invoice, company, client, totals, showPrices, onClose }) {
+  const lines = (invoice.lines || []).map((line) => calcInvoiceLine(line, invoice.reverse_calculation))
+  const amountWords = numberToWordsUzbek(totals.grand)
+  const docTitle = invoice.name || documentTypeLabel(invoice.document_type)
+  const executorName = company?.name || 'Bajaruvchi'
+  const executorDirector = company?.director_fish || executorName
+  const customerName = client?.company_name || client?.full_name || 'Buyurtmachi'
+  const customerDirector = client?.director_fish || client?.full_name || customerName
+
+  const partyBlock = (title, data) => (
+    <div className="preview-party">
+      <h4>{title}</h4>
+      <dl>
+        <div><dt>Nomi</dt><dd>{data.name || '—'}</dd></div>
+        <div><dt>Manzil</dt><dd>{data.address || '—'}</dd></div>
+        <div><dt>Telefon</dt><dd>{data.phone || '—'}</dd></div>
+        <div><dt>Faks</dt><dd>{data.fax || '—'}</dd></div>
+        <div><dt>STIR</dt><dd>{data.stir || '—'}</dd></div>
+        <div><dt>IFUT/OKED</dt><dd>{data.oked || '—'}</dd></div>
+        <div><dt>X/R</dt><dd>{data.bank_account || '—'}</dd></div>
+        <div><dt>Bank</dt><dd>{data.bank_name || '—'}</dd></div>
+        <div><dt>MFO</dt><dd>{data.mfo || '—'}</dd></div>
+      </dl>
+    </div>
+  )
+
+  return (
+    <div className="modal-backdrop document-preview-backdrop" role="presentation" onClick={onClose}>
+      <div className="document-preview-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+        <div className="document-preview-toolbar">
+          <button type="button" className="icon-button" onClick={onClose} aria-label="Yopish"><X size={20} /></button>
+        </div>
+
+        <article className="document-preview-paper">
+          <header className="document-preview-header">
+            <p className="document-preview-doc-title">{docTitle}</p>
+            <h2 className="document-preview-contract-no">Shartnoma №{invoice.contract_number || '—'}</h2>
+            <div className="document-preview-meta">
+              <span>{invoice.place_signed || '—'}</span>
+              <span>
+                {formatDateUz(invoice.contract_date)}
+                {invoice.valid_until ? ` — ${formatDateUz(invoice.valid_until)} gacha` : ''}
+              </span>
+            </div>
+          </header>
+
+          <p className="document-preview-intro">
+            <b>Bajaruvchi</b> {executorDirector} ({executorName}) va <b>Buyurtmachi</b> {customerDirector} ({customerName}) o‘rtasida tuzilgan shartnoma.
+          </p>
+
+          <section className="document-preview-section">
+            <h3>{invoice.content_title || '1.'}</h3>
+            <div className="document-preview-table-wrap">
+              <table className="document-preview-table">
+                <thead>
+                  <tr>
+                    <th>№</th>
+                    <th>Mahsulot nomi</th>
+                    <th>National Catalog Code</th>
+                    <th>Barcode</th>
+                    <th>O‘lchov birligi</th>
+                    <th>Miqdori</th>
+                    {showPrices && (
+                      <>
+                        <th>Narx</th>
+                        <th>Etkazib berish qiymati</th>
+                        <th>QQS (Stavka/Summa)</th>
+                        <th>Etkazib berish narxi QQS bilan</th>
+                      </>
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {lines.map((line, index) => (
+                    <tr key={index}>
+                      <td>{index + 1}</td>
+                      <td>{line.product_name || '—'}</td>
+                      <td>{line.identification_code || '—'}</td>
+                      <td>{line.barcode || '—'}</td>
+                      <td>{unitLabel(line.unit)}</td>
+                      <td>{money(line.quantity)}</td>
+                      {showPrices && (
+                        <>
+                          <td>{moneyDecimal(line.unit_price)}</td>
+                          <td>{moneyDecimal(line.delivery_amount)}</td>
+                          <td>{vatLabel(line.vat_percent)} / {moneyDecimal(line.vat_amount)}</td>
+                          <td>{moneyDecimal(line.total_amount)}</td>
+                        </>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+                {showPrices && (
+                  <tfoot>
+                    <tr>
+                      <td colSpan={7}><b>Jami</b></td>
+                      <td><b>{moneyDecimal(totals.delivery)}</b></td>
+                      <td><b>{moneyDecimal(totals.vat)}</b></td>
+                      <td><b>{moneyDecimal(totals.grand)}</b></td>
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </div>
+            {showPrices && (
+              <p className="document-preview-total-words">
+                Shartnomaning umumiy miqdori {amountWords.sumWords} sum {amountWords.tiyinWords} tiyin ({moneyDecimal(totals.grand)} so‘m).
+              </p>
+            )}
+            {invoice.content_body ? (
+              <div className="document-preview-clauses">{invoice.content_body}</div>
+            ) : null}
+          </section>
+
+          <section className="document-preview-section">
+            <h3>2. Tomonlarni yuridik manzillari va rekvizitlari</h3>
+            <div className="document-preview-parties">
+              {partyBlock('Bajaruvchi', {
+                name: company?.name,
+                address: company?.address,
+                phone: company?.phone,
+                fax: company?.fax,
+                stir: company?.stir,
+                oked: company?.oked,
+                bank_account: company?.bank_account,
+                bank_name: company?.bank_name,
+                mfo: company?.mfo,
+              })}
+              {partyBlock('Buyurtmachi', {
+                name: client?.company_name || client?.full_name,
+                address: client?.address,
+                phone: client?.phone,
+                fax: client?.fax,
+                stir: client?.inn,
+                oked: client?.oked,
+                bank_account: client?.bank_account,
+                bank_name: client?.bank_name,
+                mfo: client?.mfo,
+              })}
+            </div>
+          </section>
+        </article>
+      </div>
+    </div>
+  )
+}
+
+function EInvoicePage({ notify, session }) {
+  const showPrices = can(session, 'prices_view')
+  const canManage = can(session, 'einvoice_manage')
+  const [rows, setRows] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [editing, setEditing] = useState(null)
+  const [clients, setClients] = useState([])
+  const [products, setProducts] = useState([])
+  const [company, setCompany] = useState(null)
+  const [saving, setSaving] = useState(false)
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const [contractNumberEdited, setContractNumberEdited] = useState(false)
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const [invoiceData, clientData, productData, profile] = await Promise.all([
+        api.invoices(),
+        api.clients({ page_size: 200 }),
+        api.products({ page_size: 200 }),
+        api.companyProfile(),
+      ])
+      setRows(list(invoiceData))
+      setClients(list(clientData))
+      setProducts(list(productData))
+      setCompany(profile)
+    } catch (err) {
+      notify(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }, [notify])
+
+  useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    if (!editing || editing.id || contractNumberEdited || !editing.contract_date) return
+    let cancelled = false
+    api.nextContractNumber({ contract_date: editing.contract_date })
+      .then((data) => {
+        if (!cancelled) {
+          setEditing((current) => (
+            current && !current.id ? { ...current, contract_number: data.contract_number || '' } : current
+          ))
+        }
+      })
+      .catch((err) => notify(err.message))
+    return () => { cancelled = true }
+  }, [editing?.id, contractNumberEdited, editing?.contract_date, notify])
+
+  const openNew = () => {
+    setContractNumberEdited(false)
+    setEditing({
+      document_type: 'contract_sk',
+      name: '',
+      contract_number: '',
+      place_signed: '',
+      contract_date: todayValue(),
+      valid_until: currentYearEndValue(),
+      client: '',
+      reverse_calculation: false,
+      comment: '',
+      content_title: '1.',
+      content_body: '',
+      lines: [emptyInvoiceLine()],
+    })
+  }
+
+  const openEdit = async (row) => {
+    try {
+      const detail = await api.invoice(row.id)
+      setContractNumberEdited(true)
+      setEditing({
+        ...detail,
+        client: detail.client || '',
+        lines: (detail.lines?.length ? detail.lines : [emptyInvoiceLine()]).map((line, i) => ({
+          ...line,
+          product: line.product || '',
+          quantity: String(line.quantity ?? 1),
+          unit_price: line.unit_price ?? '',
+        })),
+      })
+    } catch (err) {
+      notify(err.message)
+    }
+  }
+
+  const updateLine = (index, patch) => {
+    setEditing((current) => {
+      const lines = current.lines.map((line, i) => {
+        if (i !== index) return line
+        let next = { ...line, ...patch }
+        if (patch.product !== undefined) {
+          const product = products.find((p) => String(p.id) === String(patch.product))
+          if (product) {
+            next = {
+              ...next,
+              product_name: product.name,
+              identification_code: product.serial_number,
+              barcode: product.barcode || '',
+              unit: product.unit || 'piece',
+              unit_price: showPrices ? (product.selling_price || product.delivery_price || next.unit_price || '') : next.unit_price,
+              vat_percent: product.vat_percent || next.vat_percent || 'none',
+            }
+          }
+        }
+        if (!current.reverse_calculation) next = calcInvoiceLine(next, false)
+        return next
+      })
+      return { ...current, lines }
+    })
+  }
+
+  const updateLineProductName = (index, name) => {
+    const product = products.find((p) => p.name === name)
+    if (product) {
+      updateLine(index, { product: product.id, product_name: product.name })
+      return
+    }
+    updateLine(index, { product: '', product_name: name })
+  }
+
+  const toggleReverse = (checked) => {
+    setEditing((current) => ({
+      ...current,
+      reverse_calculation: checked,
+      lines: current.lines.map((line) => calcInvoiceLine(line, checked)),
+    }))
+  }
+
+  const addLineBelow = (index) => {
+    setEditing((current) => {
+      const lines = [...current.lines]
+      lines.splice(index + 1, 0, emptyInvoiceLine(lines.length + 1))
+      return { ...current, lines }
+    })
+  }
+
+  const removeLine = (index) => {
+    setEditing((current) => {
+      if (current.lines.length <= 1) return current
+      return { ...current, lines: current.lines.filter((_, i) => i !== index) }
+    })
+  }
+
+  const totals = useMemo(() => {
+    if (!editing?.lines) return { delivery: 0, vat: 0, grand: 0 }
+    return editing.lines.reduce((acc, line) => ({
+      delivery: acc.delivery + Number(line.delivery_amount || 0),
+      vat: acc.vat + Number(line.vat_amount || 0),
+      grand: acc.grand + Number(line.total_amount || 0),
+    }), { delivery: 0, vat: 0, grand: 0 })
+  }, [editing?.lines])
+
+  const submit = async (event) => {
+    event.preventDefault()
+    if (!canManage) return notify('Bu amalni bajarish uchun ruxsatingiz yo‘q.')
+    setSaving(true)
+    try {
+      const payload = {
+        document_type: editing.document_type,
+        name: editing.name,
+        contract_number: editing.contract_number,
+        place_signed: editing.place_signed,
+        contract_date: editing.contract_date || null,
+        valid_until: editing.valid_until || null,
+        client: editing.client || null,
+        reverse_calculation: editing.reverse_calculation,
+        comment: editing.comment || '',
+        content_title: editing.content_title || '',
+        content_body: editing.content_body || '',
+        lines: editing.lines.map((line, index) => {
+          const computed = calcInvoiceLine(line, editing.reverse_calculation)
+          return {
+            ...(line.id ? { id: line.id } : {}),
+            line_number: index + 1,
+            product: computed.product || null,
+            product_name: computed.product_name,
+            identification_code: computed.identification_code,
+            barcode: computed.barcode,
+            unit: computed.unit || 'piece',
+            quantity: Number(computed.quantity || 1),
+            unit_price: computed.unit_price || 0,
+            delivery_amount: computed.delivery_amount || 0,
+            vat_percent: computed.vat_percent || 'none',
+            vat_amount: computed.vat_amount || 0,
+            total_amount: computed.total_amount || 0,
+          }
+        }),
+      }
+      if (editing.id) await api.updateInvoice(editing.id, payload)
+      else await api.createInvoice(payload)
+      notify('Elektron faktura saqlandi.', 'success')
+      setEditing(null)
+      load()
+    } catch (err) {
+      notify(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const selectedClient = clients.find((c) => String(c.id) === String(editing?.client))
+
+  return (
+    <div className="page e-invoice-page">
+      <div className="page-heading">
+        <div>
+          <p className="eyebrow">MODUL</p>
+          <h1>Elektron faktura</h1>
+        </div>
+        {canManage && !editing && (
+          <button className="primary-button" onClick={openNew}><Plus size={20} />Yangi hujjat</button>
+        )}
+      </div>
+
+      {!editing ? (
+        <section className="data-panel">
+          <div className="panel-head"><div><p className="eyebrow">RO‘YXAT</p><h3>{rows.length} ta hujjat</h3></div></div>
+          {loading ? <SkeletonRows /> : !rows.length ? <Empty label="Hali elektron faktura yo‘q." /> : (
+            <ul className="product-list">
+              {rows.map((row) => (
+                <li key={row.id} className={canManage ? 'product-row product-row-clickable' : 'product-row'} onClick={canManage ? () => openEdit(row) : undefined} role={canManage ? 'button' : undefined} tabIndex={canManage ? 0 : undefined}>
+                  <div><b>{row.contract_number || row.name || `#${row.id}`}</b><small>{row.document_type_display} • {row.client_name || '—'} • {row.contract_date || '—'}</small></div>
+                  <div>{showPrices ? `${money(row.grand_total)} UZS` : `${row.lines?.length || 0} qator`}</div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      ) : (
+        <form className="e-invoice-form" onSubmit={submit}>
+          <div className="e-invoice-toolbar">
+            <button type="button" className="secondary-button" onClick={() => { setContractNumberEdited(false); setEditing(null) }}>Orqaga</button>
+          </div>
+
+          <section className="e-invoice-section">
+            <h3>Hujjat ma’lumotlari</h3>
+            <div className="form-grid">
+              <label>Hujjat turi
+                <select value={editing.document_type} onChange={(e) => setEditing({ ...editing, document_type: e.target.value })}>
+                  <option value="contract_sk">Shartnoma (SK)</option>
+                  <option value="invoice">Hisob-faktura</option>
+                  <option value="act">Dalolatnoma</option>
+                </select>
+              </label>
+              <label>Nomi<input value={editing.name || ''} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></label>
+              <label>Shartnoma raqami<input value={editing.contract_number || ''} onChange={(e) => { setContractNumberEdited(true); setEditing({ ...editing, contract_number: e.target.value.replace(/[^\d/]/g, '') }) }} placeholder="Masalan: 12/1108" inputMode="numeric" pattern="[0-9/]*" /></label>
+              <label>Tuzilgan joyi<input value={editing.place_signed || ''} onChange={(e) => setEditing({ ...editing, place_signed: e.target.value })} /></label>
+              <label>Tuzilgan sana<input type="date" value={editing.contract_date || ''} onChange={(e) => setEditing({ ...editing, contract_date: e.target.value })} /></label>
+              <label>Amal qilish muddati<input type="date" value={editing.valid_until || ''} onChange={(e) => setEditing({ ...editing, valid_until: e.target.value })} /></label>
+            </div>
+          </section>
+
+          <section className="e-invoice-section">
+            <h3>Sizning ma’lumotlaringiz</h3>
+            <div className="info-grid">
+              <div><dt>STIR</dt><dd>{company?.stir || '—'}</dd></div>
+              <div><dt>Nomi</dt><dd>{company?.name || '—'}</dd></div>
+              <div><dt>JSHSHIR</dt><dd>{company?.director_jshshr || '—'}</dd></div>
+              <div><dt>F.I.Sh.</dt><dd>{company?.director_fish || '—'}</dd></div>
+              <div><dt>MFO</dt><dd>{company?.mfo || '—'}</dd></div>
+              <div><dt>Bank</dt><dd>{company?.bank_name || '—'}</dd></div>
+              <div><dt>OKED</dt><dd>{company?.oked || '—'}</dd></div>
+              <div><dt>Hisob raqami</dt><dd>{company?.bank_account || '—'}</dd></div>
+              <div><dt>Manzil</dt><dd>{company?.address || '—'}</dd></div>
+              <div><dt>Telefon</dt><dd>{company?.phone || '—'}</dd></div>
+            </div>
+          </section>
+
+          <section className="e-invoice-section">
+            <h3>Hamkorning ma’lumotlari</h3>
+            <label>Mijoz
+              <select value={editing.client || ''} onChange={(e) => setEditing({ ...editing, client: e.target.value })}>
+                <option value="">Tanlang</option>
+                {clients.map((client) => <option value={client.id} key={client.id}>{client.company_name || client.full_name}</option>)}
+              </select>
+            </label>
+            {selectedClient && (
+              <div className="info-grid">
+                <div><dt>STIR/INN</dt><dd>{selectedClient.inn || '—'}</dd></div>
+                <div><dt>Nomi</dt><dd>{selectedClient.company_name || selectedClient.full_name || '—'}</dd></div>
+                <div><dt>JSHSHIR</dt><dd>{selectedClient.director_jshshr || selectedClient.pinfl || '—'}</dd></div>
+                <div><dt>F.I.Sh.</dt><dd>{selectedClient.director_fish || selectedClient.full_name || '—'}</dd></div>
+                <div><dt>MFO</dt><dd>{selectedClient.mfo || '—'}</dd></div>
+                <div><dt>Bank</dt><dd>{selectedClient.bank_name || '—'}</dd></div>
+                <div><dt>OKED</dt><dd>{selectedClient.oked || '—'}</dd></div>
+                <div><dt>Hisob raqami</dt><dd>{selectedClient.bank_account || '—'}</dd></div>
+                <div><dt>Manzil</dt><dd>{selectedClient.address || '—'}</dd></div>
+                <div><dt>Telefon</dt><dd>{selectedClient.phone || '—'}</dd></div>
+              </div>
+            )}
+          </section>
+
+          <section className="e-invoice-section">
+            <h3>Mahsulot qatorlari</h3>
+            <div className="e-invoice-lines">
+              <div className="e-invoice-lines-toolbar">
+                <label className="reverse-check e-invoice-reverse-check">
+                  <input type="checkbox" checked={editing.reverse_calculation} onChange={(e) => toggleReverse(e.target.checked)} />
+                  Teskari hisob
+                </label>
+                <div className="e-invoice-lines-toolbar-end">
+                  <a href="https://tasnif.soliq.uz/" className="e-invoice-mxik-link" target="_blank" rel="noopener noreferrer">
+                    MXIK kodlari
+                  </a>
+                </div>
+              </div>
+              <div className="e-invoice-table-wrap">
+                <table className="e-invoice-table e-invoice-table--light">
+                  <thead>
+                    <tr>
+                      <th>№</th>
+                      <th>Tovar nomi</th>
+                      <th>Identifikatsiya kodi</th>
+                      <th>Shtrix kod</th>
+                      <th>O‘lchov birligi</th>
+                      <th>Soni</th>
+                      {showPrices && (
+                        <>
+                          <th>Narxi</th>
+                          <th>Yetkazish narxi</th>
+                          <th>QQS %</th>
+                          <th>QQS miqdori</th>
+                          <th>Jami</th>
+                        </>
+                      )}
+                      <th className="e-invoice-actions-head" aria-label="Amallar" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {editing.lines.map((line, index) => (
+                      <tr key={index}>
+                        <td className="e-invoice-num">{index + 1}</td>
+                        <td className="e-invoice-product">
+                          <input
+                            list={`einv-product-${index}`}
+                            value={line.product_name || ''}
+                            onChange={(e) => updateLineProductName(index, e.target.value)}
+                            placeholder="Tovar nomi"
+                            aria-label="Tovar nomi"
+                          />
+                          <datalist id={`einv-product-${index}`}>
+                            {products.map((p) => <option value={p.name} key={p.id} />)}
+                          </datalist>
+                        </td>
+                        <td>
+                          <input
+                            list={`einv-idcode-${index}`}
+                            value={line.identification_code || ''}
+                            onChange={(e) => updateLine(index, { identification_code: e.target.value })}
+                            placeholder="Kod"
+                            aria-label="Identifikatsiya kodi"
+                          />
+                          <datalist id={`einv-idcode-${index}`}>
+                            {products.map((p) => p.serial_number).filter(Boolean).map((code) => (
+                              <option value={code} key={code} />
+                            ))}
+                          </datalist>
+                        </td>
+                        <td><input value={line.barcode || ''} onChange={(e) => updateLine(index, { barcode: e.target.value })} placeholder="Shtrix kod" aria-label="Shtrix kod" /></td>
+                        <td className="e-invoice-unit">
+                          <select value={line.unit || 'piece'} onChange={(e) => updateLine(index, { unit: e.target.value })} aria-label="O‘lchov birligi">
+                            {eInvoiceUnits.map(([v, n]) => <option value={v} key={v}>{n}</option>)}
+                          </select>
+                        </td>
+                        <td><input type="number" min="1" value={line.quantity} onChange={(e) => updateLine(index, { quantity: e.target.value })} aria-label="Soni" /></td>
+                        {showPrices && (
+                          <>
+                            <td><input type="number" min="0" step="0.01" readOnly={!editing.reverse_calculation} value={line.unit_price} onChange={(e) => updateLine(index, { unit_price: e.target.value })} /></td>
+                            <td><input type="number" min="0" step="0.01" readOnly={!editing.reverse_calculation} value={line.delivery_amount} onChange={(e) => updateLine(index, { delivery_amount: e.target.value })} /></td>
+                            <td>
+                              <select value={line.vat_percent || 'none'} onChange={(e) => updateLine(index, { vat_percent: e.target.value })}>
+                                {vatOptions.map(([v, n]) => <option value={v} key={v}>{n}</option>)}
+                              </select>
+                            </td>
+                            <td><input type="number" min="0" step="0.01" readOnly={!editing.reverse_calculation} value={line.vat_amount} onChange={(e) => updateLine(index, { vat_amount: e.target.value })} /></td>
+                            <td><input type="number" min="0" step="0.01" readOnly={!editing.reverse_calculation} value={line.total_amount} onChange={(e) => updateLine(index, { total_amount: e.target.value })} /></td>
+                          </>
+                        )}
+                        <td className="e-invoice-row-actions">
+                          <div className="e-invoice-row-actions-inner">
+                            <button
+                              type="button"
+                              className="e-invoice-row-btn e-invoice-row-btn--delete"
+                              onClick={() => removeLine(index)}
+                              disabled={editing.lines.length <= 1}
+                              aria-label="Qatorni o‘chirish"
+                            >
+                              <Trash size={16} />
+                            </button>
+                            <button
+                              type="button"
+                              className="e-invoice-row-btn e-invoice-row-btn--add"
+                              onClick={() => addLineBelow(index)}
+                              aria-label="Qator qo‘shish"
+                            >
+                              <Plus size={16} weight="bold" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  {showPrices && (
+                    <tfoot>
+                      <tr>
+                        <td colSpan={7}><b>Jami</b></td>
+                        <td><b>{moneyDecimal(totals.delivery)}</b></td>
+                        <td />
+                        <td><b>{moneyDecimal(totals.vat)}</b></td>
+                        <td><b>{moneyDecimal(totals.grand)}</b></td>
+                        <td />
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
+              </div>
+              {showPrices && (
+                <p className="e-invoice-grand-total">Jami: <strong>{moneyDecimal(totals.grand)}</strong></p>
+              )}
+            </div>
+          </section>
+
+          <section className="e-invoice-section mazmun-section">
+            <h3>Mazmun</h3>
+            <div className="form-grid">
+              <label className="full-width">Sarlavha
+                <input
+                  value={editing.content_title || ''}
+                  onChange={(e) => setEditing({ ...editing, content_title: e.target.value })}
+                  placeholder="1. ..."
+                />
+              </label>
+              <label className="full-width">Matn
+                <textarea
+                  rows={8}
+                  value={editing.content_body || ''}
+                  onChange={(e) => setEditing({ ...editing, content_body: e.target.value })}
+                  placeholder="Shartnoma bandlarini qo‘lda kiriting..."
+                />
+              </label>
+            </div>
+            <div className="e-invoice-actions">
+              <button type="button" className="secondary-button" onClick={() => setPreviewOpen(true)}>
+                <Eye size={18} />Hujjatni ko‘rsatish
+              </button>
+              <button type="button" className="secondary-button" onClick={() => { setContractNumberEdited(false); setEditing(null) }}>Bekor qilish</button>
+              {canManage && (
+                <button className="primary-button" disabled={saving}>
+                  {saving ? <SpinnerGap size={18} className="spin" /> : 'Saqlash'}
+                </button>
+              )}
+            </div>
+          </section>
+        </form>
+      )}
+
+      {previewOpen && editing && (
+        <DocumentPreviewModal
+          invoice={editing}
+          company={company}
+          client={selectedClient}
+          totals={totals}
+          showPrices={showPrices}
+          onClose={() => setPreviewOpen(false)}
+        />
+      )}
     </div>
   )
 }

@@ -10,6 +10,9 @@ from django.utils import timezone
 from apps.common.models import TimeStampedModel
 
 
+from apps.orders.dates import current_year_end
+
+
 def build_contract_number(client=None, *, contract_number=None, contract_date=None):
     """Shartnoma raqamini avtomatik yaratadi: {tartib}/{DDMM}."""
     if contract_number:
@@ -62,8 +65,8 @@ class Order(TimeStampedModel):
                                 help_text='Shartnoma sanasi (Tashkent)')
     contract_file   = FileField(upload_to='contracts/', null=True, blank=True,
                                 help_text='Shartnoma fayli (Word/PDF)')
-    due_date        = DateField(null=True, blank=True,
-                                help_text='Yetkazish muddati (deadline)')
+    due_date        = DateField(default=current_year_end,
+                                help_text='Yetkazish muddati — joriy yil 31-dekabr')
     status          = CharField(max_length=12, choices=STATUS_CHOICES, default=PENDING)
     comment         = TextField(blank=True, null=True)
 

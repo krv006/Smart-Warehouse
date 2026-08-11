@@ -13,7 +13,8 @@ from apps.common.permissions import (IsAccountantOrManagement,
                                      IsAccountantWithManagementRead)
 from apps.expenses.models import ExpenseType, ExpenseSubType, Expense
 from apps.expenses.serializers import (ExpenseTypeSerializer,
-                                       ExpenseSubTypeSerializer, ExpenseSerializer)
+                                       ExpenseSubTypeSerializer, ExpenseSerializer,
+                                       ExpenseOperatorSerializer)
 
 
 @extend_schema_view(
@@ -67,6 +68,14 @@ class ExpenseViewSet(ModelViewSet):
     }
     search_fields      = ('expense_type__name', 'sub_type__name', 'comment')
     ordering_fields    = ('date', 'amount')
+
+    def get_serializer_class(self):
+        user = self.request.user
+        if user.is_authenticated and getattr(user, 'is_operator', False) and not (
+                getattr(user, 'is_management', False)
+                or getattr(user, 'is_accountant', False)):
+            return ExpenseOperatorSerializer
+        return ExpenseSerializer
 
     def get_queryset(self):
         qs = Expense.objects.select_related('expense_type', 'sub_type', 'responsible')

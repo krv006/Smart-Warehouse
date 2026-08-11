@@ -6,6 +6,8 @@ from drf_spectacular.views import (SpectacularAPIView,
                                    SpectacularSwaggerView,
                                    SpectacularRedocView)
 
+from apps.common.views import CompanyProfileView
+
 urlpatterns = [
     path('admin/', admin.site.urls),
 
@@ -21,6 +23,8 @@ urlpatterns = [
     path('api/v1/reports/',   include('apps.reports.urls')),
     path('api/v1/notifications/', include('apps.notifications.urls')),
     path('api/v1/orders/',        include('apps.orders.urls')),
+    path('api/v1/invoices/',      include('apps.invoices.urls')),
+    path('api/v1/company-profile/', CompanyProfileView.as_view()),
 
     # OpenAPI / Swagger
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),

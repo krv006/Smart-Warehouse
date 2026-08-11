@@ -7,13 +7,15 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
-from apps.cash.models import ExchangeRate, Payment
-from apps.cash.serializers import (ExchangeRateSerializer, PaymentSerializer,
+from apps.cash.models import ExchangeRate, ExchangeRateSettings, Payment
+from apps.cash.serializers import (ExchangeRateSerializer, ExchangeRateSettingsSerializer,
+                                   PaymentSerializer, PaymentOperatorSerializer,
                                    PaymentUpdateSerializer,
                                    PaymentPaySerializer)
 from apps.cash.services import ExchangeRateFetchError, sync_today_usd_rate
 from apps.common.permissions import (IsAccountantOrManagement,
-                                     IsAccountantWithManagementRead)
+                                     IsAccountantWithManagementRead,
+                                     IsManagement)
 
 
 @extend_schema_view(
@@ -31,6 +33,11 @@ class ExchangeRateViewSet(ModelViewSet):
 
     def get_queryset(self):
         return ExchangeRate.objects.order_by('-rate_date', '-created_at')
+
+    def get_permissions(self):
+        if self.action == 'rate_settings' and self.request.method == 'PATCH':
+            return [IsManagement()]
+        return super().get_permissions()
 
     def perform_create(self, serializer):
         serializer.save(
@@ -54,7 +61,7 @@ class ExchangeRateViewSet(ModelViewSet):
         )
         if refresh or rate is None:
             try:
-                rate, _ = sync_today_usd_rate()
+                rate, _ = sync_today_usd_rate(force=refresh)
             except ExchangeRateFetchError as exc:
                 fallback = ExchangeRate.get_latest(ExchangeRate.USD)
                 if fallback:
@@ -63,6 +70,16 @@ class ExchangeRateViewSet(ModelViewSet):
                 return Response({'detail': str(exc)}, status=503)
         serializer = ExchangeRateSerializer(rate)
         return Response(serializer.data)
+
+    @action(detail=False, methods=['get', 'patch'], url_path='settings')
+    def rate_settings(self, request):
+        obj = ExchangeRateSettings.get_settings()
+        if request.method == 'PATCH':
+            serializer = ExchangeRateSettingsSerializer(obj, data=request.data, partial=True)
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            return Response(serializer.data)
+        return Response(ExchangeRateSettingsSerializer(obj).data)
 
 
 @extend_schema_view(
@@ -112,6 +129,11 @@ class PaymentViewSet(ModelViewSet):
     def get_serializer_class(self):
         if self.action in ('update', 'partial_update'):
             return PaymentUpdateSerializer
+        user = self.request.user
+        if user.is_authenticated and getattr(user, 'is_operator', False) and not (
+                getattr(user, 'is_management', False)
+                or getattr(user, 'is_accountant', False)):
+            return PaymentOperatorSerializer
         return PaymentSerializer
 
     def get_permissions(self):
@@ -158,7 +180,8 @@ class PaymentViewSet(ModelViewSet):
             )
         except ValueError as exc:
             return Response({'detail': str(exc)}, status=400)
-        return Response(PaymentSerializer(payment).data)
+        ser_class = self.get_serializer_class()
+        return Response(ser_class(payment, context={'request': request}).data)
 
     @extend_schema(
         summary="Kassa xulosasi (Management)",

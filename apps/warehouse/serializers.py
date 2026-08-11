@@ -38,7 +38,8 @@ class ProductSerializer(ModelSerializer):
     class Meta:
         model  = Product
         fields = ('id', 'category', 'category_name', 'name', 'model',
-                  'serial_number', 'purchase_price', 'selling_price', 'source',
+                  'serial_number', 'barcode', 'purchase_price', 'selling_price',
+                  'delivery_price', 'vat_percent', 'source',
                   'unit', 'unit_display', 'min_quantity',
                   'quantity_in_stock', 'reserved_quantity',
                   'available_quantity', 'stock_status',
@@ -98,11 +99,11 @@ class ProductOperatorSerializer(ModelSerializer):
     class Meta:
         model  = Product
         fields = ('id', 'category', 'category_name', 'name', 'model',
-                  'serial_number', 'source', 'unit', 'unit_display',
-                  'min_quantity', 'quantity_in_stock', 'reserved_quantity',
+                  'serial_number', 'barcode', 'source', 'unit', 'unit_display',
+                  'quantity_in_stock', 'reserved_quantity',
                   'available_quantity', 'stock_status', 'quantity',
                   'warehouse_location', 'created_at')
-        read_only_fields = ('created_at', 'min_quantity')
+        read_only_fields = ('created_at',)
 
     def get_stock_status(self, obj):
         return obj.stock_status
@@ -132,6 +133,15 @@ class ProductOperatorSerializer(ModelSerializer):
         from apps.notifications.models import Notification
         Notification.notify_missing_price(product)
         return product
+
+
+class ProductAccountantSerializer(ProductSerializer):
+    """Accountant uchun — narxlar ko'rinadi, mahsulot yaratish/tahrirlash yo'q."""
+
+    class Meta(ProductSerializer.Meta):
+        read_only_fields = tuple(
+            field for field in ProductSerializer.Meta.fields if field != 'id'
+        )
 
 
 class StockSerializer(ModelSerializer):

@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.db import models
 from django.db.models import (CharField, ForeignKey, CASCADE, SET_NULL,
                               PositiveIntegerField, DecimalField, DateTimeField, Sum)
@@ -10,16 +12,27 @@ STATUS_LOW_STOCK = 'low_stock'
 STATUS_OUT       = 'out_of_stock'
 
 
+class VatPercent(models.TextChoices):
+    NONE = 'none', 'QQS siz'
+    ZERO = '0', '0%'
+    SIX = '6', '6%'
+    TWELVE = '12', '12%'
+    FIFTEEN = '15', '15%'
+
+
 class ProductUnit(models.TextChoices):
     PIECE = 'piece', 'dona'
     KG = 'kg', 'kg'
     GRAM = 'gram', 'gram'
     TON = 'ton', 'tonna'
-    METER = 'meter', 'metr'
+    METER = 'meter', 'm'
     CM = 'cm', 'sm'
     MM = 'mm', 'mm'
-    LITER = 'liter', 'litr'
+    LITER = 'liter', 'l'
     ML = 'ml', 'ml'
+    SQM = 'sqm', 'm²'
+    CBM = 'cbm', 'm³'
+    BARREL = 'barrel', 'bochka'
     BOX = 'box', 'quti'
     PACK = 'pack', 'pachka'
     SET = 'set', 'komplekt'
@@ -52,10 +65,17 @@ class Product(TimeStampedModel):
     name          = CharField(max_length=255)
     model         = CharField(max_length=255, blank=True, null=True)
     serial_number = CharField(max_length=255, unique=True)
+    barcode       = CharField(max_length=128, blank=True, null=True,
+                              help_text='Shtrix kod')
     purchase_price = DecimalField(max_digits=14, decimal_places=2, null=True, blank=True,
                                   help_text='Operator tomonidan kiritilmaydi — Management belgilaydi')
     selling_price  = DecimalField(max_digits=14, decimal_places=2, null=True, blank=True,
                                   help_text='Sotuv/ketish narxi — Management belgilaydi')
+    delivery_price = DecimalField(max_digits=14, decimal_places=2, null=True, blank=True,
+                                  help_text='Yetkazish narxi (birlik)')
+    vat_percent    = CharField(max_length=8, choices=VatPercent.choices,
+                               default=VatPercent.NONE,
+                               help_text='QQS foizi')
     source         = CharField(max_length=255, blank=True, null=True,
                                help_text='Qayerdan keldi (yetkazuvchi/manzil)')
     unit           = CharField(max_length=20, choices=ProductUnit.choices,

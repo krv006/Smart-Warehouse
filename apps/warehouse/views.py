@@ -7,10 +7,11 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
-from apps.common.permissions import IsOperatorOrReadOnly, IsManagement
+from apps.common.permissions import IsOperatorOrManagementWrite, IsManagement
 from apps.warehouse.models import Category, Product, Stock, STATUS_IN_STOCK, STATUS_LOW_STOCK, STATUS_OUT
 from apps.warehouse.serializers import (CategorySerializer, ProductSerializer,
-                                        ProductOperatorSerializer, StockSerializer)
+                                        ProductOperatorSerializer,
+                                        ProductAccountantSerializer, StockSerializer)
 
 
 @extend_schema_view(
@@ -23,7 +24,7 @@ from apps.warehouse.serializers import (CategorySerializer, ProductSerializer,
 )
 class CategoryViewSet(ModelViewSet):
     serializer_class   = CategorySerializer
-    permission_classes = (IsOperatorOrReadOnly,)
+    permission_classes = (IsOperatorOrManagementWrite,)
     search_fields      = ('name',)
 
     def get_queryset(self):
@@ -44,7 +45,7 @@ class CategoryViewSet(ModelViewSet):
 )
 class ProductViewSet(ModelViewSet):
     queryset           = Product.objects.select_related('category').all()
-    permission_classes = (IsOperatorOrReadOnly,)
+    permission_classes = (IsOperatorOrManagementWrite,)
     search_fields      = ('name', 'model', 'serial_number', 'source')
     ordering_fields    = ('name', 'purchase_price', 'created_at')
     filterset_fields   = {
@@ -57,6 +58,8 @@ class ProductViewSet(ModelViewSet):
         user = self.request.user
         if user.is_authenticated and getattr(user, 'is_management', False):
             return ProductSerializer
+        if user.is_authenticated and getattr(user, 'is_accountant', False):
+            return ProductAccountantSerializer
         return ProductOperatorSerializer
 
     @extend_schema(
@@ -203,7 +206,7 @@ class ProductViewSet(ModelViewSet):
 )
 class StockViewSet(ModelViewSet):
     serializer_class   = StockSerializer
-    permission_classes = (IsOperatorOrReadOnly,)
+    permission_classes = (IsOperatorOrManagementWrite,)
     filterset_fields   = ('product', 'warehouse_location')
     search_fields      = ('product__name', 'product__serial_number', 'warehouse_location')
 

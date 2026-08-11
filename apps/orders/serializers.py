@@ -12,6 +12,7 @@ from rest_framework.serializers import (ModelSerializer, Serializer,
                                         PrimaryKeyRelatedField, FileField)
 
 from apps.clients.models import Client
+from apps.orders.dates import current_year_end
 from apps.orders.models import (Order, OrderItem, OrderHistory,
                                 Zakaz, ZakazHistory,
                                 ProductContract, register_contract,
@@ -36,6 +37,24 @@ def _can_manage_prices(user):
 
 def _can_view_prices(user):
     return _can_manage_prices(user) or bool(getattr(user, 'is_accountant', False))
+
+
+def order_serializer_class(user):
+    if user and user.is_authenticated and (
+            getattr(user, 'is_management', False)
+            or getattr(user, 'is_accountant', False)
+            or getattr(user, 'is_superuser', False)):
+        return OrderSerializer
+    return OrderOperatorSerializer
+
+
+def zakaz_serializer_class(user):
+    if user and user.is_authenticated and (
+            getattr(user, 'is_management', False)
+            or getattr(user, 'is_accountant', False)
+            or getattr(user, 'is_superuser', False)):
+        return ZakazSerializer
+    return ZakazOperatorSerializer
 
 
 def _strip_item_prices(items_data):
@@ -169,6 +188,15 @@ class OrderSerializer(ModelSerializer):
         return str(obj.client) if obj.client else None
 
     def validate(self, attrs):
+        # Yetkazish muddati — faqat joriy yil 31-dekabr
+        year_end = current_year_end()
+        if 'due_date' in attrs and attrs.get('due_date') and attrs['due_date'] != year_end:
+            raise ValidationError({
+                'due_date': f'Yetkazish muddati faqat {year_end.isoformat()} bo\'lishi kerak.',
+            })
+        if self.instance is None and 'due_date' not in attrs:
+            attrs['due_date'] = year_end
+
         contract_number_value = (attrs.get('contract_number') or '').strip()
         if contract_number_value and not CONTRACT_NUMBER_RE.match(contract_number_value):
             raise ValidationError({
@@ -468,8 +496,10 @@ class OrderBulkCreateSerializer(Serializer):
         return OrderSerializer(context=self.context).create(validated_data)
 
     def to_representation(self, instance):
-        # instance — yaratilgan BITTA Order
-        return {'order': OrderSerializer(instance).data}
+        request = self.context.get('request')
+        user = getattr(request, 'user', None) if request else None
+        serializer_class = order_serializer_class(user)
+        return {'order': serializer_class(instance, context=self.context).data}
 
 
 # ── Mahsulot shartnomalari reestri ───────────────────────────────────────────
@@ -519,7 +549,21 @@ class ZakazHistorySerializer(ModelSerializer):
 
 # ── Zakaz (Etkazuvchidan buyurtma) ────────────────────────────────────────────
 
+class ZakazInlineProductSerializer(Serializer):
+    """Importda qo'lda kiritilgan mahsulot — zakaz yaratishda omborga qo'shiladi."""
+    name = CharField(max_length=255)
+    serial_number = CharField(required=False, allow_blank=True, default='')
+    barcode = CharField(required=False, allow_blank=True, allow_null=True)
+    unit = CharField(required=False, default='piece')
+    vat_percent = CharField(required=False, allow_blank=True, default='none')
+    purchase_price = DecimalField(max_digits=14, decimal_places=2,
+                                  required=False, allow_null=True)
+    delivery_price = DecimalField(max_digits=14, decimal_places=2,
+                                  required=False, allow_null=True)
+
+
 class ZakazSerializer(ModelSerializer):
+    new_product = ZakazInlineProductSerializer(required=False, write_only=True)
     product_name        = SerializerMethodField()
     created_by_name     = SerializerMethodField()
     status_display      = SerializerMethodField()
@@ -535,7 +579,7 @@ class ZakazSerializer(ModelSerializer):
         model  = Zakaz
         fields = (
             'id', 'zakaz_type', 'type_display', 'order', 'order_contract',
-            'product', 'product_name',
+            'product', 'product_name', 'new_product',
             'quantity', 'received_qty',
             'unit_price', 'currency', 'total',
             'payment_status', 'payment_status_display',
@@ -551,6 +595,7 @@ class ZakazSerializer(ModelSerializer):
         # order'ni ko'chirish buyurtma↔zakaz bog'lanishini buzadi)
         read_only_fields = ('created_by', 'confirmed_at', 'created_at',
                             'zakaz_type', 'order')
+        extra_kwargs = {'product': {'required': False, 'allow_null': True}}
 
     def get_product_name(self, obj):
         return str(obj.product)
@@ -586,10 +631,37 @@ class ZakazSerializer(ModelSerializer):
             raise ValidationError('Narx manfiy bo\'lishi mumkin emas.')
         return value
 
+    def _create_inline_product(self, data):
+        serial = (data.get('serial_number') or '').strip()
+        if not serial:
+            serial = f'IMP-{timezone.now().strftime("%Y%m%d%H%M%S%f")}'
+        while Product.objects.filter(serial_number=serial).exists():
+            serial = f'{serial}-{Product.objects.count() + 1}'
+        return Product.objects.create(
+            name=data['name'].strip(),
+            serial_number=serial,
+            barcode=(data.get('barcode') or '').strip() or None,
+            unit=data.get('unit') or 'piece',
+            vat_percent=data.get('vat_percent') or 'none',
+            purchase_price=data.get('purchase_price'),
+            delivery_price=data.get('delivery_price'),
+        )
+
     def validate(self, attrs):
         # Yaratish: mustaqil (manual) import uchun narx faqat Management kiritadi.
         user = self.context['request'].user
         if self.instance is None:
+            new_product = attrs.pop('new_product', None)
+            product = attrs.get('product')
+            if not product and not new_product:
+                raise ValidationError({
+                    'product': 'Mahsulotni tanlang yoki qo\'lda kiriting.',
+                })
+            if product and new_product:
+                raise ValidationError(
+                    'Mahsulotni tanlash va qo\'lda kiritish bir vaqtda bo\'lmaydi.')
+            if new_product:
+                attrs['_new_product_data'] = new_product
             if _can_manage_prices(user):
                 if attrs.get('unit_price') in (None, ''):
                     raise ValidationError({
@@ -633,6 +705,9 @@ class ZakazSerializer(ModelSerializer):
 
     def create(self, validated_data):
         # Status har doim 'new' dan boshlanadi; API orqali — MUSTAQIL zakaz
+        new_product_data = validated_data.pop('_new_product_data', None)
+        if new_product_data:
+            validated_data['product'] = self._create_inline_product(new_product_data)
         validated_data['status']     = Zakaz.NEW
         validated_data['zakaz_type'] = Zakaz.MANUAL
         validated_data['created_by'] = self.context['request'].user
@@ -869,4 +944,7 @@ class ZakazBulkCreateSerializer(Serializer):
         return created
 
     def to_representation(self, instance):
-        return {'zakazlar': ZakazSerializer(instance, many=True).data}
+        request = self.context.get('request')
+        user = getattr(request, 'user', None) if request else None
+        serializer_class = zakaz_serializer_class(user)
+        return {'zakazlar': serializer_class(instance, many=True, context=self.context).data}
