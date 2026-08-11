@@ -113,22 +113,30 @@ class Payment(TimeStampedModel):
         amount = Decimal(str(amount))
         if amount <= 0:
             raise ValueError('To\'lov summasi musbat bo\'lishi kerak.')
-        if amount > self.remaining_amount:
-            raise ValueError(
-                f'To\'lov qoldiqdan ({self.remaining_amount}) oshib ketdi.')
 
-        txn = self.transactions.create(
+        # Qatorni qulflab qoldiqni QAYTA tekshiramiz — ikkita parallel to'lov
+        # ikkalasi ham eski qoldiqni o'qib, jami total'dan oshib ketmasin
+        locked = type(self).objects.select_for_update().get(pk=self.pk)
+        if amount > locked.remaining_amount:
+            raise ValueError(
+                f'To\'lov qoldiqdan ({locked.remaining_amount}) oshib ketdi.')
+
+        txn = locked.transactions.create(
             amount=amount,
             received_by=user,
             comment=comment,
         )
-        self.paid_amount += amount
-        self.save()
+        locked.paid_amount += amount
+        locked.save()
 
         # Buyurtma to'lovi — buyurtmadagi oldindan to'lov ham yangilanadi
-        if self.order_id:
-            self.order.prepaid_amount = self.paid_amount
-            self.order.save(update_fields=['prepaid_amount'])
+        if locked.order_id:
+            locked.order.prepaid_amount = locked.paid_amount
+            locked.order.save(update_fields=['prepaid_amount'])
+
+        # Chaqiruvchidagi obyekt eskirib qolmasin
+        self.paid_amount = locked.paid_amount
+        self.status      = locked.status
         return txn
 
 

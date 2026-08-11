@@ -34,6 +34,10 @@ SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(hours=8),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=30),
     "AUTH_HEADER_TYPES": ("Bearer",),
+    # Har refresh'da yangi refresh-token beriladi, eskisi blacklist'ga
+    # tushadi — o'g'irlangan token 30 kun yashamaydi
+    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": True,
 }
 
 SPECTACULAR_SETTINGS = {
@@ -47,6 +51,9 @@ SPECTACULAR_SETTINGS = {
     ),
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
+    # Swagger/schema anonim foydalanuvchiga ko'rinmasin (API recon himoyasi)
+    "SERVE_PUBLIC": False,
+    "SERVE_PERMISSIONS": ["rest_framework.permissions.IsAuthenticated"],
     "CONTACT": {"email": "admin@warehouse.uz"},
     "LICENSE": {"name": "Private"},
     # Swagger UI sozlamalari

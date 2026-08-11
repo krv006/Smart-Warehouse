@@ -13,12 +13,13 @@ class Client(TimeStampedModel):
     Shifrlash/shifr ochish apps/clients/encryption.py orqali bajariladi.
     """
     id           = UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    full_name    = CharField(max_length=512,
-                             help_text='Shifrlangan (Fernet)')
+    # Shifrlangan maydonlar TextField: Fernet ciphertext plaintext'dan sezilarli
+    # uzun bo'ladi (~100 + 4/3x) — CharField(512) uzun qiymatlarda DataError berardi
+    full_name    = TextField(help_text='Shifrlangan (Fernet)')
     company_name = CharField(max_length=512, blank=True, null=True)
-    inn          = CharField(max_length=512, blank=True, null=True,
+    inn          = TextField(blank=True, null=True,
                              help_text='Shifrlangan (Fernet)')
-    phone        = CharField(max_length=512, blank=True, null=True,
+    phone        = TextField(blank=True, null=True,
                              help_text='Shifrlangan (Fernet)')
     email        = EmailField(blank=True, null=True)
     address      = TextField(blank=True, null=True)
@@ -32,4 +33,9 @@ class Client(TimeStampedModel):
         verbose_name_plural = 'Mijozlar'
 
     def __str__(self):
-        return self.company_name or self.full_name or str(self.id)
+        if self.company_name:
+            return self.company_name
+        # full_name shifrlangan — ochib ko'rsatamiz (Excel/Telegram/adminda
+        # base64 ko'rinmasin)
+        from apps.clients.encryption import decrypt
+        return (decrypt(self.full_name) if self.full_name else None) or str(self.id)

@@ -1,3 +1,4 @@
+from django.db import transaction
 from rest_framework.serializers import (ModelSerializer, ValidationError,
                                         IntegerField, CharField, SerializerMethodField)
 
@@ -133,6 +134,9 @@ class StockSerializer(ModelSerializer):
         fields = ('id', 'product', 'product_name', 'product_model',
                   'quantity', 'reserved_quantity', 'warehouse_location',
                   'min_quantity', 'stock_status')
+        # reserved_quantity faqat buyurtma (bron) mexanizmi orqali o'zgaradi —
+        # qo'lda o'zgartirish order.reserved_qty bilan mosligini buzadi
+        read_only_fields = ('reserved_quantity',)
 
     def get_product_name(self, obj):
         return str(obj.product)
@@ -146,6 +150,7 @@ class StockSerializer(ModelSerializer):
     def get_stock_status(self, obj):
         return obj.product.stock_status
 
+    @transaction.atomic
     def update(self, instance, validated_data):
         stock = super().update(instance, validated_data)
         from apps.notifications.models import Notification
@@ -172,4 +177,14 @@ class StockSerializer(ModelSerializer):
             raise ValidationError(
                 'Bu mahsulot uchun ushbu lokatsiyada qoldiq allaqachon mavjud.'
             )
+        # Qoldiq bron qilingan miqdordan kam bo'lib qolmasin — aks holda
+        # mavjud bronlar ombordagi realsiz tovarni "ushlab turadi"
+        quantity = attrs.get('quantity',
+                             getattr(self.instance, 'quantity', 0))
+        reserved = getattr(self.instance, 'reserved_quantity', 0) or 0
+        if quantity is not None and quantity < reserved:
+            raise ValidationError({
+                'quantity': (f'Qoldiq ({quantity}) bron qilingan miqdordan '
+                             f'({reserved}) kam bo\'lishi mumkin emas. Avval '
+                             'tegishli buyurtmalarni bekor qiling.')})
         return attrs

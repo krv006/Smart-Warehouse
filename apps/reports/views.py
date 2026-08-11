@@ -106,17 +106,19 @@ class FinancialSummaryView(APIView):
             total=Sum('amount')
         )['total'] or 0
 
+        # paid_amount — real kassaga kirgan pul (PARTIAL to'lovlar ham)
         paid_uzs = Payment.objects.filter(
-            status=Payment.PAID, currency=Payment.UZS
+            currency=Payment.UZS
         ).aggregate(total=Sum('paid_amount'))['total'] or 0
 
         overdue_count = Payment.objects.filter(
-            status__in=(Payment.PENDING, Payment.PARTIAL),
+            status__in=(Payment.PENDING, Payment.PARTIAL, Payment.OVERDUE),
             due_date__lt=today,
         ).count()
 
+        # Komissiya faqat UZS bo'yicha — USD bilan aralashtirib bo'lmaydi
         commission_total = Payment.objects.filter(
-            status=Payment.PAID
+            status=Payment.PAID, currency=Payment.UZS
         ).aggregate(total=Sum('commission'))['total'] or 0
 
         return Response({
@@ -214,11 +216,14 @@ class CashReportView(APIView):
             'total_partial':    qs.filter(status=Payment.PARTIAL).count(),
             'total_paid':       qs.filter(status=Payment.PAID).count(),
             'total_overdue':    overdue_count,
-            'sum_paid_uzs':     qs.filter(status=Payment.PAID, currency=Payment.UZS)
+            # paid_amount — real olingan pul (PARTIAL to'lovlarning qismi ham)
+            'sum_paid_uzs':     qs.filter(currency=Payment.UZS)
                                   .aggregate(s=Sum('paid_amount'))['s'] or 0,
-            'sum_paid_usd':     qs.filter(status=Payment.PAID, currency=Payment.USD)
+            'sum_paid_usd':     qs.filter(currency=Payment.USD)
                                   .aggregate(s=Sum('paid_amount'))['s'] or 0,
-            'commission_total': qs.filter(status=Payment.PAID)
+            # Komissiya faqat UZS bo'yicha (valyuta aralashmasin)
+            'commission_total': qs.filter(status=Payment.PAID,
+                                          currency=Payment.UZS)
                                   .aggregate(s=Sum('commission'))['s'] or 0,
         })
 
@@ -277,7 +282,11 @@ class TopProductsView(APIView):
     def get(self, request):
         date_from = request.query_params.get('date_from')
         date_to   = request.query_params.get('date_to')
-        limit     = int(request.query_params.get('limit', 10))
+        try:
+            limit = int(request.query_params.get('limit', 10))
+        except (TypeError, ValueError):
+            limit = 10
+        limit = max(1, min(limit, 100))
 
         sales_qs = Sale.objects.all()
         if date_from:

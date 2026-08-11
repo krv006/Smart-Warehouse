@@ -212,7 +212,12 @@ class Order(TimeStampedModel):
         """
         created = []
         for item in self.items.all():
-            if item.backorder_qty <= 0 or item.has_active_zakaz:
+            # Faollik SHU BUYURTMA doirasida tekshiriladi: boshqa buyurtma
+            # yoki qo'lda ochilgan zakaz bu yetishmovchilikni qoplamaydi.
+            if item.backorder_qty <= 0 or self.zakazlar.filter(
+                product=item.product,
+                status__in=Zakaz.ACTIVE_STATUSES,
+            ).exists():
                 continue
             zakaz = Zakaz.objects.create(
                 order=self,
@@ -804,6 +809,7 @@ class ZakazHistory(models.Model):
 
 # ── Yordamchi funksiya ────────────────────────────────────────────────────────
 
+@transaction.atomic
 def allocate_pending_orders(product):
     """
     Mahsulot qoldig'i o'zgarganda pending/partial buyurtma QATORLARIGA

@@ -2,17 +2,24 @@ from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.decorators import (api_view, permission_classes,
                                        throttle_classes)
+from rest_framework.mixins import (DestroyModelMixin, ListModelMixin,
+                                   RetrieveModelMixin, UpdateModelMixin)
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
-from rest_framework.throttling import ScopedRateThrottle
-from rest_framework.viewsets import ModelViewSet
+from rest_framework.throttling import AnonRateThrottle
+from rest_framework.viewsets import GenericViewSet
 
 from apps.common.permissions import IsManagement
 from apps.users.models import User
 from apps.users.serializers import LoginSerializer, RegisterOperatorSerializer, UserSerializer
 
 
-class LoginRateThrottle(ScopedRateThrottle):
+class LoginRateThrottle(AnonRateThrottle):
+    """
+    Login brute-force himoyasi — IP bo'yicha 10/min (drf_settings dagi
+    'login' rate). MUHIM: ScopedRateThrottle EMAS — u FBV'da view'dan
+    throttle_scope qidirib topolmay, tekshiruvsiz o'tkazib yuborardi.
+    """
     scope = 'login'
 
 
@@ -44,7 +51,13 @@ def register_user(request):
 
 
 @extend_schema(tags=["Users"])
-class UserViewSet(ModelViewSet):
+class UserViewSet(ListModelMixin, RetrieveModelMixin,
+                  UpdateModelMixin, DestroyModelMixin, GenericViewSet):
+    """
+    Yaratish YO'Q — bu yerdan yaratilgan user parolsiz qolib ketardi
+    (UserSerializer'da parol maydoni yo'q). Yangi user faqat
+    /auth/register/ (RegisterOperatorSerializer, parol validatsiyasi bilan).
+    """
     serializer_class = UserSerializer
     permission_classes = (IsManagement,)
     search_fields = ('username', 'first_name', 'last_name')

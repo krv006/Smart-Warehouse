@@ -11,6 +11,12 @@ class ClientSerializer(ModelSerializer):
                   'phone', 'email', 'address', 'comment',
                   'is_active', 'created_at')
         read_only_fields = ('id', 'created_at')
+        # Uzunlik OCHIQ matnga qo'llanadi (encrypt'dan oldin tekshiriladi)
+        extra_kwargs = {
+            'full_name': {'max_length': 512},
+            'inn':       {'max_length': 512},
+            'phone':     {'max_length': 512},
+        }
 
     def to_representation(self, instance):
         data = super().to_representation(instance)

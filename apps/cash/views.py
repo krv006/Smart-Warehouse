@@ -10,7 +10,8 @@ from rest_framework.viewsets import ModelViewSet
 from apps.cash.models import Payment
 from apps.cash.serializers import (PaymentSerializer, PaymentUpdateSerializer,
                                    PaymentPaySerializer)
-from apps.common.permissions import IsAccountantOrManagement, IsAccountantOrReadOnly
+from apps.common.permissions import (IsAccountantOrManagement,
+                                     IsAccountantWithManagementRead)
 
 
 @extend_schema_view(
@@ -30,7 +31,8 @@ class PaymentViewSet(ModelViewSet):
         'sale__product', 'order', 'client'
     ).prefetch_related('transactions__received_by',
                        'order__items__product')
-    permission_classes  = (IsAccountantOrReadOnly,)
+    # Operator kirolmaydi — to'lovlarda narx/summa/komissiya bor
+    permission_classes  = (IsAccountantWithManagementRead,)
     filterset_fields    = ('status', 'client', 'currency', 'due_date',
                            'order', 'sale')
     search_fields       = ('sale__product__name', 'order__items__product__name',
@@ -77,17 +79,16 @@ class PaymentViewSet(ModelViewSet):
                 {'detail': 'Bu to\'lov allaqachon to\'liq to\'langan.'},
                 status=400,
             )
-        if amount > payment.remaining_amount:
-            return Response(
-                {'detail': f'To\'lov qoldiqdan ({payment.remaining_amount}) '
-                           f'oshib ketdi.'},
-                status=400,
+        try:
+            # add_payment qatorni qulflab qoldiqni qayta tekshiradi —
+            # parallel to'lovlar total'dan oshira olmaydi
+            payment.add_payment(
+                amount,
+                user=request.user,
+                comment=serializer.validated_data.get('comment') or 'Qo\'shimcha to\'lov',
             )
-        payment.add_payment(
-            amount,
-            user=request.user,
-            comment=serializer.validated_data.get('comment') or 'Qo\'shimcha to\'lov',
-        )
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=400)
         return Response(PaymentSerializer(payment).data)
 
     @extend_schema(
@@ -110,11 +111,11 @@ class PaymentViewSet(ModelViewSet):
             'total_partial':       qs.filter(status=Payment.PARTIAL).count(),
             'total_paid':          qs.filter(status=Payment.PAID).count(),
             'total_overdue':       overdue_qs.count(),
-            'sum_paid_uzs':        qs.filter(status=Payment.PAID,
-                                              currency=Payment.UZS).aggregate(
+            # paid_amount — real olingan pul; PARTIAL to'lovlarning
+            # qismi ham kassaga kirgan, shuning uchun status filtrsiz
+            'sum_paid_uzs':        qs.filter(currency=Payment.UZS).aggregate(
                                        s=Sum('paid_amount'))['s'] or 0,
-            'sum_paid_usd':        qs.filter(status=Payment.PAID,
-                                              currency=Payment.USD).aggregate(
+            'sum_paid_usd':        qs.filter(currency=Payment.USD).aggregate(
                                        s=Sum('paid_amount'))['s'] or 0,
             'total_commission_uzs': qs.filter(currency=Payment.UZS).aggregate(
                                         s=Sum('commission'))['s'] or 0,

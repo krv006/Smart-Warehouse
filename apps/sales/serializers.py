@@ -69,6 +69,7 @@ class SaleSerializer(ModelSerializer):
                   'quantity', 'sold_price', 'total_amount', 'profit',
                   'sold_to', 'destination', 'sold_date', 'comment', 'created_at')
         read_only_fields = ('created_at',)
+        extra_kwargs = {'sold_price': {'min_value': 0}}
 
     def get_product_name(self, obj):
         return str(obj.product)
@@ -128,7 +129,8 @@ class SaleOperatorSerializer(SaleSerializer):
     Biznes qoidasi: operator sotuv summalarini/narxlarni ko'rmaydi.
     sold_price yozishда kerak, shuning uchun write_only qilinadi.
     """
-    sold_price = DecimalField(max_digits=14, decimal_places=2, write_only=True)
+    sold_price = DecimalField(max_digits=14, decimal_places=2, min_value=0,
+                              write_only=True)
 
     class Meta(SaleSerializer.Meta):
         fields = ('id', 'product', 'product_name', 'client', 'client_name',
@@ -140,7 +142,7 @@ class SaleItemSerializer(Serializer):
     """Bulk savdo ichidagi bitta mahsulot qatori."""
     product    = PrimaryKeyRelatedField(queryset=Product.objects.all())
     quantity   = DecimalField(max_digits=12, decimal_places=0, min_value=1)
-    sold_price = DecimalField(max_digits=14, decimal_places=2)
+    sold_price = DecimalField(max_digits=14, decimal_places=2, min_value=0)
     comment    = CharField(required=False, allow_blank=True, allow_null=True)
 
 

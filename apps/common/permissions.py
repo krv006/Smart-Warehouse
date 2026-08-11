@@ -61,6 +61,18 @@ class IsAccountantOrReadOnly(BasePermission):
         return getattr(request.user, 'is_accountant', False)
 
 
+class IsAccountantWithManagementRead(BasePermission):
+    """O'qish — Accountant/Management, yozish — faqat Accountant.
+    Operator umuman kirolmaydi (pul summalari/komissiya operatordan yashirin)."""
+    def has_permission(self, request, view):
+        if not (request.user and request.user.is_authenticated):
+            return False
+        if request.method in SAFE_METHODS:
+            return (getattr(request.user, 'is_accountant', False)
+                    or getattr(request.user, 'is_management', False))
+        return getattr(request.user, 'is_accountant', False)
+
+
 class CanViewClients(BasePermission):
     """Faqat can_view_clients ruxsati bor foydalanuvchilar."""
     def has_permission(self, request, view):

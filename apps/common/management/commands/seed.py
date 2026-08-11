@@ -116,6 +116,15 @@ class Command(BaseCommand):
 
     @transaction.atomic
     def handle(self, *args, **options):
+        # HIMOYA: seed faqat dev (DEBUG=True) muhitida ishlaydi — prodda
+        # ma'lum parolli test-userlar (operator1/op1pass...) yaratilib qolmasin
+        from django.conf import settings
+        if not settings.DEBUG:
+            self.stderr.write(self.style.ERROR(
+                'seed faqat DEBUG=True (dev) muhitida ishlaydi. '
+                'Production bazasiga test ma\'lumot kiritilmaydi.'))
+            return
+
         # Faqat rasxod toifalari rejimi
         if options['only_types']:
             self.stdout.write('>>> Faqat rasxod toifalari seed...\n')

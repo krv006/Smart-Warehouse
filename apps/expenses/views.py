@@ -8,7 +8,9 @@ from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet, GenericViewSet
 from rest_framework.permissions import IsAuthenticated
 
-from apps.common.permissions import IsAccountantOrManagement, IsAccountantOrReadOnly
+from apps.common.permissions import (IsAccountantOrManagement,
+                                     IsAccountantOrReadOnly,
+                                     IsAccountantWithManagementRead)
 from apps.expenses.models import ExpenseType, ExpenseSubType, Expense
 from apps.expenses.serializers import (ExpenseTypeSerializer,
                                        ExpenseSubTypeSerializer, ExpenseSerializer)
@@ -55,7 +57,8 @@ class ExpenseSubTypeViewSet(CreateModelMixin, ListModelMixin,
 )
 class ExpenseViewSet(ModelViewSet):
     serializer_class   = ExpenseSerializer
-    permission_classes = (IsAccountantOrReadOnly,)
+    # Operator kirolmaydi — rasxodlarda oyliklar/summalar bor
+    permission_classes = (IsAccountantWithManagementRead,)
     filterset_fields   = {
         'expense_type': ['exact'],
         'sub_type':     ['exact'],

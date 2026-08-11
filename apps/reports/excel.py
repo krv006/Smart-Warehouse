@@ -107,16 +107,26 @@ def export_expenses(queryset) -> HttpResponse:
 def export_payments(queryset) -> HttpResponse:
     wb, ws = _create_workbook('Kassa')
     _write_header(ws, [
-        '№', 'Sotuv ID', 'Mahsulot', 'Mijoz',
+        '№', 'Manba', 'Mahsulot', 'Mijoz',
         'Jami summa', 'Komissiya (15%)', 'Toʻlangan',
         'Qoldiq', 'Valyuta', 'Toʻlov muddati', 'Status',
     ])
     for i, pay in enumerate(queryset, 1):
         remaining = pay.total_amount - pay.paid_amount
+        # To'lov sotuvdan YOKI buyurtmadan bo'ladi — sale None bo'lishi mumkin
+        if pay.sale_id:
+            source  = f'Sotuv #{pay.sale_id}'
+            product = str(pay.sale.product)
+        elif pay.order_id:
+            source  = f'Buyurtma #{pay.order_id}'
+            product = ', '.join(str(item.product)
+                                for item in pay.order.items.all())
+        else:
+            source, product = '', ''
         ws.append([
             i,
-            pay.sale_id,
-            str(pay.sale.product),
+            source,
+            product,
             str(pay.client) if pay.client else '',
             float(pay.total_amount),
             float(pay.commission),

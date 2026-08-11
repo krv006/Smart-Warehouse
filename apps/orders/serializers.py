@@ -81,6 +81,7 @@ class OrderItemSerializer(ModelSerializer):
                   'reserved_qty', 'backorder_qty', 'has_active_zakaz',
                   'comment')
         read_only_fields = ('reserved_qty',)
+        extra_kwargs = {'unit_price': {'min_value': 0}}
 
     def get_product_name(self, obj):
         return str(obj.product)
@@ -128,7 +129,7 @@ class OrderSerializer(ModelSerializer):
     product    = PrimaryKeyRelatedField(queryset=Product.objects.all(),
                                         required=False, write_only=True)
     quantity   = IntegerField(required=False, min_value=1, write_only=True)
-    unit_price = DecimalField(max_digits=14, decimal_places=2,
+    unit_price = DecimalField(max_digits=14, decimal_places=2, min_value=0,
                               required=False, allow_null=True, write_only=True)
 
     class Meta:
@@ -146,6 +147,7 @@ class OrderSerializer(ModelSerializer):
             'asos', 'history',
         )
         read_only_fields = ('status', 'created_at')
+        extra_kwargs = {'prepaid_amount': {'min_value': 0}}
 
     def get_client_name(self, obj):
         return str(obj.client) if obj.client else None
@@ -387,7 +389,7 @@ class OrderBulkCreateSerializer(Serializer):
                                     'required': 'Shartnoma raqami kiritilishi shart.',
                                 })
     contract_date   = DateField(required=False)
-    prepaid_amount  = DecimalField(max_digits=14, decimal_places=2,
+    prepaid_amount  = DecimalField(max_digits=14, decimal_places=2, min_value=0,
                                    required=False, allow_null=True)
     comment         = CharField(required=False, allow_blank=True, allow_null=True)
     items           = OrderItemSerializer(many=True)
@@ -483,9 +485,10 @@ class ZakazSerializer(ModelSerializer):
             'comment', 'created_at',
             'history',
         )
-        # zakaz_type — yaratishda o'rnatiladi, keyin o'zgarmaydi (audit)
+        # zakaz_type/order — yaratishda o'rnatiladi, keyin o'zgarmaydi (audit;
+        # order'ni ko'chirish buyurtma↔zakaz bog'lanishini buzadi)
         read_only_fields = ('created_by', 'confirmed_at', 'created_at',
-                            'zakaz_type')
+                            'zakaz_type', 'order')
 
     def get_product_name(self, obj):
         return str(obj.product)
@@ -510,6 +513,17 @@ class ZakazSerializer(ModelSerializer):
                     'contract_date': str(obj.order.contract_date)}
         return None
 
+    # Operator uchun taqiq: received_qty (ombor hisobiga ta'sir qiladi) —
+    # faqat Management. Backorder zakazda miqdor/mahsulot buyurtmadan
+    # keladi — operator qo'lda o'zgartira olmaydi.
+    _MANAGEMENT_ONLY_FIELDS = frozenset(('received_qty',))
+    _BACKORDER_LOCKED_FIELDS = frozenset(('quantity', 'product', 'unit_price'))
+
+    def validate_unit_price(self, value):
+        if value is not None and value < 0:
+            raise ValidationError('Narx manfiy bo\'lishi mumkin emas.')
+        return value
+
     def validate(self, attrs):
         # Yaratish: API orqali ochilgan zakaz MUSTAQIL (manual) hisoblanadi —
         # unda narx (unit_price) MAJBURIY (summa avtomatik hisoblanadi).
@@ -525,6 +539,29 @@ class ZakazSerializer(ModelSerializer):
                 raise ValidationError(
                     f'"{self.instance.get_status_display()}" holatidagi zakazda '
                     f'miqdor yoki narxni o\'zgartirib bo\'lmaydi.')
+
+            # Rol chegarasi: received_qty faqat Management (ombor hisobi);
+            # backorder zakazda miqdor/mahsulot buyurtmadan keladi
+            user = self.context['request'].user
+            if not getattr(user, 'is_management', False):
+                blocked = set(attrs) & self._MANAGEMENT_ONLY_FIELDS
+                if self.instance.is_backorder:
+                    blocked |= set(attrs) & self._BACKORDER_LOCKED_FIELDS
+                if blocked:
+                    raise PermissionDenied(
+                        'Bu maydonlarni faqat boshqaruv (Management) '
+                        f'o\'zgartira oladi: {", ".join(sorted(blocked))}.')
+
+        # Qabul miqdori zakaz miqdoridan oshmasligi kerak — aks holda omborga
+        # "fantom" tovar kiradi
+        quantity = attrs.get(
+            'quantity', getattr(self.instance, 'quantity', None))
+        received = attrs.get(
+            'received_qty', getattr(self.instance, 'received_qty', 0) or 0)
+        if quantity is not None and received and received > quantity:
+            raise ValidationError({
+                'received_qty': (f'Qabul qilingan miqdor ({received}) zakaz '
+                                 f'miqdoridan ({quantity}) oshib ketmasligi kerak.')})
         return attrs
 
     def create(self, validated_data):
@@ -555,7 +592,11 @@ class ZakazSerializer(ModelSerializer):
         Zakaz.CANCELLED: ProductContract.ZAKAZ_CANCELLED,
     }
 
+    @transaction.atomic
     def update(self, instance, validated_data):
+        # Atomic: status 'received' ga o'tib, receive() (ombor to'ldirish +
+        # taqsimlash) yiqilsa — hammasi birga qaytariladi; zakaz RECEIVED'da
+        # stock kirmagan holda qotib qolmaydi.
         user       = self.context['request'].user
         new_status = validated_data.get('status')
         status_changing = bool(new_status and new_status != instance.status)
@@ -655,7 +696,8 @@ class ZakazItemSerializer(Serializer):
     """Bulk zakaz ichidagi bitta mahsulot qatori (mustaqil zakaz)."""
     product       = PrimaryKeyRelatedField(queryset=Product.objects.all())
     quantity      = IntegerField(min_value=1)
-    unit_price    = DecimalField(max_digits=14, decimal_places=2)  # narx majburiy
+    unit_price    = DecimalField(max_digits=14, decimal_places=2,
+                                 min_value=0)  # narx majburiy
     currency      = CharField(required=False, allow_blank=True, allow_null=True)
     supplier      = CharField(required=False, allow_blank=True, allow_null=True)
     expected_date = DateField(required=False, allow_null=True)

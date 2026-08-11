@@ -207,6 +207,16 @@ class StockViewSet(ModelViewSet):
     filterset_fields   = ('product', 'warehouse_location')
     search_fields      = ('product__name', 'product__serial_number', 'warehouse_location')
 
+    def perform_destroy(self, instance):
+        # Broni bor qatorni o'chirish buyurtmalardagi reserved_qty hisobini
+        # havoda qoldiradi
+        if instance.reserved_quantity > 0:
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError(
+                f'Bu qoldiqda {instance.reserved_quantity} dona bron bor — '
+                'avval tegishli buyurtmalarni bekor qiling.')
+        super().perform_destroy(instance)
+
     def get_queryset(self):
         qs = Stock.objects.select_related('product', 'product__category')
         params = self.request.query_params

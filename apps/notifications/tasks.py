@@ -21,11 +21,18 @@ def _send_telegram(text: str) -> bool:
         logger.warning('TelegramSettings not configured or inactive.')
         return False
     url = f'https://api.telegram.org/bot{cfg.bot_token}/sendMessage'
-    resp = requests.post(url, json={
-        'chat_id':    cfg.chat_id,
-        'text':       text,
-        'parse_mode': 'HTML',
-    }, timeout=10)
+    try:
+        resp = requests.post(url, json={
+            'chat_id':    cfg.chat_id,
+            'text':       text,
+            'parse_mode': 'HTML',
+        }, timeout=10)
+    except requests.RequestException as exc:
+        # MUHIM: exc ichida to'liq URL (bot token!) bo'ladi — logga faqat
+        # xato turini yozamiz, tokenni chiqarmaymiz
+        logger.error('Telegram so\'rovi muvaffaqiyatsiz: %s',
+                     type(exc).__name__)
+        return False
     if not resp.ok:
         logger.error('Telegram xatosi: %s', resp.text)
         return False
@@ -40,7 +47,8 @@ def check_overdue_payments(self):
     overdue = Payment.objects.filter(
         status__in=(Payment.PENDING, Payment.PARTIAL),
         due_date__lt=today,
-    ).select_related('sale__product', 'client')
+    ).select_related('sale__product', 'client').prefetch_related(
+        'order__items__product')
 
     if not overdue.exists():
         return 'No overdue payments.'
@@ -49,8 +57,15 @@ def check_overdue_payments(self):
     for pay in overdue[:20]:
         client = str(pay.client) if pay.client else '—'
         remaining = pay.total_amount - pay.paid_amount
+        # To'lov sotuvdan YOKI buyurtmadan — sale None bo'lishi mumkin
+        if pay.sale_id:
+            subject = str(pay.sale.product)
+        elif pay.order_id:
+            subject = f'Buyurtma #{pay.order_id}'
+        else:
+            subject = f'To\'lov #{pay.pk}'
         lines.append(
-            f'• {pay.sale.product} | {client} | '
+            f'• {subject} | {client} | '
             f'qoldiq: <b>{remaining:,.0f} {pay.currency}</b> | '
             f'muddati: {pay.due_date}'
         )

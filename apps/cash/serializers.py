@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from django.db import transaction
 from rest_framework.serializers import (ModelSerializer, Serializer,
                                         SerializerMethodField,
                                         ValidationError, ReadOnlyField,
@@ -109,17 +110,56 @@ class PaymentSerializer(ModelSerializer):
                     'To\'lov bir vaqtda ham sotuv, ham buyurtmaga bog\'lana olmaydi.')
         return attrs
 
+    @transaction.atomic
+    def create(self, validated_data):
+        # Boshlang'ich to'lov ledger orqali yoziladi — paid_amount har doim
+        # tranzaksiyalar yig'indisiga teng bo'lib qoladi va total_amount'dan
+        # oshib ketishi mumkin emas (add_payment tekshiradi).
+        initial = validated_data.pop('paid_amount', None) or Decimal('0')
+        payment = super().create(validated_data)
+        if initial > 0:
+            request = self.context.get('request')
+            user = request.user if request else None
+            try:
+                payment.add_payment(initial, user=user,
+                                    comment='Boshlang\'ich to\'lov')
+            except ValueError as exc:
+                raise ValidationError({'paid_amount': str(exc)})
+        return payment
+
 
 class PaymentUpdateSerializer(ModelSerializer):
     class Meta:
         model  = Payment
         fields = ('paid_amount', 'currency', 'due_date', 'comment')
 
+    def validate_paid_amount(self, value):
+        if value < Decimal('0'):
+            raise ValidationError('Toʻlov summasi manfiy boʻlishi mumkin emas.')
+        return value
+
+    def validate(self, attrs):
+        new_paid = attrs.get('paid_amount')
+        if new_paid is not None and new_paid > self.instance.total_amount:
+            raise ValidationError({
+                'paid_amount': (f'To\'langan summa jami summadan '
+                                f'({self.instance.total_amount}) oshib ketmasligi kerak.')})
+        new_currency = attrs.get('currency')
+        if (new_currency and new_currency != self.instance.currency
+                and self.instance.paid_amount > 0):
+            raise ValidationError({
+                'currency': 'To\'lovlari boshlangan yozuvda valyutani '
+                            'o\'zgartirib bo\'lmaydi.'})
+        return attrs
+
+    @transaction.atomic
     def update(self, instance, validated_data):
         """
         paid_amount to'g'ridan-to'g'ri o'zgartirilsa ham tranzaksiya
         yozilib boradi (ledger doim yig'indiga teng bo'lib qolsin).
+        Atomic: tranzaksiya va payment yangilanishi birga o'tadi/qaytadi.
         """
+        instance = Payment.objects.select_for_update().get(pk=instance.pk)
         new_paid = validated_data.get('paid_amount')
         if new_paid is not None and new_paid != instance.paid_amount:
             diff = new_paid - instance.paid_amount

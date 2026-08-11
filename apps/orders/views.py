@@ -1,3 +1,4 @@
+from django.db import transaction
 from drf_spectacular.utils import extend_schema, extend_schema_view
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
@@ -185,36 +186,48 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
     @action(detail=True, methods=['post'],
             permission_classes=[IsOperatorOrManagement])
     def fulfill(self, request, pk=None):
-        order = self.get_object()
-        if order.status == Order.FULFILLED:
-            return Response(
-                {'detail': 'Buyurtma allaqachon yetkazilgan.'},
-                status=400,
-            )
-        if order.status == Order.CANCELLED:
-            return Response(
-                {'detail': 'Bekor qilingan buyurtmani yetkazib bo\'lmaydi.'},
-                status=400,
-            )
-        if order.reserved_qty == 0:
-            return Response(
-                {'detail': 'Bron qilingan miqdor yo\'q. Avval omborda qoldiq bo\'lishi kerak.'},
-                status=400,
-            )
         contract_number, asos, faktura = _require_action_fields(request)
-        order.fulfill()
-        OrderHistory.objects.create(
-            order=order, changed_by=request.user, action=OrderHistory.FULFILLED,
-            contract_number=contract_number, faktura=faktura, asos=asos,
-        )
-        for item in order.items.all():
-            register_contract(
-                item.product, ProductContract.ORDER_FULFILLED,
-                contract_number=contract_number,
-                contract_date=order.contract_date,
-                faktura=faktura,
-                asos=asos, order=order, user=request.user,
+        with transaction.atomic():
+            # Parallel fulfill/cancel bir-birini kutadi — holat tekshiruvlari
+            # qulflangan qator ustida ishonchli bo'ladi.
+            order = (Order.objects.select_for_update()
+                     .get(pk=self.get_object().pk))
+            if order.status == Order.FULFILLED:
+                return Response(
+                    {'detail': 'Buyurtma allaqachon yetkazilgan.'},
+                    status=400,
+                )
+            if order.status == Order.CANCELLED:
+                return Response(
+                    {'detail': 'Bekor qilingan buyurtmani yetkazib bo\'lmaydi.'},
+                    status=400,
+                )
+            if order.reserved_qty == 0:
+                return Response(
+                    {'detail': 'Bron qilingan miqdor yo\'q. Avval omborda qoldiq bo\'lishi kerak.'},
+                    status=400,
+                )
+            if order.reserved_qty < order.total_quantity:
+                return Response(
+                    {'detail': (f'Buyurtma to\'liq bronlanmagan '
+                                f'({order.reserved_qty}/{order.total_quantity}). '
+                                'Yetishmagan miqdor kelmaguncha yetkazib bo\'lmaydi — '
+                                'aks holda qoldiq miqdor hisobdan yo\'qoladi.')},
+                    status=400,
+                )
+            order.fulfill()
+            OrderHistory.objects.create(
+                order=order, changed_by=request.user, action=OrderHistory.FULFILLED,
+                contract_number=contract_number, faktura=faktura, asos=asos,
             )
+            for item in order.items.all():
+                register_contract(
+                    item.product, ProductContract.ORDER_FULFILLED,
+                    contract_number=contract_number,
+                    contract_date=order.contract_date,
+                    faktura=faktura,
+                    asos=asos, order=order, user=request.user,
+                )
         return Response(OrderSerializer(order).data)
 
     @extend_schema(
@@ -232,29 +245,31 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
     @action(detail=True, methods=['post'],
             permission_classes=[IsOperatorOrManagement])
     def cancel(self, request, pk=None):
-        order = self.get_object()
-        if order.status in (Order.FULFILLED, Order.CANCELLED):
-            return Response(
-                {'detail': f'"{order.get_status_display()}" holatidagi buyurtmani bekor qilib bo\'lmaydi.'},
-                status=400,
-            )
         contract_number, asos, faktura = _require_action_fields(request)
-        order.release()
-        order.status = Order.CANCELLED
-        order.save(update_fields=['status'])
-        OrderHistory.objects.create(
-            order=order, changed_by=request.user, action=OrderHistory.CANCELLED,
-            contract_number=contract_number, faktura=faktura, asos=asos,
-        )
-        for item in order.items.all():
-            allocate_pending_orders(item.product)
-            register_contract(
-                item.product, ProductContract.ORDER_CANCELLED,
-                contract_number=contract_number,
-                contract_date=order.contract_date,
-                faktura=faktura,
-                asos=asos, order=order, user=request.user,
+        with transaction.atomic():
+            order = (Order.objects.select_for_update()
+                     .get(pk=self.get_object().pk))
+            if order.status in (Order.FULFILLED, Order.CANCELLED):
+                return Response(
+                    {'detail': f'"{order.get_status_display()}" holatidagi buyurtmani bekor qilib bo\'lmaydi.'},
+                    status=400,
+                )
+            order.release()
+            order.status = Order.CANCELLED
+            order.save(update_fields=['status'])
+            OrderHistory.objects.create(
+                order=order, changed_by=request.user, action=OrderHistory.CANCELLED,
+                contract_number=contract_number, faktura=faktura, asos=asos,
             )
+            for item in order.items.all():
+                allocate_pending_orders(item.product)
+                register_contract(
+                    item.product, ProductContract.ORDER_CANCELLED,
+                    contract_number=contract_number,
+                    contract_date=order.contract_date,
+                    faktura=faktura,
+                    asos=asos, order=order, user=request.user,
+                )
         return Response(OrderSerializer(order).data)
 
     @extend_schema(
