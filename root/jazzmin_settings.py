@@ -24,6 +24,8 @@ JAZZMIN_SETTINGS = {
         "orders.Zakaz",
         "sales.Sale",
         "clients.Client",
+        "warehouse.Stock",
+        "users.User",
     ],
 
     # ── Top navbar havolalar ─────────────────────────────────────────────
@@ -69,6 +71,7 @@ JAZZMIN_SETTINGS = {
         "expenses",
         "notifications",
         "users",
+        "users.User",
         "auth",
         "django_celery_beat",
     ],
@@ -139,8 +142,8 @@ JAZZMIN_UI_TWEAKS = {
     "brand_small_text":   False,
 
     # ── Tema: har doim LIGHT ──────────────────────────────────────────────
-    "theme":           "default",
-    "dark_mode_theme": None,
+    "theme":              "default",
+    "default_theme_mode": "light",
 
     # ── Rang ─────────────────────────────────────────────────────────────
     "brand_colour":    "navbar-primary",

@@ -1,9 +1,11 @@
 from django.db import transaction
+import json
 from drf_spectacular.utils import extend_schema, extend_schema_view
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.mixins import (CreateModelMixin, ListModelMixin,
                                    RetrieveModelMixin, UpdateModelMixin)
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
@@ -122,6 +124,7 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
                                             'history__changed_by'))
     serializer_class   = OrderSerializer
     permission_classes = (IsOperatorOrReadOnly,)
+    parser_classes     = (MultiPartParser, FormParser, JSONParser)
     filterset_fields   = {
         'status':          ['exact'],
         'client':          ['exact'],
@@ -132,6 +135,19 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
                           'client__company_name', 'contract_number', 'comment')
     ordering_fields    = ('due_date', 'created_at', 'status')
     http_method_names  = ('get', 'post', 'patch', 'head', 'options')
+
+    def create(self, request, *args, **kwargs):
+        data = request.data.copy() if hasattr(request.data, 'copy') else request.data
+        if isinstance(data.get('items'), str):
+            try:
+                data['items'] = json.loads(data['items'])
+            except json.JSONDecodeError:
+                data['items'] = []
+        if hasattr(request, '_full_data') or hasattr(request, '_data'):
+            request._full_data = data
+        else:
+            request.data = data
+        return super().create(request, *args, **kwargs)
 
     @extend_schema(
         summary="Bir nechta mahsulotli buyurtma (bulk) — natija BITTA buyurtma",

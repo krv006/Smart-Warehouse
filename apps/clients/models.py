@@ -9,18 +9,31 @@ from apps.common.models import TimeStampedModel
 class Client(TimeStampedModel):
     """
     Mijoz modeli.
-    INN, ism va telefon maydonlari Fernet (symmetric) shifrlash bilan saqlanadi.
+    INN, passport va telefon maydonlari Fernet (symmetric) shifrlash bilan saqlanadi.
     Shifrlash/shifr ochish apps/clients/encryption.py orqali bajariladi.
     """
+    INDIVIDUAL = 'individual'
+    LEGAL      = 'legal'
+    CLIENT_TYPE_CHOICES = (
+        (INDIVIDUAL, 'Jismoniy shaxs'),
+        (LEGAL, 'Yuridik shaxs'),
+    )
+
     id           = UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     # Shifrlangan maydonlar TextField: Fernet ciphertext plaintext'dan sezilarli
     # uzun bo'ladi (~100 + 4/3x) — CharField(512) uzun qiymatlarda DataError berardi
     full_name    = TextField(help_text='Shifrlangan (Fernet)')
+    first_name   = TextField(blank=True, null=True, help_text='Shifrlangan (Fernet)')
+    last_name    = TextField(blank=True, null=True, help_text='Shifrlangan (Fernet)')
+    middle_name  = TextField(blank=True, null=True, help_text='Shifrlangan (Fernet)')
+    pinfl        = TextField(blank=True, null=True, help_text='Shifrlangan (Fernet)')
+    client_type  = CharField(max_length=20, choices=CLIENT_TYPE_CHOICES,
+                             default=INDIVIDUAL)
     company_name = CharField(max_length=512, blank=True, null=True)
     inn          = TextField(blank=True, null=True,
                              help_text='Shifrlangan (Fernet)')
-    phone        = TextField(blank=True, null=True,
-                             help_text='Shifrlangan (Fernet)')
+    passport_number = TextField(blank=True, null=True, help_text='Shifrlangan (Fernet)')
+    phone        = TextField(blank=True, null=True, help_text='Shifrlangan (Fernet)')
     email        = EmailField(blank=True, null=True)
     address      = TextField(blank=True, null=True)
     comment      = TextField(blank=True, null=True)

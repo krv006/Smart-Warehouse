@@ -1,6 +1,7 @@
 import os
 
 from celery import Celery
+from celery.schedules import crontab
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'root.settings')
 
@@ -12,5 +13,9 @@ app.conf.beat_schedule = {
     'check-overdue-payments-daily': {
         'task':     'apps.notifications.tasks.check_overdue_payments',
         'schedule': 32400,  # har kuni 09:00 UTC (14:00 Toshkent)
+    },
+    'refresh-infinbank-usd-rate-daily': {
+        'task': 'apps.cash.tasks.refresh_infinbank_usd_rate',
+        'schedule': crontab(hour=9, minute=0),
     },
 }

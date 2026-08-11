@@ -8,13 +8,13 @@ from rest_framework.serializers import (ModelSerializer, Serializer,
                                         ValidationError, BooleanField,
                                         CharField, DateField,
                                         DecimalField, IntegerField,
-                                        PrimaryKeyRelatedField)
+                                        PrimaryKeyRelatedField, FileField)
 
 from apps.clients.models import Client
 from apps.orders.models import (Order, OrderItem, OrderHistory,
                                 Zakaz, ZakazHistory,
                                 ProductContract, register_contract,
-                                allocate_pending_orders)
+                                allocate_pending_orders, build_contract_number)
 from apps.warehouse.models import Product
 
 # Buyurtma sarlavha tahririda kuzatiladigan maydonlar (tarixga yoziladi)
@@ -113,12 +113,8 @@ class OrderSerializer(ModelSerializer):
     has_active_zakaz = ReadOnlyField()
     history          = OrderHistorySerializer(many=True, read_only=True)
 
-    # Shartnoma raqami — buyurtma olishda MAJBURIY
-    contract_number = CharField(max_length=100, allow_blank=False,
-                                error_messages={
-                                    'blank':    'Shartnoma raqami kiritilishi shart.',
-                                    'required': 'Shartnoma raqami kiritilishi shart.',
-                                })
+    # Shartnoma raqami — agar yuborilmasa avtomatik yaratiladi
+    contract_number = CharField(max_length=100, required=False, allow_blank=True)
     contract_date   = DateField(required=False)
 
     # Tahrir asosi — modelda saqlanmaydi, tarixga yoziladi
@@ -140,7 +136,7 @@ class OrderSerializer(ModelSerializer):
             'product', 'quantity', 'unit_price',   # legacy (write-only)
             'total_quantity', 'total',
             'prepaid_amount', 'balance_due',
-            'contract_number', 'contract_date',
+            'contract_number', 'contract_date', 'contract_file',
             'reserved_qty', 'backorder_qty',
             'has_active_zakaz',
             'due_date', 'status', 'comment', 'created_at',
@@ -153,6 +149,11 @@ class OrderSerializer(ModelSerializer):
         return str(obj.client) if obj.client else None
 
     def validate(self, attrs):
+        if self.instance is None:
+            client = attrs.get('client')
+            contract_number = (attrs.get('contract_number') or '').strip()
+            if not contract_number:
+                attrs['contract_number'] = build_contract_number(client=client, contract_date=attrs.get('contract_date'))
         # Tahrirlashda asos MAJBURIY — auditda "nima uchun" aniq bo'lishi kerak
         if self.instance is not None:
             if not attrs.get('asos'):
@@ -192,6 +193,11 @@ class OrderSerializer(ModelSerializer):
     def create(self, validated_data):
         validated_data.pop('asos', None)
         validated_data.setdefault('contract_date', timezone.localdate())
+        if not (validated_data.get('contract_number') or '').strip():
+            validated_data['contract_number'] = build_contract_number(
+                client=validated_data.get('client'),
+                contract_date=validated_data.get('contract_date'),
+            )
         user = self.context['request'].user
 
         # items yoki legacy (product/quantity/unit_price)
@@ -383,12 +389,9 @@ class OrderBulkCreateSerializer(Serializer):
     client          = PrimaryKeyRelatedField(queryset=Client.objects.all(),
                                              required=False, allow_null=True)
     due_date        = DateField(required=False, allow_null=True)
-    contract_number = CharField(max_length=100, allow_blank=False,
-                                error_messages={
-                                    'blank':    'Shartnoma raqami kiritilishi shart.',
-                                    'required': 'Shartnoma raqami kiritilishi shart.',
-                                })
+    contract_number = CharField(max_length=100, required=False, allow_blank=True)
     contract_date   = DateField(required=False)
+    contract_file   = FileField(required=False, allow_null=True)
     prepaid_amount  = DecimalField(max_digits=14, decimal_places=2, min_value=0,
                                    required=False, allow_null=True)
     comment         = CharField(required=False, allow_blank=True, allow_null=True)

@@ -7,11 +7,62 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
-from apps.cash.models import Payment
-from apps.cash.serializers import (PaymentSerializer, PaymentUpdateSerializer,
+from apps.cash.models import ExchangeRate, Payment
+from apps.cash.serializers import (ExchangeRateSerializer, PaymentSerializer,
+                                   PaymentUpdateSerializer,
                                    PaymentPaySerializer)
+from apps.cash.services import ExchangeRateFetchError, sync_today_usd_rate
 from apps.common.permissions import (IsAccountantOrManagement,
                                      IsAccountantWithManagementRead)
+
+
+@extend_schema_view(
+    list=extend_schema(summary="Valyuta kurslari", tags=["Cash / Kassa"]),
+    retrieve=extend_schema(summary="Valyuta kursi", tags=["Cash / Kassa"]),
+    create=extend_schema(summary="Valyuta kursini saqlash", tags=["Cash / Kassa"]),
+)
+class ExchangeRateViewSet(ModelViewSet):
+    queryset = ExchangeRate.objects.all()
+    serializer_class = ExchangeRateSerializer
+    permission_classes = (IsAuthenticated,)
+    filterset_fields = ('currency', 'manual_override', 'rate_date')
+    ordering_fields = ('rate_date', 'created_at', 'mb_rate')
+    http_method_names = ('get', 'post', 'patch', 'head', 'options')
+
+    def get_queryset(self):
+        return ExchangeRate.objects.order_by('-rate_date', '-created_at')
+
+    def perform_create(self, serializer):
+        serializer.save(
+            currency=ExchangeRate.USD,
+            buy_rate=serializer.validated_data.get('buy_rate') or serializer.validated_data['mb_rate'],
+            sell_rate=serializer.validated_data.get('sell_rate') or serializer.validated_data['mb_rate'],
+            rate_date=timezone.localdate(),
+            source='manual',
+            manual_override=True,
+        )
+
+    @action(detail=False, methods=['get'], url_path='latest')
+    def latest(self, request):
+        refresh = request.query_params.get('refresh', '').lower() in {'1', 'true', 'yes'}
+        today = timezone.localdate()
+        rate = (
+            ExchangeRate.objects
+            .filter(currency=ExchangeRate.USD, rate_date=today)
+            .order_by('-manual_override', '-created_at')
+            .first()
+        )
+        if refresh or rate is None:
+            try:
+                rate, _ = sync_today_usd_rate()
+            except ExchangeRateFetchError as exc:
+                fallback = ExchangeRate.get_latest(ExchangeRate.USD)
+                if fallback:
+                    serializer = ExchangeRateSerializer(fallback)
+                    return Response(serializer.data)
+                return Response({'detail': str(exc)}, status=503)
+        serializer = ExchangeRateSerializer(rate)
+        return Response(serializer.data)
 
 
 @extend_schema_view(
