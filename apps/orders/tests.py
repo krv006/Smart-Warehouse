@@ -208,7 +208,7 @@ class OrderEditKassaSyncTests(TestCase):
 
         # 35M + 25M = 60M, oldindan to'lov 5M
         res = self.api.post('/api/v1/orders/', {
-            'contract_number': 'ASD1', 'prepaid_amount': '5000000',
+            'contract_number': '1/1108', 'prepaid_amount': '5000000',
             'items': [
                 {'product': self.p1.pk, 'quantity': 10, 'unit_price': '3500000'},
                 {'product': self.p2.pk, 'quantity': 5,  'unit_price': '5000000'},

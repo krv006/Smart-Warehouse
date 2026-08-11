@@ -1,4 +1,5 @@
 import json
+import re
 
 from django.db import transaction
 from django.utils import timezone
@@ -16,6 +17,8 @@ from apps.orders.models import (Order, OrderItem, OrderHistory,
                                 ProductContract, register_contract,
                                 allocate_pending_orders, build_contract_number)
 from apps.warehouse.models import Product
+
+CONTRACT_NUMBER_RE = re.compile(r'^\d+/\d{4}$')
 
 # Buyurtma sarlavha tahririda kuzatiladigan maydonlar (tarixga yoziladi)
 _ORDER_TRACKED_FIELDS = ('client', 'prepaid_amount', 'contract_number',
@@ -149,10 +152,14 @@ class OrderSerializer(ModelSerializer):
         return str(obj.client) if obj.client else None
 
     def validate(self, attrs):
+        contract_number_value = (attrs.get('contract_number') or '').strip()
+        if contract_number_value and not CONTRACT_NUMBER_RE.match(contract_number_value):
+            raise ValidationError({
+                'contract_number': 'Shartnoma raqami faqat "{raqam}/{DDMM}" formatida bo\'lishi kerak. Masalan: 12/1108.'
+            })
         if self.instance is None:
             client = attrs.get('client')
-            contract_number = (attrs.get('contract_number') or '').strip()
-            if not contract_number:
+            if not contract_number_value:
                 attrs['contract_number'] = build_contract_number(client=client, contract_date=attrs.get('contract_date'))
         # Tahrirlashda asos MAJBURIY — auditda "nima uchun" aniq bo'lishi kerak
         if self.instance is not None:

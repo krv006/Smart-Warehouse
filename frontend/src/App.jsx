@@ -781,18 +781,20 @@ function ResourcePage({ title, notify, reloadKey = 0, session }) {
                     </div>
                     <span className="bar"><i style={{ width: '58%' }} /></span>
                     <b>{row.total_amount ? `${money(row.total_amount)} so‘m` : (row.available_quantity ?? row.total ?? '—')}</b>
-                    {canManage && <button className="row-action" disabled={opening} onClick={() => handleEdit(row)} aria-label="Tahrirlash"><PencilSimple size={17} /></button>}
-                    {can(session, 'orders_manage') && title === 'Buyurtmalar' && !['fulfilled', 'cancelled'].includes(row.status) && (
-                      <>
-                        <button className="row-action" onClick={() => setOrderAction({ row, action: 'fulfill' })}>Yetkazish</button>
-                        <button className="row-action" onClick={() => setOrderAction({ row, action: 'cancel' })}>Bekor</button>
-                        {Number(row.backorder_qty || 0) > 0 && <button className="row-action" onClick={() => setOrderAction({ row, action: 'zakaz' })}>Zakaz</button>}
-                      </>
-                    )}
-                    {can(session, 'warehouse_manage') && title === 'Ombor' && <button className="row-action" onClick={() => setStockProduct(row)} aria-label="Kirim qilish">Kirim</button>}
-                    {can(session, 'cash_manage') && title === 'Kassa' && row.remaining !== '0' && (
-                      <button className="row-action" onClick={() => setPaying(row)} aria-label="To‘lov qabul qilish"><CurrencyCircleDollar size={17} /></button>
-                    )}
+                    <div className="row-actions">
+                      {canManage && <button className="row-action" disabled={opening} onClick={() => handleEdit(row)} aria-label="Tahrirlash"><PencilSimple size={17} /></button>}
+                      {can(session, 'orders_manage') && title === 'Buyurtmalar' && !['fulfilled', 'cancelled'].includes(row.status) && (
+                        <>
+                          <button className="row-action" onClick={() => setOrderAction({ row, action: 'fulfill' })}>Yetkazish</button>
+                          <button className="row-action" onClick={() => setOrderAction({ row, action: 'cancel' })}>Bekor</button>
+                          {Number(row.backorder_qty || 0) > 0 && <button className="row-action" onClick={() => setOrderAction({ row, action: 'zakaz' })}>Zakaz</button>}
+                        </>
+                      )}
+                      {can(session, 'warehouse_manage') && title === 'Ombor' && <button className="row-action" onClick={() => setStockProduct(row)} aria-label="Kirim qilish">Kirim</button>}
+                      {can(session, 'cash_manage') && title === 'Kassa' && row.remaining !== '0' && (
+                        <button className="row-action" onClick={() => setPaying(row)} aria-label="To‘lov qabul qilish"><CurrencyCircleDollar size={17} /></button>
+                      )}
+                    </div>
                   </>
                 )}
               </div>
@@ -1051,6 +1053,10 @@ function OrderEditor({ close, done, notify, item = null }) {
   const [file, setFile] = useState(null)
   const [form, setForm] = useState({ client: '', contract_number: '', contract_date: new Date().toISOString().slice(0, 10), due_date: '', prepaid_amount: '0', product: '', itemId: null, quantity: '1', unit_price: '', comment: '', asos: '' })
 
+  const updateContractNumber = (value) => {
+    setForm({ ...form, contract_number: value.replace(/[^\d/]/g, '') })
+  }
+
   useEffect(() => {
     Promise.all([api.clients(), api.products()])
       .then(([clientData, productData]) => { setClients(list(clientData)); setProducts(list(productData)) })
@@ -1128,7 +1134,7 @@ function OrderEditor({ close, done, notify, item = null }) {
         </div>
         <div className="form-grid">
           <label>Mijoz<select value={form.client} onChange={(event) => setForm({ ...form, client: event.target.value })}><option value="">Mijoz tanlanmagan</option>{clients.map((client) => <option value={client.id} key={client.id}>{client.company_name || client.full_name}</option>)}</select></label>
-          <label>Shartnoma raqami<input value={form.contract_number} onChange={(event) => setForm({ ...form, contract_number: event.target.value })} placeholder="Bo‘sh qoldirilsa avtomatik yaratiladi" /></label>
+          <label>Shartnoma raqami<input value={form.contract_number} onChange={(event) => updateContractNumber(event.target.value)} placeholder="Masalan: 12/1108" inputMode="numeric" pattern="[0-9/]*" /></label>
           <label>Shartnoma sanasi<input type="date" value={form.contract_date} onChange={(event) => setForm({ ...form, contract_date: event.target.value })} /></label>
           <label>Mahsulot<select required value={form.product} onChange={(event) => setForm({ ...form, product: event.target.value })}><option value="">Mahsulotni tanlang</option>{products.map((product) => <option value={product.id} key={product.id}>{product.name} — {product.serial_number}</option>)}</select></label>
           <label>Miqdor<input required min="1" type="number" value={form.quantity} onChange={(event) => setForm({ ...form, quantity: event.target.value })} /></label>
@@ -1136,7 +1142,13 @@ function OrderEditor({ close, done, notify, item = null }) {
           <label>Oldindan to‘lov<input type="number" min="0" step="0.01" value={form.prepaid_amount} onChange={(event) => setForm({ ...form, prepaid_amount: event.target.value })} /></label>
           <label>Yetkazish muddati<input type="date" value={form.due_date} onChange={(event) => setForm({ ...form, due_date: event.target.value })} /></label>
           {item?.id && <label className="full-width">Tahrirlash sababi<input required value={form.asos} onChange={(event) => setForm({ ...form, asos: event.target.value })} placeholder="Nima uchun o‘zgartirilayotganini yozing" /></label>}
-          <label className="full-width">Shartnoma fayli<input type="file" onChange={(event) => setFile(event.target.files?.[0] || null)} /></label>
+          <label className="full-width file-field">Shartnoma fayli
+            <span className="file-picker">
+              <span><FileText size={18} />{file?.name || 'Word yoki PDF fayl tanlang'}</span>
+              <b>Tanlash</b>
+              <input type="file" accept=".doc,.docx,.pdf" onChange={(event) => setFile(event.target.files?.[0] || null)} />
+            </span>
+          </label>
           <label className="full-width">Izoh<textarea value={form.comment} onChange={(event) => setForm({ ...form, comment: event.target.value })} rows="3" /></label>
         </div>
         <div className="editor-actions">

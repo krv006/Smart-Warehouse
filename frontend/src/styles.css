@@ -490,7 +490,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 }
 .product-row {
   display: grid;
-  grid-template-columns: 32px minmax(130px, 1fr) minmax(60px, 0.75fr) 72px auto;
+  grid-template-columns: 32px minmax(180px, 1fr) minmax(80px, 0.6fr) 96px minmax(180px, auto);
   align-items: center;
   gap: 12px;
   padding: 13px 0;
@@ -703,12 +703,21 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .report-table td:last-child,
 .report-table th:last-child { text-align: right; }
 
+.row-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
 .row-action {
   min-width: 34px;
   height: 34px;
   padding: 0 10px;
-  display: grid;
-  place-items: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 0;
   border-radius: 8px;
   color: var(--primary);
@@ -722,6 +731,55 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .row-action:disabled {
   cursor: progress;
   opacity: 0.65;
+}
+
+.file-field { gap: 8px; }
+.file-picker {
+  position: relative;
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 12px 10px 16px;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  background: #fff;
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+.file-picker:hover {
+  border-color: var(--primary);
+  background: var(--primary-light);
+}
+.file-picker span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+.file-picker span svg {
+  flex: 0 0 auto;
+  color: var(--primary);
+}
+.file-picker b {
+  flex: 0 0 auto;
+  border-radius: 9px;
+  background: var(--primary);
+  color: #fff;
+  padding: 9px 13px;
+  font-size: 12px;
+  font-weight: 800;
+}
+.file-picker input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
 }
 
 .modal-backdrop {
