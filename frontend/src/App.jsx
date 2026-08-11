@@ -120,7 +120,7 @@ const documentTypeLabels = {
 }
 const documentTypeLabel = (value) => documentTypeLabels[value] || value || 'Hujjat'
 
-function FxRatePanel({ session, notify, compact = false, onSourceChange }) {
+function FxRatePanel({ session, notify, compact = false, header = false, onSourceChange }) {
   const [snapshot, setSnapshot] = useState(null)
   const [manualDraft, setManualDraft] = useState('')
   const [saving, setSaving] = useState(false)
@@ -152,6 +152,7 @@ function FxRatePanel({ session, notify, compact = false, onSourceChange }) {
   }, [serverSource])
 
   const setSource = async (source) => {
+    if (!canManage) return
     if (source === 'manual' && !manualRate) {
       setUiSource('manual')
       return
@@ -194,14 +195,28 @@ function FxRatePanel({ session, notify, compact = false, onSourceChange }) {
     }
   }
 
+  if (header) {
+    return (
+      <div className="fx-card fx-card--header">
+        <span className="fx-rate-label">Infinbank</span>
+        <strong className="fx-rate-readonly">{infinRate ? money(infinRate) : '—'}</strong>
+        {canManage && (
+          <button type="button" className="fx-refresh" onClick={() => load(true).catch((err) => notify(err.message))} aria-label="Infinbank kursini yangilash" title="Infinbankdan yangilash">
+            ↻
+          </button>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className={compact ? 'fx-card fx-card--dual fx-card--embedded' : 'fx-card fx-card--dual'}>
       <span className="fx-card-title">{compact ? 'USD kurs (hisob-kitob)' : 'USD MB kurs'}</span>
       <div className="fx-source-tabs" role="tablist" aria-label="USD kurs manbasi">
-        <button type="button" role="tab" aria-selected={activeSource === 'infinbank'} disabled={sourceSaving} className={activeSource === 'infinbank' ? 'fx-source-tab is-active' : 'fx-source-tab'} onClick={() => setSource('infinbank')}>
+        <button type="button" role="tab" aria-selected={activeSource === 'infinbank'} disabled={sourceSaving || !canManage} className={activeSource === 'infinbank' ? 'fx-source-tab is-active' : 'fx-source-tab'} onClick={() => setSource('infinbank')}>
           Infinbank{infinRate ? ` - ${money(infinRate)}` : ''}
         </button>
-        <button type="button" role="tab" aria-selected={activeSource === 'manual'} disabled={sourceSaving} className={activeSource === 'manual' ? 'fx-source-tab is-active' : 'fx-source-tab'} onClick={() => setSource('manual')}>
+        <button type="button" role="tab" aria-selected={activeSource === 'manual'} disabled={sourceSaving || !canManage} className={activeSource === 'manual' ? 'fx-source-tab is-active' : 'fx-source-tab'} onClick={() => setSource('manual')}>
           Qo‘lda
         </button>
       </div>
@@ -1352,7 +1367,7 @@ function App() {
         <header className="topbar">
           <div className="crumb"><span>Smart ombor</span><span>/</span><b>{crumbFromPath(location.pathname)}</b></div>
           <div className="top-actions">
-            <FxRatePanel session={session} notify={notify} onSourceChange={() => loadDashboard(true)} />
+            <FxRatePanel session={session} notify={notify} header onSourceChange={() => loadDashboard(true)} />
             <button className="icon-button" aria-label="Global qidiruv" title="Qidiruv (Ctrl+K)" onClick={() => setGlobalSearchOpen(true)}><MagnifyingGlass size={20} /></button>
             <NotificationDropdown
               browserPermission={notificationPermission}
@@ -2759,7 +2774,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
           />
         )
       }
-      if (title === 'Import' && can(session, 'procurement_manage')) {
+      if (title === 'Import' && can(session, 'order_status_manage')) {
         const locked = ['received', 'cancelled'].includes(row.status)
         const transitions = {
           new: ['new', 'confirmed', 'cancelled'],
@@ -2892,7 +2907,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
               <DownloadSimple size={18} />
               Eksport
             </button>
-            {title === 'Import' && can(session, 'procurement_manage') && (
+            {title === 'Import' && can(session, 'order_status_manage') && (
               <button type="button" className="secondary-button" disabled={!selectedIds.length} onClick={handleBulkStatus}>
                 Status o‘zgartirish
               </button>
@@ -3313,10 +3328,15 @@ function SaleEditor({ close, done, notify, item = null, session }) {
   const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
-    Promise.all([api.clients({ page_size: 500 }), api.products()])
-      .then(([clientData, productData]) => { setClients(list(clientData)); setProducts(list(productData)) })
+    api.products({ page_size: 500 })
+      .then((productData) => setProducts(list(productData)))
       .catch((err) => notify(err.message))
-  }, [notify])
+    if (can(session, 'clients_view')) {
+      api.clients({ page_size: 500 })
+        .then((clientData) => setClients(list(clientData)))
+        .catch((err) => notify(err.message))
+    }
+  }, [notify, session])
 
   const submit = async (event) => {
     event.preventDefault()
@@ -3583,10 +3603,15 @@ function OrderEditor({ close, done, notify, item = null, session, prefillClientI
   }
 
   useEffect(() => {
-    Promise.all([api.clients({ page_size: 500 }), api.products()])
-      .then(([clientData, productData]) => { setClients(list(clientData)); setProducts(list(productData)) })
+    api.products({ page_size: 500 })
+      .then((productData) => setProducts(list(productData)))
       .catch((err) => notify(err.message))
-  }, [notify])
+    if (can(session, 'clients_view')) {
+      api.clients({ page_size: 500 })
+        .then((clientData) => setClients(list(clientData)))
+        .catch((err) => notify(err.message))
+    }
+  }, [notify, session])
 
   useEffect(() => {
     if (!item && prefillClientId) {
@@ -4419,22 +4444,26 @@ function EInvoicePage({ notify, session }) {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [invoiceData, clientData, productData, profile] = await Promise.all([
+      const [invoiceData, productData, profile] = await Promise.all([
         api.invoices(),
-        api.clients({ page_size: 200 }),
         api.products({ page_size: 200 }),
         api.companyProfile(),
       ])
       setRows(list(invoiceData))
-      setClients(list(clientData))
       setProducts(list(productData))
       setCompany(profile)
+      if (can(session, 'clients_view')) {
+        const clientData = await api.clients({ page_size: 200 })
+        setClients(list(clientData))
+      } else {
+        setClients([])
+      }
     } catch (err) {
       notify(err.message)
     } finally {
       setLoading(false)
     }
-  }, [notify])
+  }, [notify, session])
 
   useEffect(() => { load() }, [load])
 

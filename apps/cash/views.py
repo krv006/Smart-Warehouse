@@ -36,8 +36,9 @@ class ExchangeRateViewSet(ModelViewSet):
         return ExchangeRate.objects.order_by('-rate_date', '-created_at')
 
     def get_permissions(self):
-        if self.action == 'rate_settings' and self.request.method == 'PATCH':
-            return [IsAuthenticated()]
+        if self.action in ('create',) or (
+                self.action == 'rate_settings' and self.request.method == 'PATCH'):
+            return [IsManagement()]
         return super().get_permissions()
 
     def perform_create(self, serializer):

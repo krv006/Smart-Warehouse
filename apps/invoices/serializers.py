@@ -57,12 +57,18 @@ class ElectronicInvoiceSerializer(ModelSerializer):
         return obj.get_document_type_display()
 
     def get_total_delivery(self, obj):
+        if not self.context.get('can_view_prices', True):
+            return None
         return obj.total_delivery
 
     def get_total_vat(self, obj):
+        if not self.context.get('can_view_prices', True):
+            return None
         return obj.total_vat
 
     def get_grand_total(self, obj):
+        if not self.context.get('can_view_prices', True):
+            return None
         return obj.grand_total
 
     def get_created_by_name(self, obj):

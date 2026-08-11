@@ -59,7 +59,10 @@ class ElectronicInvoiceViewSet(ModelViewSet):
     def get_serializer(self, *args, **kwargs):
         serializer = super().get_serializer(*args, **kwargs)
         if not _can_view_prices(self.request.user):
-            for field in ('unit_price', 'delivery_amount', 'vat_amount', 'total_amount'):
+            for field in (
+                    'unit_price', 'delivery_amount', 'vat_amount', 'total_amount',
+                    'total_delivery', 'total_vat', 'grand_total',
+            ):
                 if field in serializer.fields:
                     serializer.fields.pop(field)
         return serializer

@@ -134,7 +134,7 @@ export default function DataTable({
                 ))}
                 {renderActions && (
                   <td className="data-table-actions-col" onClick={(event) => event.stopPropagation()}>
-                    {renderActions(row)}
+                    <div className="row-actions">{renderActions(row)}</div>
                   </td>
                 )}
               </tr>

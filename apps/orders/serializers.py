@@ -661,6 +661,10 @@ class ZakazSerializer(ModelSerializer):
                 raise ValidationError(
                     'Mahsulotni tanlash va qo\'lda kiritish bir vaqtda bo\'lmaydi.')
             if new_product:
+                if not _can_manage_prices(user):
+                    new_product = dict(new_product)
+                    new_product.pop('purchase_price', None)
+                    new_product.pop('delivery_price', None)
                 attrs['_new_product_data'] = new_product
             if _can_manage_prices(user):
                 if attrs.get('unit_price') in (None, ''):
@@ -840,7 +844,7 @@ class ZakazOperatorSerializer(ZakazSerializer):
     class Meta(ZakazSerializer.Meta):
         fields = (
             'id', 'zakaz_type', 'type_display', 'order', 'order_contract',
-            'product', 'product_name',
+            'product', 'product_name', 'new_product',
             'quantity', 'received_qty',
             'supplier', 'status', 'status_display',
             'contract_number', 'contract_date', 'confirmed_at',

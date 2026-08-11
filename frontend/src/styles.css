@@ -1882,6 +1882,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   min-width: 0;
 }
 .row-action {
+  box-sizing: border-box;
   min-width: var(--touch-min);
   min-height: 36px;
   height: 36px;
@@ -1898,6 +1899,12 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   white-space: nowrap;
   font-size: var(--text-xs);
   font-weight: 700;
+  line-height: 1;
+}
+.row-action:has(svg):not(:has(*:not(svg))) {
+  padding: 0;
+  width: 36px;
+  min-width: 36px;
 }
 .row-action svg {
   width: var(--icon-inline);
@@ -2271,6 +2278,29 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   width: 100%;
   min-width: 0;
   border-radius: 14px;
+}
+.fx-card--header {
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: #f9fafb;
+}
+.fx-card--header .fx-rate-label {
+  display: inline;
+  min-width: auto;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.fx-card--header .fx-rate-readonly {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
 }
 .fx-card-title {
   color: var(--muted);
@@ -2827,14 +2857,19 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
     justify-content: flex-end;
     gap: 8px;
   }
-  .fx-card {
+  .fx-card--header {
     flex: 1;
     min-width: 0;
     max-width: none;
-    height: 46px;
-    padding: 5px 6px 5px 12px;
+    min-height: 44px;
+    padding: 6px 10px 6px 12px;
+  }
+  .fx-card--dual:not(.fx-card--header) {
+    height: auto;
+    min-height: 0;
   }
   .fx-card span { display: none; }
+  .fx-card--header .fx-rate-label { display: inline; }
   .fx-card div { gap: 4px; }
   .fx-card input {
     width: min(30vw, 96px);
@@ -2994,7 +3029,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 @media (max-width: 480px) {
   .page { padding: 20px 14px 24px; }
   .topbar { padding: 8px 12px; }
-  .fx-card {
+  .fx-card--header {
+    padding: 4px 8px 4px 10px;
+    border-radius: 999px;
+  }
+  .fx-card--dual:not(.fx-card--header) {
     padding: 4px 6px 4px 10px;
     border-radius: 12px;
   }
@@ -3576,8 +3615,15 @@ label.field-invalid textarea:focus,
 }
 .data-table-actions-col .row-actions {
   display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
   gap: 6px;
   justify-content: flex-end;
+  min-width: max-content;
+}
+.data-table-actions-col .row-action {
+  flex-shrink: 0;
 }
 .data-table-empty,
 .data-table-skeleton {
