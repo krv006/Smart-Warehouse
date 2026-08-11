@@ -3120,6 +3120,39 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   line-height: 1.5;
 }
 
+.field-error {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.45;
+  font-weight: 500;
+  color: var(--error);
+}
+
+label.field-invalid input,
+label.field-invalid select,
+label.field-invalid textarea,
+.e-invoice-table input.input-invalid,
+.e-invoice-table select.input-invalid {
+  border-color: var(--error);
+  box-shadow: 0 0 0 1px rgba(220, 38, 38, 0.15);
+}
+
+label.field-invalid input:focus,
+label.field-invalid select:focus,
+label.field-invalid textarea:focus,
+.e-invoice-table input.input-invalid:focus,
+.e-invoice-table select.input-invalid:focus {
+  border-color: var(--error);
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.18);
+}
+
+.e-invoice-table td .field-error {
+  margin-top: 3px;
+  white-space: normal;
+  min-width: 0;
+}
+
 .e-invoice-actions {
   display: flex;
   flex-wrap: wrap;

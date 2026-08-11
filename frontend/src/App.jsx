@@ -3329,6 +3329,82 @@ function emptyInvoiceLine(num = 1) {
   return { line_number: num, product: '', product_name: '', identification_code: '', barcode: '', unit: 'piece', quantity: '1', unit_price: '', delivery_amount: 0, vat_percent: 'none', vat_amount: 0, total_amount: 0 }
 }
 
+function validateEInvoice(editing, { showPrices, company } = {}) {
+  const errors = {}
+  const trim = (value) => (value ?? '').toString().trim()
+
+  if (!trim(editing.contract_number)) {
+    errors.contract_number = 'Shartnoma raqamini kiriting'
+  } else if (!/^\d+\/\d{4}$/.test(trim(editing.contract_number))) {
+    errors.contract_number = 'Format: raqam/DDMM (masalan 12/1108)'
+  }
+
+  if (!trim(editing.place_signed)) {
+    errors.place_signed = 'Tuzilgan joyini kiriting'
+  }
+
+  if (!editing.contract_date) {
+    errors.contract_date = 'Tuzilgan sanani tanlang'
+  }
+
+  if (!editing.valid_until) {
+    errors.valid_until = 'Amal qilish muddatini tanlang'
+  } else if (editing.contract_date && editing.valid_until < editing.contract_date) {
+    errors.valid_until = 'Muddat tuzilgan sanadan oldin bo‘lmasin'
+  }
+
+  if (!editing.client) {
+    errors.client = 'Mijozni tanlang'
+  }
+
+  if (!trim(editing.content_title)) {
+    errors.content_title = 'Sarlavhani yozing'
+  }
+
+  if (!trim(editing.content_body)) {
+    errors.content_body = 'Mazmun matnini yozing'
+  }
+
+  if (!company?.name?.trim() || !company?.stir?.trim()) {
+    errors.company = 'Korxona profilida nom va STIR to‘ldirilgan bo‘lishi kerak'
+  }
+
+  const lines = editing.lines || []
+  let hasValidLine = false
+  lines.forEach((line, index) => {
+    const prefix = `lines.${index}`
+    const name = trim(line.product_name)
+    const qty = Number(line.quantity)
+    const idCode = trim(line.identification_code)
+
+    if (!name) errors[`${prefix}.product_name`] = 'Tovar nomini kiriting'
+    if (!qty || qty < 1 || !Number.isFinite(qty)) {
+      errors[`${prefix}.quantity`] = 'Soni kamida 1 bo‘lishi kerak'
+    }
+    if (!idCode) errors[`${prefix}.identification_code`] = 'Identifikatsiya kodini kiriting'
+
+    if (showPrices && !editing.reverse_calculation) {
+      const price = Number(line.unit_price)
+      if (line.unit_price === '' || line.unit_price == null || !Number.isFinite(price) || price < 0) {
+        errors[`${prefix}.unit_price`] = 'Narxni kiriting'
+      }
+    }
+
+    if (name && qty >= 1 && idCode) hasValidLine = true
+  })
+
+  if (!hasValidLine) {
+    errors.lines = 'Kamida bitta to‘liq mahsulot qatori kerak'
+  }
+
+  return errors
+}
+
+function EInvoiceFieldError({ message }) {
+  if (!message) return null
+  return <span className="field-error" role="alert">{message}</span>
+}
+
 function DocumentPreviewModal({ invoice, company, client, totals, showPrices, onClose }) {
   const lines = (invoice.lines || []).map((line) => calcInvoiceLine(line, invoice.reverse_calculation))
   const amountWords = numberToWordsUzbek(totals.grand)
@@ -3488,6 +3564,35 @@ function EInvoicePage({ notify, session }) {
   const [saving, setSaving] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [contractNumberEdited, setContractNumberEdited] = useState(false)
+  const [errors, setErrors] = useState({})
+  const [validatedOnce, setValidatedOnce] = useState(false)
+
+  const clearFieldError = (key) => {
+    setErrors((current) => {
+      if (!current[key]) return current
+      const next = { ...current }
+      delete next[key]
+      if (key.startsWith('lines.')) delete next.lines
+      return next
+    })
+  }
+
+  const clearLineErrors = () => {
+    setErrors((current) => {
+      const next = { ...current }
+      Object.keys(next).forEach((key) => {
+        if (key === 'lines' || key.startsWith('lines.')) delete next[key]
+      })
+      return next
+    })
+  }
+
+  const runValidation = () => {
+    const nextErrors = validateEInvoice(editing, { showPrices, company })
+    setErrors(nextErrors)
+    setValidatedOnce(true)
+    return nextErrors
+  }
   const load = useCallback(async () => {
     setLoading(true)
     try {
@@ -3527,6 +3632,9 @@ function EInvoicePage({ notify, session }) {
 
   const openNew = () => {
     setContractNumberEdited(false)
+    setErrors({})
+    setValidatedOnce(false)
+    setPreviewOpen(false)
     setEditing({
       document_type: 'contract_sk',
       name: '',
@@ -3547,6 +3655,9 @@ function EInvoicePage({ notify, session }) {
     try {
       const detail = await api.invoice(row.id)
       setContractNumberEdited(true)
+      setErrors({})
+      setValidatedOnce(false)
+      setPreviewOpen(false)
       setEditing({
         ...detail,
         client: detail.client || '',
@@ -3563,6 +3674,7 @@ function EInvoicePage({ notify, session }) {
   }
 
   const updateLine = (index, patch) => {
+    clearLineErrors()
     setEditing((current) => {
       const lines = current.lines.map((line, i) => {
         if (i !== index) return line
@@ -3629,9 +3741,22 @@ function EInvoicePage({ notify, session }) {
     }), { delivery: 0, vat: 0, grand: 0 })
   }, [editing?.lines])
 
+  const handlePreview = () => {
+    const nextErrors = runValidation()
+    if (Object.keys(nextErrors).length) return
+    setPreviewOpen(true)
+  }
+
+  const handleFieldBlur = () => {
+    if (!validatedOnce || !editing) return
+    setErrors(validateEInvoice(editing, { showPrices, company }))
+  }
+
   const submit = async (event) => {
     event.preventDefault()
     if (!canManage) return notify('Bu amalni bajarish uchun ruxsatingiz yo‘q.')
+    const nextErrors = runValidation()
+    if (Object.keys(nextErrors).length) return
     setSaving(true)
     try {
       const payload = {
@@ -3708,7 +3833,7 @@ function EInvoicePage({ notify, session }) {
       ) : (
         <form className="e-invoice-form" onSubmit={submit}>
           <div className="e-invoice-toolbar">
-            <button type="button" className="secondary-button" onClick={() => { setContractNumberEdited(false); setEditing(null) }}>Orqaga</button>
+            <button type="button" className="secondary-button" onClick={() => { setContractNumberEdited(false); setErrors({}); setValidatedOnce(false); setPreviewOpen(false); setEditing(null) }}>Orqaga</button>
           </div>
 
           <section className="e-invoice-section">
@@ -3722,15 +3847,53 @@ function EInvoicePage({ notify, session }) {
                 </select>
               </label>
               <label>Nomi<input value={editing.name || ''} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></label>
-              <label>Shartnoma raqami<input value={editing.contract_number || ''} onChange={(e) => { setContractNumberEdited(true); setEditing({ ...editing, contract_number: e.target.value.replace(/[^\d/]/g, '') }) }} placeholder="Masalan: 12/1108" inputMode="numeric" pattern="[0-9/]*" /></label>
-              <label>Tuzilgan joyi<input value={editing.place_signed || ''} onChange={(e) => setEditing({ ...editing, place_signed: e.target.value })} /></label>
-              <label>Tuzilgan sana<input type="date" value={editing.contract_date || ''} onChange={(e) => setEditing({ ...editing, contract_date: e.target.value })} /></label>
-              <label>Amal qilish muddati<input type="date" value={editing.valid_until || ''} onChange={(e) => setEditing({ ...editing, valid_until: e.target.value })} /></label>
+              <label className={errors.contract_number ? 'field-invalid' : ''}>Shartnoma raqami
+                <input
+                  value={editing.contract_number || ''}
+                  onChange={(e) => { clearFieldError('contract_number'); setContractNumberEdited(true); setEditing({ ...editing, contract_number: e.target.value.replace(/[^\d/]/g, '') }) }}
+                  onBlur={handleFieldBlur}
+                  placeholder="Masalan: 12/1108"
+                  inputMode="numeric"
+                  pattern="[0-9/]*"
+                  aria-invalid={Boolean(errors.contract_number)}
+                />
+                <EInvoiceFieldError message={errors.contract_number} />
+              </label>
+              <label className={errors.place_signed ? 'field-invalid' : ''}>Tuzilgan joyi
+                <input
+                  value={editing.place_signed || ''}
+                  onChange={(e) => { clearFieldError('place_signed'); setEditing({ ...editing, place_signed: e.target.value }) }}
+                  onBlur={handleFieldBlur}
+                  aria-invalid={Boolean(errors.place_signed)}
+                />
+                <EInvoiceFieldError message={errors.place_signed} />
+              </label>
+              <label className={errors.contract_date ? 'field-invalid' : ''}>Tuzilgan sana
+                <input
+                  type="date"
+                  value={editing.contract_date || ''}
+                  onChange={(e) => { clearFieldError('contract_date'); clearFieldError('valid_until'); setEditing({ ...editing, contract_date: e.target.value }) }}
+                  onBlur={handleFieldBlur}
+                  aria-invalid={Boolean(errors.contract_date)}
+                />
+                <EInvoiceFieldError message={errors.contract_date} />
+              </label>
+              <label className={errors.valid_until ? 'field-invalid' : ''}>Amal qilish muddati
+                <input
+                  type="date"
+                  value={editing.valid_until || ''}
+                  onChange={(e) => { clearFieldError('valid_until'); setEditing({ ...editing, valid_until: e.target.value }) }}
+                  onBlur={handleFieldBlur}
+                  aria-invalid={Boolean(errors.valid_until)}
+                />
+                <EInvoiceFieldError message={errors.valid_until} />
+              </label>
             </div>
           </section>
 
           <section className="e-invoice-section">
             <h3>Sizning ma’lumotlaringiz</h3>
+            {errors.company ? <EInvoiceFieldError message={errors.company} /> : null}
             <div className="info-grid">
               <div><dt>STIR</dt><dd>{company?.stir || '—'}</dd></div>
               <div><dt>Nomi</dt><dd>{company?.name || '—'}</dd></div>
@@ -3747,11 +3910,17 @@ function EInvoicePage({ notify, session }) {
 
           <section className="e-invoice-section">
             <h3>Hamkorning ma’lumotlari</h3>
-            <label>Mijoz
-              <select value={editing.client || ''} onChange={(e) => setEditing({ ...editing, client: e.target.value })}>
+            <label className={errors.client ? 'field-invalid' : ''}>Mijoz
+              <select
+                value={editing.client || ''}
+                onChange={(e) => { clearFieldError('client'); setEditing({ ...editing, client: e.target.value }) }}
+                onBlur={handleFieldBlur}
+                aria-invalid={Boolean(errors.client)}
+              >
                 <option value="">Tanlang</option>
                 {clients.map((client) => <option value={client.id} key={client.id}>{client.company_name || client.full_name}</option>)}
               </select>
+              <EInvoiceFieldError message={errors.client} />
             </label>
             {selectedClient && (
               <div className="info-grid">
@@ -3771,6 +3940,7 @@ function EInvoicePage({ notify, session }) {
 
           <section className="e-invoice-section">
             <h3>Mahsulot qatorlari</h3>
+            {errors.lines ? <EInvoiceFieldError message={errors.lines} /> : null}
             <div className="e-invoice-lines">
               <div className="e-invoice-lines-toolbar">
                 <label className="reverse-check e-invoice-reverse-check">
@@ -3814,26 +3984,34 @@ function EInvoicePage({ notify, session }) {
                             list={`einv-product-${index}`}
                             value={line.product_name || ''}
                             onChange={(e) => updateLineProductName(index, e.target.value)}
+                            onBlur={handleFieldBlur}
                             placeholder="Tovar nomi"
                             aria-label="Tovar nomi"
+                            aria-invalid={Boolean(errors[`lines.${index}.product_name`])}
+                            className={errors[`lines.${index}.product_name`] ? 'input-invalid' : ''}
                           />
                           <datalist id={`einv-product-${index}`}>
                             {products.map((p) => <option value={p.name} key={p.id} />)}
                           </datalist>
+                          <EInvoiceFieldError message={errors[`lines.${index}.product_name`]} />
                         </td>
                         <td>
                           <input
                             list={`einv-idcode-${index}`}
                             value={line.identification_code || ''}
                             onChange={(e) => updateLine(index, { identification_code: e.target.value })}
+                            onBlur={handleFieldBlur}
                             placeholder="Kod"
                             aria-label="Identifikatsiya kodi"
+                            aria-invalid={Boolean(errors[`lines.${index}.identification_code`])}
+                            className={errors[`lines.${index}.identification_code`] ? 'input-invalid' : ''}
                           />
                           <datalist id={`einv-idcode-${index}`}>
                             {products.map((p) => p.serial_number).filter(Boolean).map((code) => (
                               <option value={code} key={code} />
                             ))}
                           </datalist>
+                          <EInvoiceFieldError message={errors[`lines.${index}.identification_code`]} />
                         </td>
                         <td><input value={line.barcode || ''} onChange={(e) => updateLine(index, { barcode: e.target.value })} placeholder="Shtrix kod" aria-label="Shtrix kod" /></td>
                         <td className="e-invoice-unit">
@@ -3841,10 +4019,35 @@ function EInvoicePage({ notify, session }) {
                             {eInvoiceUnits.map(([v, n]) => <option value={v} key={v}>{n}</option>)}
                           </select>
                         </td>
-                        <td><input type="number" min="1" value={line.quantity} onChange={(e) => updateLine(index, { quantity: e.target.value })} aria-label="Soni" /></td>
+                        <td>
+                          <input
+                            type="number"
+                            min="1"
+                            value={line.quantity}
+                            onChange={(e) => updateLine(index, { quantity: e.target.value })}
+                            onBlur={handleFieldBlur}
+                            aria-label="Soni"
+                            aria-invalid={Boolean(errors[`lines.${index}.quantity`])}
+                            className={errors[`lines.${index}.quantity`] ? 'input-invalid' : ''}
+                          />
+                          <EInvoiceFieldError message={errors[`lines.${index}.quantity`]} />
+                        </td>
                         {showPrices && (
                           <>
-                            <td><input type="number" min="0" step="0.01" readOnly={!editing.reverse_calculation} value={line.unit_price} onChange={(e) => updateLine(index, { unit_price: e.target.value })} /></td>
+                            <td>
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                readOnly={!editing.reverse_calculation}
+                                value={line.unit_price}
+                                onChange={(e) => updateLine(index, { unit_price: e.target.value })}
+                                onBlur={handleFieldBlur}
+                                aria-invalid={Boolean(errors[`lines.${index}.unit_price`])}
+                                className={errors[`lines.${index}.unit_price`] ? 'input-invalid' : ''}
+                              />
+                              <EInvoiceFieldError message={errors[`lines.${index}.unit_price`]} />
+                            </td>
                             <td><input type="number" min="0" step="0.01" readOnly={!editing.reverse_calculation} value={line.delivery_amount} onChange={(e) => updateLine(index, { delivery_amount: e.target.value })} /></td>
                             <td>
                               <select value={line.vat_percent || 'none'} onChange={(e) => updateLine(index, { vat_percent: e.target.value })}>
@@ -3902,27 +4105,33 @@ function EInvoicePage({ notify, session }) {
           <section className="e-invoice-section mazmun-section">
             <h3>Mazmun</h3>
             <div className="form-grid">
-              <label className="full-width">Sarlavha
+              <label className={`full-width${errors.content_title ? ' field-invalid' : ''}`}>Sarlavha
                 <input
                   value={editing.content_title || ''}
-                  onChange={(e) => setEditing({ ...editing, content_title: e.target.value })}
+                  onChange={(e) => { clearFieldError('content_title'); setEditing({ ...editing, content_title: e.target.value }) }}
+                  onBlur={handleFieldBlur}
                   placeholder="1. ..."
+                  aria-invalid={Boolean(errors.content_title)}
                 />
+                <EInvoiceFieldError message={errors.content_title} />
               </label>
-              <label className="full-width">Matn
+              <label className={`full-width${errors.content_body ? ' field-invalid' : ''}`}>Matn
                 <textarea
                   rows={8}
                   value={editing.content_body || ''}
-                  onChange={(e) => setEditing({ ...editing, content_body: e.target.value })}
+                  onChange={(e) => { clearFieldError('content_body'); setEditing({ ...editing, content_body: e.target.value }) }}
+                  onBlur={handleFieldBlur}
                   placeholder="Shartnoma bandlarini qo‘lda kiriting..."
+                  aria-invalid={Boolean(errors.content_body)}
                 />
+                <EInvoiceFieldError message={errors.content_body} />
               </label>
             </div>
             <div className="e-invoice-actions">
-              <button type="button" className="secondary-button" onClick={() => setPreviewOpen(true)}>
+              <button type="button" className="secondary-button" onClick={handlePreview}>
                 <Eye size={18} />Hujjatni ko‘rsatish
               </button>
-              <button type="button" className="secondary-button" onClick={() => { setContractNumberEdited(false); setEditing(null) }}>Bekor qilish</button>
+              <button type="button" className="secondary-button" onClick={() => { setContractNumberEdited(false); setErrors({}); setValidatedOnce(false); setPreviewOpen(false); setEditing(null) }}>Bekor qilish</button>
               {canManage && (
                 <button className="primary-button" disabled={saving}>
                   {saving ? <SpinnerGap size={18} className="spin" /> : 'Saqlash'}
