@@ -1,4 +1,4 @@
-const API_ROOT = '/api/v1'
+const API_ROOT = import.meta.env.VITE_API_BASE_URL || '/api/v1'
 const ACCESS_KEY = 'warehouse_access'
 const REFRESH_KEY = 'warehouse_refresh'
 
@@ -14,6 +14,21 @@ function errorMessage(data) {
   if (data.detail) return data.detail
   const messages = Object.values(data).flat(Infinity).filter(Boolean)
   return messages.join(' ') || 'So‘rovni bajarib bo‘lmadi.'
+}
+
+async function readResponse(response) {
+  const contentType = response.headers.get('content-type') || ''
+  if (response.status === 204) return null
+  if (contentType.includes('application/json')) {
+    return response.json().catch(() => ({}))
+  }
+  const text = await response.text().catch(() => '')
+  const isHtml = /^\s*</.test(text)
+  return {
+    detail: isHtml
+      ? 'Backend API JSON o‘rniga HTML qaytardi. Django backend ishlayotganini va Vite proxy /api -> http://127.0.0.1:8000 ekanini tekshiring.'
+      : text || 'Serverdan noto‘g‘ri formatdagi javob keldi.',
+  }
 }
 
 function clearSession() {
@@ -70,7 +85,7 @@ export async function refreshAccessToken() {
     body: JSON.stringify({ refresh }),
   })
     .then(async (response) => {
-      const data = await response.json().catch(() => ({}))
+      const data = await readResponse(response)
       if (!response.ok || !data.access) throw new ApiError(errorMessage(data), response.status)
       localStorage.setItem(ACCESS_KEY, data.access)
       return data.access
@@ -110,11 +125,11 @@ export async function request(path, options = {}) {
   }
 
   if (response.status === 401 && !skipAuth) notifyAuthFailure()
+  const data = await readResponse(response)
   if (!response.ok) {
-    const data = await response.json().catch(() => ({}))
     throw new ApiError(errorMessage(data), response.status)
   }
-  return response.status === 204 ? null : response.json()
+  return data
 }
 
 export const api = {
