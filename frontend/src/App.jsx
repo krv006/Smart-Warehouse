@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Warehouse, Bell, Buildings, CaretDown, ChartLineUp,
   ClipboardText, CurrencyCircleDollar, DownloadSimple, FileText, Funnel, House, MagnifyingGlass,
-  Package, PencilSimple, Plus, SignOut, SpinnerGap, Stack, Tag, TrendDown, TrendUp, Truck, UserGear, Users, WarningCircle, X, XCircle,
+  Package, PencilSimple, Plus, SignOut, SpinnerGap, Stack, Tag, TrendDown, TrendUp, Truck, UserGear, Users, WarningCircle, X, XCircle, DotsThree,
 } from '@phosphor-icons/react'
 import { api, clearStoredSession, refreshAccessToken, saveSession, setAuthFailureHandler, tokenExpiresAt } from './api'
 
@@ -174,9 +174,16 @@ function App() {
   const [notificationPermission, setNotificationPermission] = useState(() => (typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'default'))
   const [orderModalOpen, setOrderModalOpen] = useState(false)
   const [resourceReloadKey, setResourceReloadKey] = useState(0)
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const { toasts, notify, dismiss } = useNotify()
   const seenNotifications = useRef(new Set())
   const navItems = allowedNavigation(session)
+  const primaryMobileNav = navItems.slice(0, 4)
+  const secondaryMobileNav = navItems.slice(4)
+  const navigate = (label) => {
+    setActive(label)
+    setMobileMenuOpen(false)
+  }
 
   useEffect(() => {
     setAuthFailureHandler(() => setSession(null))
@@ -324,7 +331,7 @@ function App() {
           <b className="workspace-name">{workspace}</b>
         </div>
         <nav>{navItems.map(([label, Icon]) => (
-          <button key={label} onClick={() => setActive(label)} className={active === label ? 'nav-item is-active' : 'nav-item'}>
+          <button key={label} onClick={() => navigate(label)} className={active === label ? 'nav-item is-active' : 'nav-item'}>
             <Icon size={19} weight={active === label ? 'fill' : 'regular'} />{label}
           </button>
         ))}</nav>
@@ -341,15 +348,15 @@ function App() {
                 <button type="submit" disabled={fxSaving}>{fxSaving ? '…' : 'Saqlash'}</button>
               </div>
             </form>
-            <button className="icon-button" aria-label="Qidiruv" onClick={() => setActive('Buyurtmalar')}><MagnifyingGlass size={20} /></button>
+            <button className="icon-button" aria-label="Qidiruv" onClick={() => navigate('Buyurtmalar')}><MagnifyingGlass size={20} /></button>
             <button className="icon-button notification" aria-label="Bildirishnomalar" onClick={() => {
               if (notificationPermission !== 'granted') requestNotifications()
-              if (can(session, 'notifications_view')) setActive('Bildirishnomalar')
+              if (can(session, 'notifications_view')) navigate('Bildirishnomalar')
             }}><Bell size={20} /><i /></button>
             <ProfileDropdown session={session} onLogout={logout} />
           </div>
         </header>
-        {active === 'Bosh sahifa' && can(session, 'dashboard') && <Dashboard data={dashboard} loading={loading && !dashboard} onCreateOrder={openOrderEditor} onNavigate={setActive} session={session} />}
+        {active === 'Bosh sahifa' && can(session, 'dashboard') && <Dashboard data={dashboard} loading={loading && !dashboard} onCreateOrder={openOrderEditor} onNavigate={navigate} session={session} />}
         {active === 'Hisobotlar' && <ReportsPage notify={notify} />}
         {active !== 'Bosh sahifa' && active !== 'Hisobotlar' && <ResourcePage title={active} notify={notify} reloadKey={resourceReloadKey} session={session} />}
         {orderModalOpen && (
@@ -364,6 +371,30 @@ function App() {
           />
         )}
       </section>
+      {mobileMenuOpen && secondaryMobileNav.length > 0 && (
+        <div className="mobile-menu-panel" role="dialog" aria-label="Barcha bo‘limlar">
+          {secondaryMobileNav.map(([label, Icon]) => (
+            <button key={label} onClick={() => navigate(label)} className={active === label ? 'mobile-menu-item is-active' : 'mobile-menu-item'}>
+              <Icon size={20} weight={active === label ? 'fill' : 'regular'} />{label}
+            </button>
+          ))}
+          <button className="mobile-menu-item danger" onClick={logout}><SignOut size={20} />Chiqish</button>
+        </div>
+      )}
+      <nav className="bottom-nav" aria-label="Mobil menyu">
+        {primaryMobileNav.map(([label, Icon]) => (
+          <button key={label} onClick={() => navigate(label)} className={active === label ? 'bottom-nav-item is-active' : 'bottom-nav-item'}>
+            <Icon size={22} weight={active === label ? 'fill' : 'regular'} />
+            <span>{label}</span>
+          </button>
+        ))}
+        {secondaryMobileNav.length > 0 && (
+          <button onClick={() => setMobileMenuOpen((value) => !value)} className={mobileMenuOpen ? 'bottom-nav-item is-active' : 'bottom-nav-item'}>
+            <DotsThree size={25} weight="bold" />
+            <span>Ko‘proq</span>
+          </button>
+        )}
+      </nav>
     </main>
   )
 }

@@ -171,3 +171,26 @@ Bu ishlar orqali loyiha oldingi oddiy funksionallikdan chiqib, buyurtma, shartno
 ### Tekshiruv natijalari
 - `.venv/bin/python manage.py check` → muvaffaqiyatli.
 - `npm run build` → muvaffaqiyatli.
+
+## 12. Backend endpointlarini frontendga ulash va mobil UI
+
+### Qaysi fayllar?
+- [frontend/src/api.js](frontend/src/api.js)
+- [frontend/src/App.jsx](frontend/src/App.jsx)
+- [frontend/src/styles.css](frontend/src/styles.css)
+- [apps/users/serializers.py](apps/users/serializers.py)
+- [completed_tasks.md](completed_tasks.md)
+
+### Nima qilindi?
+- Backendda bor bo‘lgan qo‘shimcha endpointlar frontend API qatlamiga qo‘shildi: zakazlar, shartnomalar reestri, kategoriyalar, qoldiqlar, bulk sotuv, xarajat/payment summary va Excel exportlar.
+- Sidebar menyusi yangi modullar bilan kengaytirildi: Zakazlar, Shartnomalar, Kategoriyalar, Qoldiqlar, Foydalanuvchilar.
+- Hisobotlar sahifasiga xarajat summary, payment summary va Excel export tugmalari qo‘shildi.
+- Buyurtma va sotuv formalarida ko‘p qatorli mahsulot kiritish imkoniyati qo‘shildi.
+- User management uchun frontenddagi oddiy boshqaruv formasi qo‘shildi.
+- Mobile ekranlarda sidebar yashirilib, pastki bottom navigation qo‘shildi.
+- Mobile navigation 4 ta asosiy menyu va qolgan bo‘limlar uchun “Ko‘proq” paneli bilan ishlaydigan qilindi.
+- Mobile’da forma, modal, qidiruv, ro‘yxat qatorlari va jadval ko‘rinishlari kichik ekranga moslashtirildi.
+- Tugmalar mobile touch uchun kamida 44px atrofida bosiladigan qilib moslashtirildi.
+
+### Tekshiruv natijalari
+- `npm run build` → muvaffaqiyatli.
