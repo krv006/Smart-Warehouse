@@ -4,7 +4,8 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
-from apps.common.permissions import IsOperatorOrReadOnly
+from apps.common.permissions import IsOperatorOrManagementWrite
+from apps.common.querysets import apply_date_range
 from apps.sales.models import Sale
 from apps.sales.serializers import (SaleSerializer, SaleOperatorSerializer,
                                     SaleBulkCreateSerializer, _restore_stock)
@@ -29,10 +30,13 @@ from apps.sales.serializers import (SaleSerializer, SaleOperatorSerializer,
 class SaleViewSet(ModelViewSet):
     queryset           = Sale.objects.select_related('product', 'product__category', 'client')
     serializer_class   = SaleSerializer
-    permission_classes = (IsOperatorOrReadOnly,)
+    permission_classes = (IsOperatorOrManagementWrite,)
     filterset_fields   = ('product', 'sold_date', 'client')
     search_fields      = ('product__name', 'sold_to', 'destination', 'client__company_name')
     ordering_fields    = ('sold_date', 'sold_price', 'quantity')
+
+    def get_queryset(self):
+        return apply_date_range(super().get_queryset(), self.request, field='sold_date')
 
     def get_serializer_class(self):
         # Operator (management/accountant emas) sotuv narxi/foydasini ko'rmaydi
@@ -78,6 +82,6 @@ class SaleViewSet(ModelViewSet):
         serializer.is_valid(raise_exception=True)
         sales = serializer.save()
         return Response(
-            SaleBulkCreateSerializer().to_representation(sales),
+            SaleBulkCreateSerializer(context={'request': request}).to_representation(sales),
             status=201,
         )

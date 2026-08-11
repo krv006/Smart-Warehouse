@@ -2,6 +2,7 @@ from drf_spectacular.utils import extend_schema, extend_schema_view
 from rest_framework.viewsets import ModelViewSet
 
 from apps.clients.models import Client
+from apps.common.querysets import apply_date_range
 from apps.clients.serializers import ClientSerializer, ClientListSerializer
 from apps.common.permissions import CanViewClients
 
@@ -22,7 +23,10 @@ class ClientViewSet(ModelViewSet):
     permission_classes = (CanViewClients,)
     search_fields      = ('company_name', 'email')
     filterset_fields   = ('is_active',)
-    ordering_fields    = ('company_name', 'created_at')
+    ordering_fields    = ('company_name', 'created_at', 'is_active')
+
+    def get_queryset(self):
+        return apply_date_range(super().get_queryset(), self.request)
 
     def get_serializer_class(self):
         if self.action == 'list':

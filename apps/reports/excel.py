@@ -64,20 +64,49 @@ def export_sales(queryset) -> HttpResponse:
 
 
 def export_stock(queryset) -> HttpResponse:
+    from decimal import Decimal
+    from apps.warehouse.models import VatPercent
+
     wb, ws = _create_workbook('Ombor holati')
     _write_header(ws, [
-        '№', 'Mahsulot', 'Kategoriya', 'Serial №',
-        'Qoldiq (dona)', 'Omborxona', 'Narxi (sotib olish)',
+        '№', 'Mahsulot nomi', 'Kategoriya', 'Seriya raqami', 'Shtrix kod',
+        'O\'lchov birligi', 'Qoldiq', 'Bron', 'Mavjud', 'Omborxona',
+        'Kelish narxi', 'Sotuv narxi', 'Yetkazish narxi', 'QQS %',
+        'QQS miqdori (qoldiq)', 'Jami (qoldiq×sotuv)', 'Minimal qoldiq',
+        'Holat', 'Manba',
     ])
     for i, stock in enumerate(queryset, 1):
+        product = stock.product
+        qty = stock.quantity or 0
+        reserved = stock.reserved_quantity or 0
+        available = qty - reserved
+        sell = product.selling_price
+        delivery = product.delivery_price
+        vat_rate = VatPercent.rate(product.vat_percent)
+        vat_label = dict(VatPercent.choices).get(product.vat_percent, product.vat_percent or '')
+        line_base = (Decimal(sell or 0) * Decimal(qty)) if sell is not None else Decimal('0')
+        vat_amount = (line_base * vat_rate / Decimal('100')).quantize(Decimal('0.01')) if sell else ''
+        total = (line_base + vat_amount).quantize(Decimal('0.01')) if sell else ''
         ws.append([
             i,
-            str(stock.product),
-            str(stock.product.category) if stock.product.category else '',
-            stock.product.serial_number,
-            stock.quantity,
+            product.name,
+            str(product.category) if product.category else '',
+            product.serial_number,
+            product.barcode or '',
+            product.get_unit_display(),
+            qty,
+            reserved,
+            available,
             stock.warehouse_location,
-            float(stock.product.purchase_price) if stock.product.purchase_price is not None else '',
+            float(product.purchase_price) if product.purchase_price is not None else '',
+            float(sell) if sell is not None else '',
+            float(delivery) if delivery is not None else '',
+            vat_label,
+            float(vat_amount) if vat_amount != '' else '',
+            float(total) if total != '' else '',
+            product.min_quantity,
+            product.stock_status,
+            product.source or '',
         ])
     today = date.today().isoformat()
     return _response(wb, f'ombor_{today}.xlsx')

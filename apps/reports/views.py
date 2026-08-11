@@ -11,6 +11,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.cash.models import Payment, ExchangeRate, PaymentTransaction
+from apps.cash.services import get_active_mb_rate
 from apps.common.permissions import IsAccountantOrManagement
 from apps.expenses.models import Expense
 from apps.orders.models import Zakaz
@@ -129,8 +130,7 @@ def _kassa_collected(date_from=None, date_to=None, currency=None,
 def _import_paid_totals(date_from=None, date_to=None, currency=None,
                         category_id=None, product_id=None, supplier=None, **_):
     """To'langan importlar (MANUAL zakaz) — tanlangan davr bo'yicha."""
-    mb_rate = ExchangeRate.get_latest(ExchangeRate.USD)
-    rate = mb_rate.mb_rate if mb_rate else Decimal('0')
+    rate = get_active_mb_rate()
 
     zakaz_qs = Zakaz.objects.filter(
         zakaz_type=Zakaz.MANUAL,
@@ -292,8 +292,7 @@ class FinancialSummaryView(APIView):
         )
         kassa_kw = dict(client_id=client_id, payment_status=payment_status)
 
-        mb_rate_obj = ExchangeRate.get_latest(ExchangeRate.USD)
-        mb_rate = mb_rate_obj.mb_rate if mb_rate_obj else Decimal('0')
+        mb_rate = get_active_mb_rate()
 
         sales_all = _sales_revenue(**dash_kw)
         kassa_all_uzs = _kassa_collected(currency=Payment.UZS, **kassa_kw)

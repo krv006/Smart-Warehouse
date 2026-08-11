@@ -60,3 +60,31 @@ class ExpenseSerializer(ModelSerializer):
         if request and request.user.is_authenticated:
             validated_data['responsible'] = request.user
         return super().create(validated_data)
+
+
+class ExpenseOperatorSerializer(ModelSerializer):
+    """Operator uchun — rasxod summasi yashirin."""
+    expense_type_name = SerializerMethodField()
+    sub_type_name     = SerializerMethodField()
+    responsible_name  = SerializerMethodField()
+
+    class Meta:
+        model  = Expense
+        fields = ('id', 'expense_type', 'expense_type_name',
+                  'sub_type', 'sub_type_name', 'currency',
+                  'date', 'responsible', 'responsible_name',
+                  'comment', 'attachment', 'created_at')
+        read_only_fields = fields
+
+    def get_expense_type_name(self, obj):
+        return str(obj.expense_type)
+
+    def get_sub_type_name(self, obj):
+        return str(obj.sub_type) if obj.sub_type else None
+
+    def get_responsible_name(self, obj):
+        user = obj.responsible
+        if not user:
+            return None
+        full = user.get_full_name()
+        return f'{full} ({user.username})' if full else user.username

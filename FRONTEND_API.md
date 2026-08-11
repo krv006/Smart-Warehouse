@@ -1,6 +1,8 @@
 # Frontend API qo‘llanma — Smart Warehouse
 
-**Maqsad:** Frontend dasturchilar uchun Django REST API bilan ishlash bo‘yicha to‘liq, amaldagi kontrakt — ulanish, auth, barcha endpointlar, `api.js` mapping va yangi funksiya qo‘shish tartibi.
+**Auditoriya:** Bu hujjat **frontend dasturchilar** (va React ilovasini yig‘ayotgan full-stack dasturchilar) uchun yozilgan — Django REST API bilan integratsiya qilish, endpoint kontraktlari, `abilities` bo‘yicha UI gating va `api.js` mapping.
+
+**Maqsad:** Backend va frontend o‘rtasidagi **amaldagi kontrakt** — ulanish, auth, barcha endpointlar, sahifa ↔ API xaritasi va yangi funksiya qo‘shish tartibi.
 
 Bazaviy URL:
 
@@ -9,6 +11,22 @@ Bazaviy URL:
 ```
 
 Production override: `VITE_API_BASE_URL` (masalan `https://api.example.com/api/v1`).
+
+### Mundarija
+
+| § | Bo‘lim |
+|---|---|
+| 1 | Kirish — ulanish, auth, formatlar |
+| 2 | `api.js` — transport va metodlar |
+| 3 | Frontend ↔ Backend xaritasi (sahifalar, grid, editorlar, FX, bulk) |
+| 4 | Barcha endpointlar — to‘liq jadval |
+| 5 | Auth va user sessiya |
+| 6 | Role, `abilities` va **UI gating** |
+| 7 | Valyuta kursi (backend + `FxRatePanel`) |
+| 8–16 | Modul bo‘yicha batafsil (buyurtma, zakaz, ombor, …) |
+| 17 | Hisobotlar |
+| 17a | Elektron faktura (batafsil) |
+| 18–22 | Yangi endpoint qo‘shish, performance, checklist, rol matritsasi |
 
 ---
 
@@ -149,7 +167,7 @@ Timeout: **8 soniya**. Xato klassi: `ApiError(message, status)`.
 | `users(params)` | GET | `/auth/users/` | `page_size=20`, `search`, `role`, `is_active` |
 | `reports(params)` | GET ×4 | parallel (qarang pastda) | dashboard filter params |
 | `monthlyTrend(months, params)` | GET | `/reports/monthly-trend/` | `months` (default 6), filter params |
-| `orders(params)` | GET | `/orders/` | `page_size=20`, `search`, `status`, `client`, `contract_number` |
+| `orders(params)` | GET | `/orders/` | `page_size=20`, `search`, `status`, `client`, `contract_number`, `date_from`, `date_to`, `ordering`, `page` |
 | `order(id)` | GET | `/orders/{id}/` | — |
 | `nextContractNumber(params)` | GET | `/orders/next-contract-number/` | `contract_date` (ixtiyoriy, `YYYY-MM-DD`) |
 | `ordersBulk(payload)` | POST | `/orders/bulk/` | bulk order body |
@@ -164,13 +182,22 @@ Timeout: **8 soniya**. Xato klassi: `ApiError(message, status)`.
 | `products(params)` | GET | `/warehouse/products/` | `page_size=30`, `search`, `category` |
 | `stocks(params)` | GET | `/warehouse/stocks/` | `page_size=30`, `product`, `category`, `status` |
 | `addStock(id, payload)` | POST | `/warehouse/products/{id}/add-stock/` | kirim body |
-| `clients(params)` | GET | `/clients/` | `page_size=30`, `search` |
-| `sales(params)` | GET | `/sales/` | `page_size=30`, `product`, `client`, `sold_date` |
+| `clients(params)` | GET | `/clients/` | `page_size=30`, `search`, `is_active`, `date_from`, `date_to` |
+| `sales(params)` | GET | `/sales/` | `page_size=30`, `product`, `client`, `sold_date`, `date_from`, `date_to`, `search`, `ordering`, `page` |
 | `salesBulk(payload)` | POST | `/sales/bulk/` | bulk sales body |
-| `payments(params)` | GET | `/cash/payments/` | `page_size=30`, `status`, `order`, `sale`, `client`, `currency`, `include_paid` |
+| `payments(params)` | GET | `/cash/payments/` | `page_size=30`, `status`, `order`, `sale`, `client`, `currency`, `include_paid`, `search`, `ordering`, `page` |
 | `paymentsSummary()` | GET | `/cash/payments/summary/` | — |
 | `pay(id, payload)` | POST | `/cash/payments/{id}/pay/` | `{ amount, comment }` |
 | `exchangeRateLatest(refresh)` | GET | `/cash/exchange-rates/latest/` | `refresh=true\|false` |
+| `exchangeRateSettings()` | GET | `/cash/exchange-rates/settings/` | — |
+| `updateExchangeRateSettings(payload)` | PATCH | `/cash/exchange-rates/settings/` | `{ auto_fetch_enabled?, preferred_rate_source? }` (`infinbank` \| `manual`) |
+| `companyProfile()` | GET | `/company-profile/` | — |
+| `updateCompanyProfile(payload)` | PATCH | `/company-profile/` | korxona rekvizitlari — Management |
+| `invoices(params)` | GET | `/invoices/` | `page_size=30`, `document_type`, `client`, `search` |
+| `invoice(id)` | GET | `/invoices/{id}/` | — |
+| `createInvoice(payload)` | POST | `/invoices/` | elektron faktura + `lines[]` |
+| `updateInvoice(id, payload)` | PATCH | `/invoices/{id}/` | — |
+| `removeInvoice(id)` | DELETE | `/invoices/{id}/` | Management |
 | `expenses(params)` | GET | `/expenses/expenses/` | `page_size=30`, `expense_type`, `sub_type`, `currency`, `date_from`, `date_to` |
 | `expensesSummary()` | GET | `/expenses/summary/` | — |
 | `expenseTypes()` | GET | `/expenses/expense-types/` | `page_size=50` |
@@ -227,25 +254,149 @@ await api.remove('/auth/users/', id)
 
 ---
 
-## 3. Frontend ↔ Backend xaritasi (`App.jsx`)
+## 3. Frontend ↔ Backend xaritasi (sahifalar va API)
 
 | UI sahifa | `api.js` | Backend path | Eslatma |
 |---|---|---|---|
 | Bosh sahifa | `reports`, `monthlyTrend` | `/reports/*` | Filtrli |
 | Hisobotlar | `reports`, `expensesSummary`, `paymentsSummary`, `export*` | `/reports/*`, `/expenses/summary/`, `/cash/payments/summary/` | Filtrsiz reports |
-| Buyurtmalar | `orders`, `nextContractNumber`, `createForm`, `update`, `fulfillOrder`, `cancelOrder`, `createOrderZakaz` | `/orders/` | Multipart buyurtma |
-| Import (Zakaz) | `zakaz`, `create`, `update` | `/orders/zakaz/` | |
+| Buyurtmalar | `orders`, `nextContractNumber`, `createForm`, `update`, `fulfillOrder`, `cancelOrder`, `createOrderZakaz` | `/orders/` | Grid; `/buyurtmalar/{id}` tarix paneli |
+| Import | `zakaz`, `create`, `update` | `/orders/zakaz/` | `new_product` inline (manual import); inline/bulk status — faqat `order_status_manage` |
 | Shartnomalar | `contracts`, `retrieve` | `/orders/contracts/` | Read-only |
-| Ombor | `products`, `create`, `update`, `addStock`, `productContracts` | `/warehouse/products/` | |
+| Elektron faktura | `invoices`, `invoice`, `createInvoice`, `updateInvoice`, `removeInvoice`, `nextContractNumber`, `companyProfile` | `/invoices/`, `/company-profile/` | Mazmun + preview UI |
+| Korxona profili | `companyProfile`, `updateCompanyProfile` | `/company-profile/` | Profil dropdown |
+| Ombor | `products`, `create`, `update`, `addStock`, `productContracts` | `/warehouse/products/` | `warehouse_create` ability |
 | Kategoriyalar | `categories`, `create`, `update`, `remove` | `/warehouse/categories/` | |
 | Qoldiqlar | `stocks` | `/warehouse/stocks/` | |
-| Mijozlar | `clients`, `create`, `update`, `remove` | `/clients/` | `can_view_clients` |
+| Mijozlar (ro‘yxat) | `clients`, `create`, `update`, `remove` | `/clients/` | Grid + filtr; qator → mijoz kartasi |
+| Mijoz kartasi | `retrieve`, `orders`, `sales`, `payments`, `invoices` | `/clients/{uuid}/`, `/orders/`, … | URL: `/mijozlar/{id}[/{tab}]` — `ClientDetailPage` |
 | Sotuvlar | `sales`, `salesBulk`, `create`, `update` | `/sales/` | |
 | Kassa | `payments`, `pay` | `/cash/payments/` | Paid yashirin |
 | Xarajatlar | `expenses`, `expenseTypes`, `expenseSubtypes`, `createForm`, `updateForm` | `/expenses/expenses/` | Multipart |
 | Foydalanuvchilar | `users`, `registerUser`, `update`, `remove` | `/auth/users/`, `/auth/register/` | |
 | Bildirishnomalar | `notifications`, `notificationsMarkRead`, `notificationsMarkAllRead` | `/notifications/` | 30s polling |
-| Valyuta kursi | `exchangeRateLatest`, `create('/cash/exchange-rates/')` | `/cash/exchange-rates/` | Header widget |
+| Valyuta kursi | `exchangeRateLatest`, `exchangeRateSettings`, `updateExchangeRateSettings`, `create('/cash/exchange-rates/')` | `/cash/exchange-rates/` | `FxRatePanel`: `header` (topbar, read-only) yoki `compact` (Import/Rasxod editorlari) |
+
+
+### URL va layout (`routes.js`, `routes.jsx`)
+
+| Fayl | Vazifa |
+|---|---|
+| `frontend/src/routes.js` | `PAGE_PATHS`, `parseAppPath()`, `clientDetailPath()`, `orderDetailPath()`, `CLIENT_TABS` |
+| `frontend/src/routes.jsx` | `AppRoutes` — URL → `ClientDetailPage`, `ResourcePage`, dashboard, hisobotlar |
+| `frontend/src/pages/LoginPage.jsx` | JWT login (`api.login` → `saveSession`) |
+| `frontend/src/main.jsx` | `BrowserRouter` |
+
+Asosiy URL lar (react-router):
+
+| Path | Ko‘rinish |
+|---|---|
+| `/`, `/buyurtmalar`, `/import`, … | `PAGE_PATHS` dagi ro‘yxat sahifalari |
+| `/mijozlar/{uuid}` | Mijoz kartasi, tab `umumiy` |
+| `/mijozlar/{uuid}/{tab}` | `buyurtmalar`, `sotuvlar`, `tolovlar`, `hujjatlar`, `tarix` |
+| `/buyurtmalar/{id}` | Buyurtmalar ro‘yxati + `#id` tarix paneli (`initialOrderHistoryId`) |
+
+### Global qidiruv (`GlobalSearch.jsx`)
+
+- Ochish: header tugmasi yoki **Ctrl+K** / **⌘+K** (`useGlobalSearchHotkey`).
+- Kamida **2** belgi; debounce bilan parallel so‘rovlar (`page_size=6`):
+  - Mijozlar → `api.clients({ search })`
+  - Buyurtmalar → `api.orders({ search })`
+  - Mahsulotlar → `api.products({ search })`
+  - Shartnomalar → `api.contracts({ search })`
+- Natija bosilganda: mijoz kartasi, buyurtma detail URL, Ombor yoki Shartnomalar sahifasi.
+
+### Grid ro‘yxatlar, filtr, pagination (`ResourcePage` + `listFilters.js`)
+
+**Grid sahifalar** (`GRID_PAGES` — `App.jsx`): Mijozlar, Buyurtmalar, Sotuvlar, Import, Ombor, Kassa, Xarajatlar.
+
+| Parametr | Qiymat |
+|---|---|
+| `page_size` | 25 (grid); `api.js` defaultlari 20/30 — grid override qiladi) |
+| `page`, `ordering` | Server-side sort (`GRID_SORT_FIELDS` mapping) |
+| Qidiruv | Form submit → query param `search` |
+
+Filtr paneli: `ListFiltersPanel` + `frontend/src/listFilters.js`.
+
+| Modul | Status | Mijoz | Sana |
+|---|---|---|---|
+| Mijozlar | `is_active` | — | ✅ |
+| Buyurtmalar | `status` | ✅ | ✅ |
+| Sotuvlar | — | ✅ | ✅ |
+| Import | `status` | — | ✅ |
+| Ombor | — | — | — |
+| Kassa | `status` | ✅ | ✅ (UI) |
+| Xarajatlar | — | — | ✅ |
+
+`buildListQueryParams(title, filters)` → API query: `status` yoki `is_active`, `client`, `date_from`, `date_to`.
+
+Backend sana maydoni (`apps/common/querysets.apply_date_range`):
+
+| Endpoint | Sana maydoni |
+|---|---|
+| `/clients/` | `created_at` |
+| `/orders/`, `/orders/zakaz/` | `created_at` |
+| `/sales/` | `sold_date` |
+| `/expenses/expenses/` | `date` |
+| `/warehouse/stocks/` | `created_at` (custom) |
+| `/cash/payments/` | hozircha **`date_from`/`date_to` e’tiborga olinmaydi** (UI yuboradi) |
+
+Komponentlar: `DataTable` (sort, tanlash), `TablePagination`, `StatusChangeModal`, `EmptyState`, `SkeletonRows`.
+
+**Amallar ustuni (`DataTable`):** `renderActions(row)` natijasi `.row-actions` flex wrapper ichida (`DataTable.jsx`). Grid ustunida `.data-table-actions-col .row-actions`:
+
+- `display: flex; flex-direction: row; flex-wrap: nowrap` — barcha tugmalar **bir qator**da
+- `.row-action` — `height: 36px`, `min-height: 36px`, `inline-flex`, `align-items: center`
+- `gap: 6px`, `justify-content: flex-end`, `flex-shrink: 0` — ikonka va matnli tugmalar bir xil balandlikda hizalanadi
+
+Mobil/product-row kontekstida `.row-actions` `flex-wrap: wrap` bo‘lishi mumkin; grid **Amallar** ustuni doim `nowrap`.
+
+### Editor ma’lumot yuklashi
+
+Forma editorlari mahsulotlarni **mustaqil** yuklaydi; mijozlar faqat `clients_view` bo‘lsa:
+
+| Komponent | Mahsulot | Mijoz |
+|---|---|---|
+| `OrderEditor` | `api.products({ page_size: 500 })` | `api.clients(...)` — faqat `clients_view` |
+| `SaleEditor` | `api.products({ page_size: 500 })` | `api.clients(...)` — faqat `clients_view` |
+| `EInvoicePage` | `api.products({ page_size: 200 })` | `api.clients(...)` — faqat `clients_view` |
+
+`clients_view` yo‘q bo‘lsa mijoz combobox bo‘sh qoladi; 403 xato chiqmasligi uchun `api.clients()` chaqirilmaydi.
+
+### `FxRatePanel` rejimlari (`App.jsx`)
+
+| Prop | Joylashuv | Ko‘rinish | Ruxsat |
+|---|---|---|---|
+| `header` | Topbar (bosh sahifa) | Faqat Infinbank kursi (read-only) + ixtiyoriy ↻ | ↻ — `users_manage` |
+| `compact` | Import / Xarajat editorlari | **Default: Infinbank.** Tablar: Infinbank (kurs tab yorlig‘ida) \| Qo‘lda. Infinbank — faqat ixtiyoriy ↻; Qo‘lda — bitta input (`Kurs kiriting`), blur/Enter da saqlash; alohida Saqlash tugmasi va «Hisobda: …» yo‘q | Tab almashtirish, qo‘lda saqlash, ↻ — `users_manage` |
+
+`users_manage` bo‘lmagan foydalanuvchi tablarni ko‘radi, lekin `disabled` — faqat faol kurs (Infinbank yoki saqlangan qo‘lda) ko‘rsatiladi.
+
+Backend: `PATCH /cash/exchange-rates/settings/` va `POST /cash/exchange-rates/` (qo‘lda kurs) — **Management** (`IsManagement()`).
+
+### Bulk amallar (grid)
+
+| Amal | Modullar | API |
+|---|---|---|
+| Tanlangan qatorlarni CSV eksport | Barcha grid sahifalar | Faqat frontend (`exportRowsCsv`) |
+| Status o‘zgartirish (inline + bulk) | Import | `order_status_manage` ability; ketma-ket `PATCH /orders/zakaz/{id}/` — `StatusChangeModal` |
+| Buyurtma fulfill/cancel | Buyurtma (inline yoki modal) | `POST /orders/{id}/fulfill/` \| `/cancel/` |
+
+`api.ordersBulk`, `api.zakazBulk`, `api.salesBulk` — forma yaratishda (ko‘p qatorli POST), grid bulk status uchun emas.
+
+### Mijoz kartasi tablari (`ClientDetailPage.jsx`)
+
+| Tab | API | Eslatma |
+|---|---|---|
+| `umumiy` | `GET /clients/{uuid}/` | Rekvizitlar, CTA (tahrir, yangi buyurtma) |
+| `buyurtmalar` | `GET /orders/?client=&page_size=15` | Pagination |
+| `sotuvlar` | `GET /sales/?client=&page_size=15` | |
+| `tolovlar` | `GET /cash/payments/?client=&page_size=15` | |
+| `hujjatlar` | `GET /invoices/?client=` | |
+| `tarix` | `GET /orders/?client=&page_size=50` | Buyurtma timeline |
+
+Tablar `abilities` bo‘yicha yashirin (`orders_view`, `sales_view`, `cash_view`, `einvoice_view`).
+
 
 ---
 
@@ -272,7 +423,7 @@ Jami **~91** HTTP endpoint (custom actionlar bilan). ✅ = `api.js` da wrapper b
 
 | Method | Path | Query / body | Ruxsat | api.js |
 |---|---|---|---|---|
-| GET | `/` | `page_size`, `search`, `status`, `client`, `contract_number`, `items__product` | Auth, read | ✅ `orders` |
+| GET | `/` | `page_size`, `search`, `status`, `client`, `contract_number`, `items__product`, `date_from`, `date_to`, `ordering`, `page` | Auth, read | ✅ `orders` |
 | POST | `/` | order JSON yoki multipart | Operator+ | ✅ `createForm` |
 | GET | `/{id}/` | — | Auth | ✅ `order` / `retrieve` |
 | PATCH | `/{id}/` | `{ asos, items[] }` | Operator+ | ✅ `update` |
@@ -288,13 +439,41 @@ DELETE yo‘q — bekor qilish `/cancel/` orqali.
 
 | Method | Path | Query / body | Ruxsat | api.js |
 |---|---|---|---|---|
-| GET | `/` | `page_size`, `status`, `zakaz_type`, `payment_status`, `product`, `order`, `contract_number`, `search` | Auth | ✅ `zakaz` |
-| POST | `/` | zakaz body | Auth | ✅ `create` |
+| GET | `/` | yuqoridagilar + `date_from`, `date_to`, `ordering`, `page` | Auth | ✅ `zakaz` |
+| POST | `/` | zakaz body yoki `new_product` inline | Auth | ✅ `create` |
 | GET | `/{id}/` | — | Auth | ✅ `retrieve` |
-| PATCH | `/{id}/` | status, received_qty, supplier… | Auth (Manager: status) | ✅ `update` |
+| PATCH | `/{id}/` | status, received_qty, supplier… | Auth; status o‘zgartirish — Management (`order_status_manage`) | ✅ `update` |
 | POST | `/bulk/` | bulk zakaz body | Auth | ✅ `zakazBulk` |
 
-`zakaz_type`: `auto` (buyurtmadan) \| `manual`. `payment_status`: `unpaid` \| `partial` \| `paid`.
+`zakaz_type`: `auto` (buyurtmadan / backorder) \| `manual`. `payment_status`: `unpaid` \| `partial` \| `paid`.
+
+**Manual import — `new_product` inline** (POST body, `product` o‘rniga):
+
+```json
+{
+  "quantity": 10,
+  "supplier": "Yetkazuvchi",
+  "contract_number": "3/1108",
+  "contract_date": "2026-08-11",
+  "expected_date": "2026-08-25",
+  "unit_price": "1500000",
+  "new_product": {
+    "name": "Yangi tovar",
+    "serial_number": "SN-001",
+    "barcode": "8600000000001",
+    "unit": "piece",
+    "vat_percent": "12",
+    "purchase_price": "1200000",
+    "delivery_price": "15000000"
+  }
+}
+```
+
+`product` va `new_product` bir vaqtda bo‘lmaydi. `unit_price` faqat Management uchun majburiy (mustaqil import).
+
+**Serializer javobi:** `ZakazOperatorSerializer` `new_product` maydonini qaytaradi (write-only emas, read uchun).
+
+**Non-management inline import:** `new_product` ichidagi `purchase_price` va `delivery_price` backendda olib tashlanadi — Operator yangi mahsulot yaratishi mumkin, lekin narx maydonlari saqlanmaydi.
 
 ### Shartnomalar reestri — `/api/v1/orders/contracts/`
 
@@ -340,7 +519,7 @@ List faqat root node + `children` daraxti.
 
 | Method | Path | Query / body | Ruxsat | api.js |
 |---|---|---|---|---|
-| GET | `/` | `page_size`, `product`, `client`, `sold_date`, `search` | Auth | ✅ `sales` |
+| GET | `/` | `page_size`, `product`, `client`, `sold_date`, `search`, `date_from`, `date_to`, `ordering`, `page` | Auth | ✅ `sales` |
 | POST | `/` | sale body | Operator+ | ✅ `create` |
 | GET/PATCH/DELETE | `/{id}/` | — | Operator+ | ✅ CRUD |
 | POST | `/bulk/` | bulk sales body | Operator+ | ✅ `salesBulk` |
@@ -368,9 +547,42 @@ FIFO ombordan ayiradi. Operator uchun narx/foyda yashirilishi mumkin.
 |---|---|---|---|---|
 | GET | `/` | `currency`, `manual_override`, `rate_date` | Auth | ❌ (faqat latest UI da) |
 | GET | `/{id}/` | — | Auth | ❌ |
-| POST | `/` | `{ mb_rate, buy_rate?, sell_rate?, note? }` | Auth | ✅ `create('/cash/exchange-rates/')` |
+| POST | `/` | `{ mb_rate, buy_rate?, sell_rate?, note? }` | Management | ✅ `create('/cash/exchange-rates/')` |
 | PATCH | `/{id}/` | kurs maydonlari | Auth | ❌ |
 | GET | `/latest/` | `refresh=true\|false` | Auth | ✅ `exchangeRateLatest` |
+| GET | `/settings/` | — | Auth | ✅ `exchangeRateSettings` |
+| PATCH | `/settings/` | `{ auto_fetch_enabled?, preferred_rate_source? }` | Management | ✅ `updateExchangeRateSettings` |
+
+Celery beat: `refresh_infinbank_usd_rate` har **1 soat** (`root/celery.py`). `auto_fetch_enabled=false` bo‘lsa task o‘tkazib yuboriladi.
+
+### Korxona profili — `/api/v1/company-profile/`
+
+| Method | Path | Query / body | Ruxsat | api.js |
+|---|---|---|---|---|
+| GET | `/` | — | Auth | ✅ `companyProfile` |
+| PATCH | `/` | `name`, `stir`, `director_jshshr`, `director_fish`, `mfo`, `bank_name`, `oked`, `bank_account`, `address`, `phone`, `email` | Management | ✅ `updateCompanyProfile` |
+
+Singleton (`pk=1`). Elektron faktura previewda «Bajaruvchi» sifatida ishlatiladi.
+
+### Elektron faktura — `/api/v1/invoices/`
+
+| Method | Path | Query / body | Ruxsat | api.js |
+|---|---|---|---|---|
+| GET | `/` | `page_size`, `document_type`, `client`, `search`, `ordering` | Auth | ✅ `invoices` |
+| POST | `/` | invoice body + `lines[]` | Operator/Management (yozish) | ✅ `createInvoice` |
+| GET | `/{uuid}/` | — | Auth | ✅ `invoice` |
+| PATCH | `/{uuid}/` | invoice + `lines[]` | Operator/Management | ✅ `updateInvoice` |
+| DELETE | `/{uuid}/` | — | Management | ✅ `removeInvoice` |
+
+`document_type`: `contract_sk` \| `invoice` \| `act`.
+
+Qator (`lines[]`) maydonlari: `product`, `product_name`, `identification_code`, `barcode`, `unit`, `quantity`, `unit_price`, `delivery_amount`, `vat_percent`, `vat_amount`, `total_amount`. Backend `reverse_calculation=true` bo‘lsa teskari hisoblaydi.
+
+Operator uchun narx maydonlari (`unit_price`, `delivery_amount`, `vat_amount`, `total_amount`) javobdan olib tashlanadi.
+
+`prices_view` yo‘q foydalanuvchilar uchun invoice darajasidagi `total_delivery`, `total_vat`, `grand_total` ham qaytmaydi (serializer context `can_view_prices=false`).
+
+Mazmun: `content_title`, `content_body` — frontend preview (`DocumentPreviewModal`) bilan ko‘rsatiladi.
 
 ### Xarajatlar — `/api/v1/expenses/`
 
@@ -390,7 +602,7 @@ FIFO ombordan ayiradi. Operator uchun narx/foyda yashirilishi mumkin.
 
 | Method | Path | Query / body | Ruxsat | api.js |
 |---|---|---|---|---|
-| GET | `/` | `page_size`, `search`, `is_active` | `can_view_clients` | ✅ `clients` |
+| GET | `/` | `page_size`, `search`, `is_active`, `date_from`, `date_to`, `ordering`, `page` | `can_view_clients` | ✅ `clients` |
 | POST/PATCH/DELETE | `/`, `/{uuid}/` | client body | `can_view_clients` | ✅ CRUD |
 
 Primary key — **UUID**. Maxfiy maydonlar bazada shifrlanadi.
@@ -433,6 +645,53 @@ Javob `mark_all_read`: `{ "status": "ok", "marked_read": 5 }`.
 
 ---
 
+## 17a. Elektron faktura (batafsil)
+
+Base:
+
+```http
+/api/v1/invoices/
+```
+
+Yangi hujjat:
+
+```http
+POST /api/v1/invoices/
+```
+
+```json
+{
+  "document_type": "contract_sk",
+  "name": "Shartnoma",
+  "contract_number": "5/1108",
+  "place_signed": "Toshkent shahri",
+  "contract_date": "2026-08-11",
+  "valid_until": "2026-12-31",
+  "client": "<uuid>",
+  "reverse_calculation": false,
+  "content_title": "1.",
+  "content_body": "1.1. Tomonlar shartnoma shartlariga rioya qiladi...",
+  "lines": [
+    {
+      "product": 1,
+      "quantity": 2,
+      "unit_price": "1500000",
+      "vat_percent": "12"
+    }
+  ]
+}
+```
+
+Backend mahsulotdan `product_name`, `barcode`, `identification_code`, `unit`, narx va QQS ni to‘ldiradi; `delivery_amount`, `vat_amount`, `total_amount` hisoblanadi.
+
+**Narx ko‘rinishi:** `prices_view` yo‘q foydalanuvchilar uchun qator narxlari (`unit_price`, `delivery_amount`, `vat_amount`, `total_amount`) va invoice jami maydonlari (`total_delivery`, `total_vat`, `grand_total`) javobdan olib tashlanadi. Frontend `EInvoicePage` da `can(session, 'prices_view')` bilan jami blokni yashiradi.
+
+Frontend: `EInvoicePage` — ro‘yxat, tahrir, `DocumentPreviewModal` (mazmun + jadval + rekvizitlar). Mahsulot va mijozlar mustaqil yuklanadi; `api.clients()` faqat `clients_view` bo‘lsa.
+
+Korxona profili (`GET/PATCH /company-profile/`) previewda «Bajaruvchi» blokida ishlatiladi.
+
+---
+
 ## 5. Auth va user sessiya (batafsil)
 
 ### Login
@@ -471,7 +730,9 @@ Javob:
       "dashboard": true,
       "orders_view": true,
       "orders_manage": true,
+      "order_status_manage": true,
       "warehouse_view": true,
+      "warehouse_create": true,
       "warehouse_manage": true,
       "prices_view": true,
       "prices_manage": true,
@@ -491,7 +752,9 @@ Javob:
       "categories_view": true,
       "stocks_view": true,
       "users_view": true,
-      "users_manage": true
+      "users_manage": true,
+      "einvoice_view": true,
+      "einvoice_manage": true
     }
   }
 }
@@ -556,33 +819,75 @@ Frontend menyuni `abilities` bo‘yicha ko‘rsatadi. Ruxsat yo‘q menu UI’da
 | Ability | Ma’nosi | Kimda |
 |---|---|---|
 | `dashboard` | bosh sahifa statistikasi | Accountant, Management |
-| `orders_view` | buyurtmalarni ko‘rish | hammaga |
+| `orders_view` | buyurtmalarni ko‘rish | Operator, Management |
 | `orders_manage` | buyurtma yaratish/tahrirlash/amallar | Operator, Management |
-| `warehouse_view` | mahsulotlarni ko‘rish | hammaga |
+| `order_status_manage` | import status (`confirmed`/`received`/…) — inline va bulk | Management |
+| `warehouse_view` | mahsulotlarni ko‘rish | Operator, Accountant, Management |
+| `warehouse_create` | mahsulot qo‘shish (narxsiz) | Operator, Management |
 | `warehouse_manage` | mahsulot/kirim boshqarish | Operator, Management |
-| `prices_view` | narx/kelish narxi ko‘rish | Accountant, Management |
+| `prices_view` | narx/kelish narxi, invoice/order summalari ko‘rish | Accountant, Management |
 | `prices_manage` | narx boshqarish | Management |
-| `clients_view` | mijozlarni ko‘rish | `can_view_clients` |
+| `clients_view` | mijozlarni ko‘rish; `api.clients()` dropdown yuklash | `can_view_clients` |
 | `clients_manage` | mijoz CRUD | `can_view_clients` |
-| `sales_view` | sotuvlarni ko‘rish | hammaga |
-| `sales_manage` | sotuv yaratish/tahrirlash | Operator |
+| `sales_view` | sotuvlarni ko‘rish | Operator, Accountant, Management |
+| `sales_manage` | sotuv yaratish/tahrirlash | Operator, Management |
 | `cash_view` | kassa ko‘rish | hammaga (summalar Accountant/Management) |
 | `cash_manage` | to‘lov qabul qilish | Accountant, Management |
 | `expenses_view` | xarajatlarni ko‘rish | hammaga (summalar Accountant/Management) |
 | `expenses_manage` | xarajat yaratish/tahrirlash | Accountant, Management |
 | `reports_view` | hisobotlar | Accountant, Management |
 | `notifications_view` | bildirishnomalar | hammaga |
-| `procurement_view` | zakazlar (Import) | hammaga |
-| `procurement_manage` | zakaz yaratish/tahrirlash | Operator, Management |
-| `contracts_view` | shartnomalar reestri | hammaga |
-| `categories_view` | kategoriyalar | hammaga |
-| `stocks_view` | qoldiqlar | hammaga |
+| `procurement_view` | importlar ko‘rish | Operator, Accountant, Management |
+| `procurement_manage` | import yaratish/tahrirlash (status emas!) | Operator, Accountant, Management |
+| `contracts_view` | shartnomalar reestri | Operator, Accountant, Management |
+| `categories_view` | kategoriyalar | Operator, Management |
+| `stocks_view` | qoldiqlar | Operator, Management |
+| `einvoice_view` | elektron faktura ko‘rish | Operator, Accountant, Management |
+| `einvoice_manage` | elektron faktura yaratish/tahrirlash | Operator, Management |
 | `users_view` | userlarni ko‘rish | Management |
-| `users_manage` | user boshqarish | Management |
+| `users_manage` | user boshqarish; FX sozlamalar, kurs manbasi, qo‘lda kurs | Management |
+
+**Muhim farqlar:**
+
+- `procurement_manage` — import **yaratish/tahrirlash**; status o‘zgartirish emas.
+- `order_status_manage` — import gridda inline status va bulk status (`confirmed` → `received` …).
+- `clients_view` — `OrderEditor`, `SaleEditor`, `EInvoicePage` da `api.clients()` chaqiriladi.
+- `users_manage` — `FxRatePanel` tab almashtirish, qo‘lda saqlash, Infinbank ↻ yangilash.
+- `prices_view` — invoice qator narxlari va `total_delivery` / `total_vat` / `grand_total`.
 
 Frontend: `can(session, 'ability')` — `session.user.abilities` dan o‘qiladi.
 
 Operator uchun narx/foyda maydonlari ayrim javoblarda qaytmaydi. Frontend bunday maydonlar yo‘qligiga tayyor bo‘lsin.
+
+### UI gating xaritasi (ability → UI)
+
+| UI element | Ability | Fayl / komponent |
+|---|---|---|
+| Sidebar / bottom nav sahifa | Har bir nav item `ability` (masalan `orders_view`, `procurement_view`) | `App.jsx` — `SIDEBAR_NAV`, `NAV_GROUPS` |
+| Grid «Yangi» tugmasi | `manageAbilities[title]` yoki `warehouse_create` (Ombor) | `ResourcePage` — `createAbilities`, `manageAbilities` |
+| Grid qator tahriri / o‘chirish | `manageAbilities[title]` | `ResourcePage` — `canEditRows` |
+| Import inline status + bulk status | `order_status_manage` (**emas** `procurement_manage`) | `ResourcePage`, `InlineStatusSelect`, `StatusChangeModal` |
+| Import yaratish/tahrir formasi | `procurement_manage` | `ResourcePage` — `canManage` |
+| Mijoz kartasi URL | `clients_view` | `routes.jsx`, `App.jsx` |
+| Global qidiruv — mijozlar | `clients_view` | `GlobalSearch.jsx` |
+| Editor mijoz combobox | `clients_view` | `OrderEditor`, `SaleEditor`, `EInvoicePage` |
+| Editor mahsulot combobox | (ability shart emas) | `api.products()` doim chaqiriladi |
+| Invoice jami / qator narxlari | `prices_view` | `EInvoicePage`, backend serializer |
+| FX tab / qo‘lda saqlash / ↻ | `users_manage` | `FxRatePanel` |
+| Foydalanuvchilar sahifasi | `users_view` (ko‘rish), `users_manage` (CRUD) | `HIDDEN_PAGES` |
+
+`manageAbilities` (`ResourcePage`):
+
+```text
+Buyurtmalar → orders_manage
+Import      → procurement_manage   (status emas!)
+Ombor/…     → warehouse_manage
+Mijozlar    → clients_manage
+Sotuvlar    → sales_manage
+Kassa       → cash_manage
+Xarajatlar  → expenses_manage
+Foydalanuvchilar → users_manage
+```
 
 ## 7. Valyuta kursi
 
@@ -594,31 +899,62 @@ https://www.infinbank.com/uz/private/exchange-rates/
 
 HTML ichida `rates-table` dan `MB kurs` qatori va `USD` ustuni ajratiladi.
 
-### Oxirgi USD kurs
+### Oxirgi USD kurs (kengaytirilgan javob)
 
 ```http
 GET /api/v1/cash/exchange-rates/latest/?refresh=false
 GET /api/v1/cash/exchange-rates/latest/?refresh=true
 ```
 
-`refresh=true` tashqi manbadan qayta olib kelishga urinadi. Agar tashqi manba ishlamasa, backend bazadagi oxirgi kursni fallback qiladi. Fallback ham bo‘lmasa `503`.
+`refresh=true` — Infinbankdan majburiy sync (`sync_today_usd_rate`). Tashqi manba ishlamasa bazadagi oxirgi kurs fallback; yo‘q bo‘lsa `503`.
 
-Javob:
+Javob (faol kurs maydonlari + ikkala manba):
 
 ```json
 {
-  "id": 1,
+  "infinbank": {
+    "currency": "USD",
+    "mb_rate": "11934.61",
+    "source": "infinbank",
+    "manual_override": false,
+    "rate_date": "2026-08-11"
+  },
+  "manual": {
+    "currency": "USD",
+    "mb_rate": "11950.00",
+    "source": "manual",
+    "manual_override": true,
+    "rate_date": "2026-08-11"
+  },
+  "active_source": "infinbank",
+  "preferred_rate_source": "infinbank",
   "currency": "USD",
   "mb_rate": "11934.61",
-  "buy_rate": "11934.61",
-  "sell_rate": "11934.61",
   "rate_date": "2026-08-11",
-  "source": "infinbank",
-  "manual_override": false,
-  "note": "",
-  "created_at": "2026-08-11T..."
+  "source": "infinbank"
 }
 ```
+
+`active_source` / yuqori darajadagi `mb_rate` — hisob-kitobda ishlatiladigan faol yozuv (`get_active_rate_record`). `preferred_rate_source`: `infinbank` | `manual`.
+
+### Frontend: `FxRatePanel` (`App.jsx`)
+
+Ikki rejim — **`header`** va **`compact`**:
+
+| Rejim | Prop | UI |
+|---|---|---|
+| Topbar (bosh sahifa) | `header` | Faqat Infinbank kursi (read-only). Tab yo‘q, Qo‘lda input yo‘q, Saqlash yo‘q. `users_manage` bo‘lsa ↻ (Infinbank yangilash). |
+| Import / Xarajat editor | `compact` | **Default: Infinbank.** Tablar: Infinbank (kurs tab yorlig‘ida) \| Qo‘lda. Infinbank — ixtiyoriy ↻ (`users_manage`). Qo‘lda — bitta input (`Kurs kiriting`), blur yoki Enter da avto-saqlash; alohida Saqlash va «Hisobda: …» yo‘q. |
+
+**Ability gating (`users_manage`):**
+
+- Tab almashtirish (`preferred_rate_source`) — faqat `users_manage`
+- Qo‘lda kurs saqlash (`POST /cash/exchange-rates/`) — faqat `users_manage`; compact rejimda blur yoki Enter
+- Infinbank ↻ (`?refresh=true`) — faqat `users_manage`
+
+`users_manage` bo‘lmagan foydalanuvchi faqat joriy kursni ko‘radi; tablar `disabled`.
+
+Backend ruxsat: `PATCH /cash/exchange-rates/settings/` va `POST /cash/exchange-rates/` — **Management** (`IsManagement()`).
 
 ### Qo‘lda kurs saqlash
 
@@ -626,11 +962,8 @@ Javob:
 POST /api/v1/cash/exchange-rates/
 ```
 
-So‘rov:
-
 ```json
 {
-  "currency": "USD",
   "mb_rate": "11950.00",
   "buy_rate": "11950.00",
   "sell_rate": "11950.00",
@@ -639,7 +972,34 @@ So‘rov:
 }
 ```
 
-Backend `currency=USD`, `source=manual`, `manual_override=true`, `rate_date=today` qilib saqlaydi.
+Backend avtomatik: `currency=USD`, `source=manual`, `rate_date=today`.
+
+### Sozlamalar
+
+```http
+GET /api/v1/cash/exchange-rates/settings/
+PATCH /api/v1/cash/exchange-rates/settings/
+```
+
+Backend ViewSet action nomi: `rate_settings` (`apps/cash/views.py`); URL path: `settings` (REST: `/exchange-rates/settings/`).
+
+GET — barcha autentifikatsiyalangan foydalanuvchilar. PATCH — **Management** (`IsManagement()`).
+
+PATCH body (qisman):
+
+```json
+{
+  "auto_fetch_enabled": true,
+  "preferred_rate_source": "infinbank"
+}
+```
+
+Javob: `{ "auto_fetch_enabled", "preferred_rate_source", "updated_at" }`.
+
+Frontend: `api.exchangeRateSettings()`, `api.updateExchangeRateSettings(payload)`.
+
+Celery: `apps.cash.tasks.refresh_infinbank_usd_rate` — har soat Infinbank (`auto_fetch_enabled=true` bo‘lsa).
+
 
 ## 8. Buyurtmalar
 
@@ -885,6 +1245,10 @@ Bir nechta mahsulot uchun zakaz yaratadi.
 PATCH /api/v1/orders/zakaz/{id}/
 ```
 
+Backend: status o‘zgartirish (`confirmed`, `ordered`, `received`, `cancelled`) — **Management** roli talab qilinadi.
+
+Frontend: Import gridda inline status va bulk status faqat `order_status_manage` ability bo‘lsa ko‘rinadi (`procurement_manage` yetarli emas).
+
 Tasdiqlash:
 
 ```json
@@ -1070,19 +1434,21 @@ DELETE /api/v1/clients/{uuid}/
 
 `can_view_clients` ruxsati kerak.
 
+Frontend: ro‘yxat grid (`/mijozlar`), qator bosilganda `/mijozlar/{uuid}` — tablar §3a jadvalida.
+
 So‘rov:
 
 ```json
 {
   "client_type": "legal",
   "company_name": "Samarqand Med Texnika MChJ",
-  "full_name": "",
-  "first_name": "",
-  "last_name": "",
-  "middle_name": "",
   "inn": "310776556",
-  "pinfl": "",
-  "passport_number": "",
+  "director_jshshr": "31208123456789",
+  "director_fish": "Karimov Akmal Alisher o‘g‘li",
+  "mfo": "00440",
+  "oked": "46900",
+  "bank_name": "Kapitalbank",
+  "bank_account": "20208000123456789012",
   "phone": "+998901112233",
   "email": "info@example.uz",
   "address": "Samarqand shahri, Universitet xiyoboni 12",
@@ -1091,7 +1457,22 @@ So‘rov:
 }
 ```
 
-`full_name`, `first_name`, `last_name`, `middle_name`, `pinfl`, `inn`, `passport_number`, `phone` bazada shifrlanadi. Javobda ochiq matn qaytadi.
+Jismoniy shaxs (`client_type: "individual"`):
+
+```json
+{
+  "client_type": "individual",
+  "full_name": "Aliyev Sardor Bahodir o‘g‘li",
+  "pinfl": "31208123456789",
+  "passport_number": "AA1234567",
+  "phone": "+998901112233",
+  "email": "sardor@example.uz",
+  "address": "Toshkent",
+  "is_active": true
+}
+```
+
+`full_name`, `pinfl`, `inn`, `passport_number`, `phone`, `director_jshshr`, `director_fish`, `bank_account` bazada shifrlanadi. Javobda ochiq matn qaytadi.
 
 Hozir Soliq/DIDox kabi external auto-fill endpoint yo‘q. Rejalangan to‘g‘ri arxitektura:
 
@@ -1553,7 +1934,7 @@ Generic CRUD yetarli bo‘lsa yangi metod shart emas — `api.create('/path/', b
 
 ### 3. UI komponentini ulang
 
-`App.jsx` dagi `resources` jadvaliga qo‘shish (ro‘yxat sahifasi):
+`App.jsx` dagi `resources` jadvaliga qo‘shish (ro‘yxat sahifasi). Grid kerak bo‘lsa `GRID_PAGES` va `MODULE_FILTER_FEATURES` (`listFilters.js`) ni yangilang:
 
 ```javascript
 'Yangi modul': { load: api.myFeature, path: '/my-app/items/' },
@@ -1643,22 +2024,42 @@ notifications: 30s
 - Operator uchun narx/foyda maydonlari yo‘q bo‘lishiga UI tayyor bo‘lsin.
 - Mobile’da sidebar emas, bottom navigation ko‘rsatilsin.
 - Desktop sidebar collapse holati saqlansin.
+- Grid sahifalarda `ListFiltersPanel` filtrlari `buildListQueryParams` orqali API ga uzatilsin.
+- Global qidiruv Ctrl+K; kamida 2 belgi.
+- Mijoz kartasi URL tablari `CLIENT_TABS` bilan mos bo‘lsin.
+- USD kurs: `preferred_rate_source` va `latest` javobidagi `infinbank`/`manual` obyektlari bilan ishlansin.
+- `FxRatePanel`: topbar — `header` (read-only Infinbank); editorlar — `compact` (tablar + ixtiyoriy ↻ / qo‘lda input). FX boshqaruv — `users_manage`.
+- Import grid status (inline + bulk) — `order_status_manage`, `procurement_manage` emas.
+- `OrderEditor`, `SaleEditor`, `EInvoicePage`: `api.products()` doim; `api.clients()` faqat `clients_view`.
+- `DataTable` Amallar ustuni: `.row-actions` flex wrapper; grid da `flex-wrap: nowrap`, tugmalar 36px balandlik.
+- Invoice javobida `prices_view` yo‘q bo‘lsa `total_delivery`, `total_vat`, `grand_total` ham yo‘q.
 
-## 21. Hali backendda yo‘q, alohida modul bo‘ladigan qism
+## 21. Rol matritsasi (11 qoida)
 
-Didox uslubidagi to‘liq elektron hisob-faktura moduli hozir backendda yo‘q.
+Regressiya testlari: `apps/common/tests/test_role_matrix.py`.
 
-Yo‘q qismlar:
+| # | Qoida | Natija |
+|---|---|---|
+| 1 | Mahsulot qo‘shish | Operator ✅, Accountant ❌, Management ✅ |
+| 2 | Operator API — narxlar yo‘q | `purchase_price`, `selling_price`, `delivery_price` qaytmaydi |
+| 3 | Narx yozish | Faqat Management (`PATCH` ishlaydi) |
+| 4 | `min_quantity` | Operator ko‘rmaydi; Management o‘zgartiradi |
+| 5 | Sotuv yaratish | Operator ✅, Accountant ❌, Management ✅ |
+| 6 | Sotuv summasi | Operator uchun `sold_price`, `total_amount`, `profit` yo‘q |
+| 7 | Kassa/xarajat | Operator faqat GET; summalar yashirin |
+| 8 | Buyurtma yaratish | Operator ✅, Accountant ❌, Management ✅ |
+| 9 | Import yaratish | Barcha rollar ✅ |
+| 10 | Import status | Faqat Management (`confirmed`, `received`, …) — frontend: `order_status_manage` |
+| 11 | Hisobotlar | Operator ❌, Accountant/Management ✅ |
 
-- hamkor STIR/JSHSHIR lookup external Soliq API orqali;
-- korxona rekvizitlari auto-fill;
-- bank, MFO, hisob raqami, OKED maydonlari;
-- MXIK/IKPU katalog lookup;
-- QQS hisoblash;
-- teskari hisob;
-- hujjat preview;
+Frontend `abilities` (`warehouse_create`, `order_status_manage`, `prices_view`, `prices_manage`, `einvoice_view`, …) shu qoidalarga mos menyu va maydonlarni yashiradi.
+
+## 22. Hali backendda yo‘q (kelajak modullar)
+
+Elektron faktura moduli (`/api/v1/invoices/`) mavjud — mazmun, qatorlar, preview, teskari hisob. Quyidagilar hali yo‘q:
+
+- hamkor STIR/JSHSHIR lookup (tashqi Soliq API);
+- MXIK/IKPU katalog lookup (frontend faqat tasnif.soliq.uz havolasi);
 - shablon saqlash;
 - ERI/imzolash;
 - Didox/Soliq real integratsiya.
-
-Bu kerak bo‘lsa, alohida backend + frontend modul sifatida qo‘shiladi.

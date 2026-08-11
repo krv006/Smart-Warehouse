@@ -105,6 +105,7 @@ async function fetchRequest(path, options, token) {
   const controller = new AbortController()
   const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
   if (token) headers.set('Authorization', `Bearer ${token}`)
+  if (!headers.has('Accept')) headers.set('Accept', 'application/json')
   if (options.body && !(options.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
   }
@@ -201,6 +202,15 @@ export const api = {
   expenseTypes: () => request('/expenses/expense-types/?page_size=50'),
   expenseSubtypes: () => request('/expenses/expense-subtypes/?page_size=100'),
   exchangeRateLatest: (refresh = false) => request(`/cash/exchange-rates/latest/?refresh=${refresh ? 'true' : 'false'}`),
+  exchangeRateSettings: () => request('/cash/exchange-rates/settings/'),
+  updateExchangeRateSettings: (payload) => request('/cash/exchange-rates/settings/', { method: 'PATCH', body: JSON.stringify(payload) }),
+  companyProfile: () => request('/company-profile/'),
+  updateCompanyProfile: (payload) => request('/company-profile/', { method: 'PATCH', body: JSON.stringify(payload) }),
+  invoices: (params = {}) => request(`/invoices/${toQuery({ page_size: 30, ...params })}`),
+  invoice: (id) => request(`/invoices/${id}/`),
+  createInvoice: (payload) => request('/invoices/', { method: 'POST', body: JSON.stringify(payload) }),
+  updateInvoice: (id, payload) => request(`/invoices/${id}/`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  removeInvoice: (id) => request(`/invoices/${id}/`, { method: 'DELETE' }),
   retrieve: (path, id) => request(`${path}${id}/`),
   create: (path, payload) => request(path, { method: 'POST', body: JSON.stringify(payload) }),
   createForm: (path, payload) => request(path, { method: 'POST', body: payload instanceof FormData ? payload : JSON.stringify(payload) }),

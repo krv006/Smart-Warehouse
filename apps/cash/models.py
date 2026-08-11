@@ -9,7 +9,6 @@ from django.utils import timezone
 
 from apps.common.models import TimeStampedModel
 
-
 class ExchangeRate(TimeStampedModel):
     USD = 'USD'
     CURRENCY_CHOICES = ((USD, 'USD'),)
@@ -194,3 +193,33 @@ class PaymentTransaction(TimeStampedModel):
 
     def __str__(self):
         return f'Txn #{self.pk} — {self.amount} (payment #{self.payment_id})'
+
+
+class ExchangeRateSettings(TimeStampedModel):
+    """Valyuta kursi sozlamalari (singleton)."""
+
+    INFINBANK = 'infinbank'
+    MANUAL = 'manual'
+    SOURCE_CHOICES = (
+        (INFINBANK, 'Infinbank'),
+        (MANUAL, 'Qo\'lda'),
+    )
+
+    auto_fetch_enabled = BooleanField(default=True,
+                                      help_text='Infin Bank kursini avtomatik olish')
+    preferred_rate_source = CharField(
+        max_length=10,
+        choices=SOURCE_CHOICES,
+        default=INFINBANK,
+        help_text='USD hisob-kitoblarida qaysi kurs ishlatiladi',
+    )
+
+    class Meta:
+        db_table = 'cash_exchangerate_settings'
+        verbose_name = 'Valyuta kursi sozlamasi'
+        verbose_name_plural = 'Valyuta kursi sozlamalari'
+
+    @classmethod
+    def get_settings(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj

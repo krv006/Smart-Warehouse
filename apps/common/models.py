@@ -7,3 +7,6 @@ class TimeStampedModel(models.Model):
 
     class Meta:
         abstract = True
+
+
+from apps.common.company import CompanyProfile  # noqa: E402, F401

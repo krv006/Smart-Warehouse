@@ -22,6 +22,13 @@ class IsManagement(BasePermission):
                     and getattr(request.user, 'is_management', False))
 
 
+class IsManagementOnly(BasePermission):
+    """Faqat Management (yozish/amal) — superuser ham ruxsatli."""
+    def has_permission(self, request, view):
+        return bool(request.user and request.user.is_authenticated
+                    and getattr(request.user, 'is_management', False))
+
+
 class IsOperatorOrReadOnly(BasePermission):
     """O'qish — hammaga, yozish — faqat Operator."""
     def has_permission(self, request, view):
@@ -30,6 +37,17 @@ class IsOperatorOrReadOnly(BasePermission):
         if request.method in SAFE_METHODS:
             return True
         return getattr(request.user, 'is_operator', False)
+
+
+class IsOperatorOrManagementWrite(BasePermission):
+    """O'qish — hammaga autentifikatsiyalangan, yozish — Operator yoki Management."""
+    def has_permission(self, request, view):
+        if not (request.user and request.user.is_authenticated):
+            return False
+        if request.method in SAFE_METHODS:
+            return True
+        return (getattr(request.user, 'is_operator', False)
+                or getattr(request.user, 'is_management', False))
 
 
 class IsOperatorOrManagement(BasePermission):
@@ -62,15 +80,16 @@ class IsAccountantOrReadOnly(BasePermission):
 
 
 class IsAccountantWithManagementRead(BasePermission):
-    """O'qish — Accountant/Management, yozish — faqat Accountant.
-    Operator umuman kirolmaydi (pul summalari/komissiya operatordan yashirin)."""
+    """O'qish — Operator (faqat ko'rish), Accountant/Management; yozish — Accountant/Management."""
     def has_permission(self, request, view):
         if not (request.user and request.user.is_authenticated):
             return False
         if request.method in SAFE_METHODS:
-            return (getattr(request.user, 'is_accountant', False)
+            return (getattr(request.user, 'is_operator', False)
+                    or getattr(request.user, 'is_accountant', False)
                     or getattr(request.user, 'is_management', False))
-        return getattr(request.user, 'is_accountant', False)
+        return (getattr(request.user, 'is_accountant', False)
+                or getattr(request.user, 'is_management', False))
 
 
 class CanViewClients(BasePermission):

@@ -76,6 +76,26 @@ def check_overdue_payments(self):
     return f'{overdue.count()} overdue payment(s) notified.'
 
 
+@shared_task
+def check_delayed_imports():
+    """Kutilgan sanasi o'tgan, hali qabul qilinmagan importlar uchun bildirishnoma."""
+    from apps.notifications.models import Notification
+    from apps.orders.models import Zakaz
+
+    today = timezone.localdate()
+    overdue = Zakaz.objects.filter(
+        expected_date__lt=today,
+    ).exclude(
+        status__in=(Zakaz.RECEIVED, Zakaz.CANCELLED),
+    ).select_related('product')
+
+    count = 0
+    for zakaz in overdue:
+        Notification.notify_delayed_import(zakaz)
+        count += 1
+    return f'{count} delayed import(s) checked.'
+
+
 @shared_task(bind=True, max_retries=2, default_retry_delay=60)
 def send_backup_notification(self, success: bool, filepath: str = ''):
     """DB backup natijasini Telegram'ga yuboradi (backup script chaqiradi)."""

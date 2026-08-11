@@ -1,4 +1,4 @@
-from django.db import transaction
+from apps.common.querysets import apply_date_range
 import json
 from django.utils import timezone
 from django.utils.dateparse import parse_date
@@ -32,7 +32,7 @@ def _require_action_fields(request, *, faktura_required=False):
         raise ValidationError(errors)
     return contract_number, asos, faktura
 
-from apps.common.permissions import (IsOperatorOrReadOnly,
+from apps.common.permissions import (IsOperatorOrManagementWrite,
                                      IsOperatorOrManagement)
 from apps.orders.models import (Order, OrderHistory, Zakaz, ZakazHistory,
                                 ProductContract, register_contract,
@@ -41,7 +41,8 @@ from apps.orders.serializers import (OrderSerializer, OrderOperatorSerializer,
                                      ZakazSerializer, ZakazOperatorSerializer,
                                      OrderBulkCreateSerializer,
                                      ZakazBulkCreateSerializer,
-                                     ProductContractSerializer)
+                                     ProductContractSerializer,
+                                     order_serializer_class)
 
 
 # ── Order (Bron) ──────────────────────────────────────────────────────────────
@@ -126,7 +127,7 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
                           .prefetch_related('items__product',
                                             'history__changed_by'))
     serializer_class   = OrderSerializer
-    permission_classes = (IsOperatorOrReadOnly,)
+    permission_classes = (IsOperatorOrManagementWrite,)
     parser_classes     = (MultiPartParser, FormParser, JSONParser)
     filterset_fields   = {
         'status':          ['exact'],
@@ -138,6 +139,9 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
                           'client__company_name', 'contract_number', 'comment')
     ordering_fields    = ('due_date', 'created_at', 'status')
     http_method_names  = ('get', 'post', 'patch', 'head', 'options')
+
+    def get_queryset(self):
+        return apply_date_range(super().get_queryset(), self.request)
 
     def get_serializer_class(self):
         user = self.request.user
@@ -214,7 +218,7 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
         serializer.is_valid(raise_exception=True)
         order = serializer.save()
         return Response(
-            OrderBulkCreateSerializer().to_representation(order),
+            OrderBulkCreateSerializer(context={'request': request}).to_representation(order),
             status=201,
         )
 
@@ -277,7 +281,8 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
                     faktura=faktura,
                     asos=asos, order=order, user=request.user,
                 )
-        return Response(OrderSerializer(order).data)
+        return Response(
+            order_serializer_class(request.user)(order, context={'request': request}).data)
 
     @extend_schema(
         summary="Buyurtmani bekor qilish (bron bo'shatiladi)",
@@ -319,7 +324,8 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
                     faktura=faktura,
                     asos=asos, order=order, user=request.user,
                 )
-        return Response(OrderSerializer(order).data)
+        return Response(
+            order_serializer_class(request.user)(order, context={'request': request}).data)
 
     @extend_schema(
         summary="Buyurtmadagi yetishmagan miqdorga zakaz berish (qo'lda)",
@@ -448,6 +454,9 @@ class ZakazViewSet(CreateModelMixin, ListModelMixin,
     ordering_fields    = ('expected_date', 'created_at', 'status')
     http_method_names  = ('get', 'post', 'patch', 'head', 'options')
 
+    def get_queryset(self):
+        return apply_date_range(super().get_queryset(), self.request)
+
     def get_serializer_class(self):
         user = self.request.user
         if user.is_authenticated and (
@@ -486,7 +495,7 @@ class ZakazViewSet(CreateModelMixin, ListModelMixin,
         serializer.is_valid(raise_exception=True)
         zakazlar = serializer.save()
         return Response(
-            ZakazBulkCreateSerializer().to_representation(zakazlar),
+            ZakazBulkCreateSerializer(context={'request': request}).to_representation(zakazlar),
             status=201,
         )
 

@@ -9,6 +9,8 @@ class ClientSerializer(ModelSerializer):
         model  = Client
         fields = ('id', 'full_name', 'first_name', 'last_name', 'middle_name',
                   'pinfl', 'client_type', 'company_name', 'inn',
+                  'director_jshshr', 'director_fish', 'mfo', 'oked',
+                  'bank_name', 'bank_account',
                   'passport_number', 'phone', 'email', 'address', 'comment',
                   'is_active', 'created_at')
         read_only_fields = ('id', 'created_at')
@@ -29,6 +31,9 @@ class ClientSerializer(ModelSerializer):
         data['inn'] = decrypt(instance.inn)
         data['passport_number'] = decrypt(instance.passport_number)
         data['phone'] = decrypt(instance.phone)
+        data['director_jshshr'] = decrypt(instance.director_jshshr)
+        data['director_fish'] = decrypt(instance.director_fish)
+        data['bank_account'] = decrypt(instance.bank_account)
 
         if data.get('client_type') == Client.INDIVIDUAL:
             parts = [data.get('last_name') or '', data.get('first_name') or '', data.get('middle_name') or '']
@@ -55,6 +60,12 @@ class ClientSerializer(ModelSerializer):
             raw['passport_number'] = encrypt(raw['passport_number'])
         if 'phone' in raw and raw.get('phone'):
             raw['phone'] = encrypt(raw['phone'])
+        if 'director_jshshr' in raw and raw.get('director_jshshr'):
+            raw['director_jshshr'] = encrypt(raw['director_jshshr'])
+        if 'director_fish' in raw and raw.get('director_fish'):
+            raw['director_fish'] = encrypt(raw['director_fish'])
+        if 'bank_account' in raw and raw.get('bank_account'):
+            raw['bank_account'] = encrypt(raw['bank_account'])
 
         if raw.get('client_type') == Client.INDIVIDUAL:
             parts = [raw.get('last_name') or '', raw.get('first_name') or '', raw.get('middle_name') or '']
@@ -65,15 +76,31 @@ class ClientSerializer(ModelSerializer):
                 raw['full_name'] = encrypt(raw['full_name'])
             raw['company_name'] = ''
             raw['inn'] = ''
+            raw['director_jshshr'] = ''
+            raw['director_fish'] = ''
+            raw['mfo'] = ''
+            raw['oked'] = ''
+            raw['bank_name'] = ''
+            raw['bank_account'] = ''
+        elif raw.get('client_type') == Client.LEGAL:
+            raw['first_name'] = ''
+            raw['last_name'] = ''
+            raw['middle_name'] = ''
+            raw['pinfl'] = ''
+            raw['passport_number'] = ''
+            raw['full_name'] = ''
         return raw
 
 
 class ClientListSerializer(ModelSerializer):
     class Meta:
         model  = Client
-        fields = ('id', 'full_name', 'company_name', 'is_active')
+        fields = ('id', 'full_name', 'company_name', 'client_type', 'phone', 'inn',
+                  'is_active', 'created_at')
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
         data['full_name'] = decrypt(instance.full_name)
+        data['phone'] = decrypt(instance.phone)
+        data['inn'] = decrypt(instance.inn)
         return data
