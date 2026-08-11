@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Warehouse, Bell, Buildings, CaretDown, ChartLineUp,
   ClipboardText, CurrencyCircleDollar, DownloadSimple, FileText, Funnel, House, MagnifyingGlass,
-  Package, PencilSimple, Plus, SignOut, SpinnerGap, Stack, Tag, TrendDown, TrendUp, Truck, UserGear, Users, WarningCircle, X, XCircle, DotsThree,
+  Package, PencilSimple, Plus, SignOut, SpinnerGap, Stack, Tag, TrendDown, TrendUp, Truck, UserGear, Users, WarningCircle, X, XCircle, DotsThree, CaretLeft, CaretRight,
 } from '@phosphor-icons/react'
 import { api, clearStoredSession, refreshAccessToken, saveSession, setAuthFailureHandler, tokenExpiresAt } from './api'
 
@@ -175,6 +175,7 @@ function App() {
   const [orderModalOpen, setOrderModalOpen] = useState(false)
   const [resourceReloadKey, setResourceReloadKey] = useState(0)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('warehouse_sidebar_collapsed') === '1')
   const { toasts, notify, dismiss } = useNotify()
   const seenNotifications = useRef(new Set())
   const navItems = allowedNavigation(session)
@@ -183,6 +184,12 @@ function App() {
   const navigate = (label) => {
     setActive(label)
     setMobileMenuOpen(false)
+  }
+  const toggleSidebar = () => {
+    setSidebarCollapsed((value) => {
+      localStorage.setItem('warehouse_sidebar_collapsed', value ? '0' : '1')
+      return !value
+    })
   }
 
   useEffect(() => {
@@ -322,10 +329,16 @@ function App() {
 
   if (!session) return <Login onSuccess={setSession} />
   return (
-    <main className="app-shell">
+    <main className={sidebarCollapsed ? 'app-shell sidebar-collapsed' : 'app-shell'}>
       <ToastStack toasts={toasts} dismiss={dismiss} />
-      <aside className="sidebar">
-        <div className="brand"><span className="brand-mark"><Warehouse size={22} weight="fill" /></span><span>smart.<b>ombor</b></span></div>
+      <aside className={sidebarCollapsed ? 'sidebar is-collapsed' : 'sidebar'}>
+        <div className="brand">
+          <span className="brand-mark"><Warehouse size={22} weight="fill" /></span>
+          <span>smart.<b>ombor</b></span>
+          <button className="sidebar-toggle" type="button" onClick={toggleSidebar} aria-label={sidebarCollapsed ? 'Sidebar ochish' : 'Sidebar yopish'}>
+            {sidebarCollapsed ? <CaretRight size={17} /> : <CaretLeft size={17} />}
+          </button>
+        </div>
         <div className="workspace">
           <span>ISH MAYDONI</span>
           <b className="workspace-name">{workspace}</b>

@@ -195,6 +195,23 @@ Bu ishlar orqali loyiha oldingi oddiy funksionallikdan chiqib, buyurtma, shartno
 ### Tekshiruv natijalari
 - `npm run build` → muvaffaqiyatli.
 
+## 15. Sidebar ochilib-yopilishi va chiqish tugmasi
+
+### Qaysi fayllar?
+- [frontend/src/App.jsx](frontend/src/App.jsx)
+- [frontend/src/styles.css](frontend/src/styles.css)
+- [completed_tasks.md](completed_tasks.md)
+
+### Nima qilindi?
+- Desktop sidebar uchun ochish/yopish tugmasi qo‘shildi.
+- Sidebar holati `localStorage` da saqlanadi.
+- Sidebar yopilganda faqat ikonlar qoladi.
+- Sidebar ichidagi menyu scroll bo‘ladigan qilindi.
+- `Chiqish` tugmasi pastda kesilib qolmasligi uchun sidebar layout tuzatildi.
+
+### Tekshiruv natijalari
+- `npm run build` → muvaffaqiyatli.
+
 ## 14. Global tunnel/loading optimizatsiyasi
 
 ### Qaysi fayllar?
