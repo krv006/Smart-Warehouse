@@ -171,8 +171,11 @@ function FxRatePanel({ session, notify, compact = false, header = false, onSourc
   }
 
   const saveManual = async (event) => {
-    event.preventDefault()
+    event?.preventDefault?.()
     if (!canManage || !manualDraft) return
+    const parsed = Number(manualDraft)
+    if (!Number.isFinite(parsed) || parsed <= 0) return
+    if (manualRate != null && Number(manualRate) === parsed) return
     setSaving(true)
     try {
       await api.create('/cash/exchange-rates/', {
@@ -195,6 +198,13 @@ function FxRatePanel({ session, notify, compact = false, header = false, onSourc
     }
   }
 
+  const handleManualKeyDown = (event) => {
+    if (event.key !== 'Enter') return
+    event.preventDefault()
+    saveManual()
+    event.currentTarget.blur()
+  }
+
   if (header) {
     return (
       <div className="fx-card fx-card--header">
@@ -209,9 +219,51 @@ function FxRatePanel({ session, notify, compact = false, header = false, onSourc
     )
   }
 
+  if (compact) {
+    return (
+      <div className="fx-card fx-card--dual fx-card--embedded fx-card--compact">
+        <span className="fx-card-title">USD kurs (hisob-kitob)</span>
+        <div className="fx-source-tabs" role="tablist" aria-label="USD kurs manbasi">
+          <button type="button" role="tab" aria-selected={activeSource === 'infinbank'} disabled={sourceSaving || !canManage} className={activeSource === 'infinbank' ? 'fx-source-tab is-active' : 'fx-source-tab'} onClick={() => setSource('infinbank')}>
+            Infinbank{infinRate ? ` - ${money(infinRate)}` : ''}
+          </button>
+          <button type="button" role="tab" aria-selected={activeSource === 'manual'} disabled={sourceSaving || !canManage} className={activeSource === 'manual' ? 'fx-source-tab is-active' : 'fx-source-tab'} onClick={() => setSource('manual')}>
+            Qo‘lda
+          </button>
+        </div>
+        {activeSource === 'infinbank' && canManage && (
+          <div className="fx-compact-toolbar">
+            <button type="button" className="fx-refresh" onClick={() => load(true).catch((err) => notify(err.message))} aria-label="Infinbank kursini yangilash" title="Infinbankdan yangilash">
+              ↻
+            </button>
+          </div>
+        )}
+        {activeSource === 'manual' && (
+          canManage ? (
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              className="fx-manual-input"
+              value={manualDraft}
+              placeholder="Kurs kiriting"
+              onChange={(event) => setManualDraft(event.target.value)}
+              onBlur={() => saveManual()}
+              onKeyDown={handleManualKeyDown}
+              disabled={saving}
+              aria-label="Qo‘lda USD kursi"
+            />
+          ) : (
+            <strong className="fx-rate-readonly fx-rate-readonly--compact">{manualRate ? money(manualRate) : '—'}</strong>
+          )
+        )}
+      </div>
+    )
+  }
+
   return (
-    <div className={compact ? 'fx-card fx-card--dual fx-card--embedded' : 'fx-card fx-card--dual'}>
-      <span className="fx-card-title">{compact ? 'USD kurs (hisob-kitob)' : 'USD MB kurs'}</span>
+    <div className="fx-card fx-card--dual">
+      <span className="fx-card-title">USD MB kurs</span>
       <div className="fx-source-tabs" role="tablist" aria-label="USD kurs manbasi">
         <button type="button" role="tab" aria-selected={activeSource === 'infinbank'} disabled={sourceSaving || !canManage} className={activeSource === 'infinbank' ? 'fx-source-tab is-active' : 'fx-source-tab'} onClick={() => setSource('infinbank')}>
           Infinbank{infinRate ? ` - ${money(infinRate)}` : ''}

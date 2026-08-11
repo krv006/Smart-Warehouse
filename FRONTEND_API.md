@@ -368,9 +368,9 @@ Forma editorlari mahsulotlarni **mustaqil** yuklaydi; mijozlar faqat `clients_vi
 | Prop | Joylashuv | Ko‘rinish | Ruxsat |
 |---|---|---|---|
 | `header` | Topbar (bosh sahifa) | Faqat Infinbank kursi (read-only) + ixtiyoriy ↻ | ↻ — `users_manage` |
-| `compact` | Import / Xarajat editorlari | To‘liq panel: Infinbank \| Qo‘lda tablar, qo‘lda input, Saqlash | Tab almashtirish, qo‘lda saqlash, ↻ — `users_manage` |
+| `compact` | Import / Xarajat editorlari | **Default: Infinbank.** Tablar: Infinbank (kurs tab yorlig‘ida) \| Qo‘lda. Infinbank — faqat ixtiyoriy ↻; Qo‘lda — bitta input (`Kurs kiriting`), blur/Enter da saqlash; alohida Saqlash tugmasi va «Hisobda: …» yo‘q | Tab almashtirish, qo‘lda saqlash, ↻ — `users_manage` |
 
-`users_manage` bo‘lmagan foydalanuvchi tablarni ko‘radi, lekin `disabled` — faqat faol kurs ko‘rsatiladi.
+`users_manage` bo‘lmagan foydalanuvchi tablarni ko‘radi, lekin `disabled` — faqat faol kurs (Infinbank yoki saqlangan qo‘lda) ko‘rsatiladi.
 
 Backend: `PATCH /cash/exchange-rates/settings/` va `POST /cash/exchange-rates/` (qo‘lda kurs) — **Management** (`IsManagement()`).
 
@@ -944,12 +944,12 @@ Ikki rejim — **`header`** va **`compact`**:
 | Rejim | Prop | UI |
 |---|---|---|
 | Topbar (bosh sahifa) | `header` | Faqat Infinbank kursi (read-only). Tab yo‘q, Qo‘lda input yo‘q, Saqlash yo‘q. `users_manage` bo‘lsa ↻ (Infinbank yangilash). |
-| Import / Xarajat editor | `compact` | To‘liq panel: Infinbank \| Qo‘lda tablar, qo‘lda kiritish, Saqlash tugmasi. |
+| Import / Xarajat editor | `compact` | **Default: Infinbank.** Tablar: Infinbank (kurs tab yorlig‘ida) \| Qo‘lda. Infinbank — ixtiyoriy ↻ (`users_manage`). Qo‘lda — bitta input (`Kurs kiriting`), blur yoki Enter da avto-saqlash; alohida Saqlash va «Hisobda: …» yo‘q. |
 
 **Ability gating (`users_manage`):**
 
 - Tab almashtirish (`preferred_rate_source`) — faqat `users_manage`
-- Qo‘lda kurs saqlash (`POST /cash/exchange-rates/`) — faqat `users_manage`
+- Qo‘lda kurs saqlash (`POST /cash/exchange-rates/`) — faqat `users_manage`; compact rejimda blur yoki Enter
 - Infinbank ↻ (`?refresh=true`) — faqat `users_manage`
 
 `users_manage` bo‘lmagan foydalanuvchi faqat joriy kursni ko‘radi; tablar `disabled`.
@@ -2028,7 +2028,7 @@ notifications: 30s
 - Global qidiruv Ctrl+K; kamida 2 belgi.
 - Mijoz kartasi URL tablari `CLIENT_TABS` bilan mos bo‘lsin.
 - USD kurs: `preferred_rate_source` va `latest` javobidagi `infinbank`/`manual` obyektlari bilan ishlansin.
-- `FxRatePanel`: topbar — `header` (read-only Infinbank); editorlar — `compact` (to‘liq panel). FX boshqaruv — `users_manage`.
+- `FxRatePanel`: topbar — `header` (read-only Infinbank); editorlar — `compact` (tablar + ixtiyoriy ↻ / qo‘lda input). FX boshqaruv — `users_manage`.
 - Import grid status (inline + bulk) — `order_status_manage`, `procurement_manage` emas.
 - `OrderEditor`, `SaleEditor`, `EInvoicePage`: `api.products()` doim; `api.clients()` faqat `clients_view`.
 - `DataTable` Amallar ustuni: `.row-actions` flex wrapper; grid da `flex-wrap: nowrap`, tugmalar 36px balandlik.
