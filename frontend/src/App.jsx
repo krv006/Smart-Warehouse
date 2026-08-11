@@ -157,18 +157,113 @@ function formatPeriodRange(period) {
   return `${period.date_from || '…'} — ${period.date_to || '…'}`
 }
 
-const PERIOD_PRESETS = [
-  { id: 'today', label: 'Bugun', getRange: () => ({ date_from: todayValue(), date_to: todayValue() }) },
-  { id: 'month', label: 'Bu oy', getRange: () => ({ date_from: monthStartValue(), date_to: todayValue() }) },
-  { id: 'prev_month', label: 'O‘tgan oy', getRange: prevMonthRangeValue },
-  { id: 'year', label: 'Bu yil', getRange: () => ({ date_from: yearStartValue(), date_to: todayValue() }) },
-  { id: 'all', label: 'Hammasi', getRange: () => ({ date_from: '', date_to: '' }) },
-]
+const CALENDAR_WEEKDAYS = ['Du', 'Se', 'Cho', 'Pa', 'Ju', 'Sha', 'Ya']
 
+function parseIsoDate(value) {
+  if (!value) return null
+  const [y, m, d] = value.split('-').map(Number)
+  if (!y || !m || !d) return null
+  return new Date(y, m - 1, d)
+}
+
+function toIsoDate(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+function buildMonthGrid(viewYear, viewMonth) {
+  const startOffset = (new Date(viewYear, viewMonth, 1).getDay() + 6) % 7
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate()
+  const cells = []
+  for (let i = 0; i < startOffset; i += 1) {
+    const d = new Date(viewYear, viewMonth, i - startOffset + 1)
+    cells.push({ date: d, inMonth: false, iso: toIsoDate(d) })
+  }
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const d = new Date(viewYear, viewMonth, day)
+    cells.push({ date: d, inMonth: true, iso: toIsoDate(d) })
+  }
+  while (cells.length % 7 !== 0) {
+    const d = new Date(cells[cells.length - 1].date)
+    d.setDate(d.getDate() + 1)
+    cells.push({ date: d, inMonth: false, iso: toIsoDate(d) })
+  }
+  return cells
+}
+
+function FilterCalendar({ label, value, onChange, min, max }) {
+  const selected = parseIsoDate(value)
+  const [viewDate, setViewDate] = useState(() => selected || new Date())
+
+  useEffect(() => {
+    if (value) {
+      const parsed = parseIsoDate(value)
+      if (parsed) setViewDate(parsed)
+    }
+  }, [value])
+
+  const viewYear = viewDate.getFullYear()
+  const viewMonth = viewDate.getMonth()
+  const monthLabel = new Intl.DateTimeFormat('uz-UZ', { month: 'long', year: 'numeric' }).format(viewDate)
+  const cells = useMemo(() => buildMonthGrid(viewYear, viewMonth), [viewYear, viewMonth])
+  const todayIso = todayValue()
+
+  const isDisabled = (iso) => (min && iso < min) || (max && iso > max)
+
+  return (
+    <div className="filter-calendar" role="group" aria-label={label}>
+      <div className="filter-calendar-header">
+        <span className="filter-calendar-label">{label}</span>
+        {value && <span className="filter-calendar-value">{value}</span>}
+      </div>
+      <div className="filter-calendar-widget">
+        <div className="filter-calendar-nav">
+          <button type="button" className="filter-calendar-nav-btn" onClick={() => setViewDate(new Date(viewYear, viewMonth - 1, 1))} aria-label="Oldingi oy">
+            <CaretLeft size={16} />
+          </button>
+          <span className="filter-calendar-month">{monthLabel}</span>
+          <button type="button" className="filter-calendar-nav-btn" onClick={() => setViewDate(new Date(viewYear, viewMonth + 1, 1))} aria-label="Keyingi oy">
+            <CaretRight size={16} />
+          </button>
+        </div>
+        <div className="filter-calendar-weekdays" aria-hidden="true">
+          {CALENDAR_WEEKDAYS.map((day) => (
+            <span key={day} className="filter-calendar-weekday">{day}</span>
+          ))}
+        </div>
+        <div className="filter-calendar-days" role="grid">
+          {cells.map((cell) => {
+            const isSelected = value === cell.iso
+            const isToday = cell.iso === todayIso
+            const disabled = isDisabled(cell.iso)
+            return (
+              <button
+                key={`${cell.iso}-${label}`}
+                type="button"
+                role="gridcell"
+                disabled={disabled}
+                className={[
+                  'filter-calendar-day',
+                  !cell.inMonth && 'is-outside',
+                  isSelected && 'is-selected',
+                  isToday && 'is-today',
+                ].filter(Boolean).join(' ')}
+                onClick={() => onChange(cell.iso)}
+                aria-label={cell.iso}
+                aria-selected={isSelected}
+              >
+                {cell.date.getDate()}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
 
 function periodMetricNote(base, period) {
-  if (period.preset === 'today') return `${base} (bugun)`
-  if (period.preset === 'all') return `${base} (barcha davr)`
+  if (period.date_from === todayValue() && period.date_to === todayValue()) return `${base} (bugun)`
+  if (!period.date_from && !period.date_to) return `${base} (barcha davr)`
   return `${base} (${formatPeriodRange(period)})`
 }
 
@@ -186,7 +281,7 @@ function buildDashboardFilterParams(filters) {
 }
 
 const DEFAULT_DASHBOARD_FILTERS = () => ({
-  preset: 'today',
+  preset: 'custom',
   date_from: todayValue(),
   date_to: todayValue(),
   currency: '',
@@ -199,8 +294,8 @@ const DEFAULT_DASHBOARD_FILTERS = () => ({
 
 const CURRENCY_FILTERS = [
   { id: '', label: 'Hammasi' },
-  { id: 'UZS', label: 'So‘m (UZS)' },
-  { id: 'USD', label: 'Dollar (USD)' },
+  { id: 'UZS', label: 'UZS' },
+  { id: 'USD', label: 'USD' },
 ]
 
 const PAYMENT_STATUS_FILTERS = [
@@ -819,19 +914,16 @@ function filterContextNote(filters, lookup = {}) {
 }
 
 function isDefaultDashboardPeriod(filters) {
-  return filters.preset === 'today'
-    && filters.date_from === todayValue()
-    && filters.date_to === todayValue()
+  return filters.date_from === todayValue() && filters.date_to === todayValue()
 }
 
 function buildDashboardFilterChips(filters, lookup = {}) {
   const chips = []
   if (!isDefaultDashboardPeriod(filters)) {
-    const preset = PERIOD_PRESETS.find((item) => item.id === filters.preset)
     chips.push({
       key: 'period',
-      label: filters.preset === 'custom' ? formatPeriodRange(filters) : (preset?.label || formatPeriodRange(filters)),
-      patch: { preset: 'today', date_from: todayValue(), date_to: todayValue() },
+      label: formatPeriodRange(filters),
+      patch: { preset: 'custom', date_from: todayValue(), date_to: todayValue() },
     })
   }
   if (filters.currency) {
@@ -920,8 +1012,7 @@ function FilterSearchSelect({
 
 function DashboardFiltersMenu({ filters, onChange }) {
   const [open, setOpen] = useState(false)
-  const [showCustomDates, setShowCustomDates] = useState(filters.preset === 'custom')
-  const [customFrom, setCustomFrom] = useState(filters.date_from || monthStartValue())
+  const [customFrom, setCustomFrom] = useState(filters.date_from || todayValue())
   const [customTo, setCustomTo] = useState(filters.date_to || todayValue())
   const [supplierDraft, setSupplierDraft] = useState(filters.supplier || '')
   const [options, setOptions] = useState({ categories: [], clients: [], products: [], loading: false })
@@ -955,11 +1046,10 @@ function DashboardFiltersMenu({ filters, onChange }) {
   useEffect(() => { loadOptions() }, [loadOptions])
 
   useEffect(() => {
-    setCustomFrom(filters.date_from || monthStartValue())
+    setCustomFrom(filters.date_from || todayValue())
     setCustomTo(filters.date_to || todayValue())
     setSupplierDraft(filters.supplier || '')
-    if (filters.preset === 'custom') setShowCustomDates(true)
-  }, [filters.date_from, filters.date_to, filters.preset, filters.supplier])
+  }, [filters.date_from, filters.date_to, filters.supplier])
 
   useEffect(() => {
     if (!open) return undefined
@@ -1003,18 +1093,23 @@ function DashboardFiltersMenu({ filters, onChange }) {
     return () => window.clearTimeout(timer)
   }, [open])
 
-  const applyPreset = (preset) => {
-    const range = preset.getRange()
-    onChange({ preset: preset.id, ...range })
+  const applyDateRange = useCallback((from, to) => {
+    let date_from = from
+    let date_to = to
+    if (date_from && date_to && date_from > date_to) {
+      [date_from, date_to] = [date_to, date_from]
+    }
+    onChange({ preset: 'custom', date_from, date_to })
+  }, [onChange])
+
+  const handleFromChange = (date_from) => {
+    setCustomFrom(date_from)
+    applyDateRange(date_from, customTo)
   }
 
-  const applyCustom = (event) => {
-    event.preventDefault()
-    if (customFrom && customTo && customFrom > customTo) {
-      onChange({ preset: 'custom', date_from: customTo, date_to: customFrom })
-    } else {
-      onChange({ preset: 'custom', date_from: customFrom, date_to: customTo })
-    }
+  const handleToChange = (date_to) => {
+    setCustomTo(date_to)
+    applyDateRange(customFrom, date_to)
   }
 
   const applyCurrency = (currency) => onChange({ currency })
@@ -1033,22 +1128,21 @@ function DashboardFiltersMenu({ filters, onChange }) {
 
   const resetFilters = () => {
     onChange(DEFAULT_DASHBOARD_FILTERS())
-    setShowCustomDates(false)
     closeMenu()
   }
 
   const removeChip = (patch) => {
     onChange(patch)
     if (patch.supplier === '') setSupplierDraft('')
-    if (patch.preset === 'today') setShowCustomDates(false)
+    if (patch.date_from === todayValue() && patch.date_to === todayValue()) {
+      setCustomFrom(todayValue())
+      setCustomTo(todayValue())
+    }
   }
 
   const chips = buildDashboardFilterChips(filters, options)
   const extraChipCount = chips.filter((chip) => chip.key !== 'period').length
-  const activePreset = PERIOD_PRESETS.find((item) => item.id === filters.preset)
-  const triggerPeriodLabel = filters.preset === 'custom'
-    ? formatPeriodRange(filters)
-    : (activePreset?.label || formatPeriodRange(filters))
+  const triggerPeriodLabel = formatPeriodRange(filters)
 
   return (
     <div className="period-filter-wrap">
@@ -1097,52 +1191,25 @@ function DashboardFiltersMenu({ filters, onChange }) {
             </div>
 
             <div className="period-filter-body">
-              <div className="filter-groups">
-                <section className="filter-group" aria-labelledby="filter-group-time">
-                  <h3 id="filter-group-time" className="filter-group-title">Vaqt va valyuta</h3>
+              <div className="filter-panel">
+                <div className="filter-panel-dates" aria-labelledby="filter-davr">
+                  <span className="visually-hidden" id="filter-davr">Davr</span>
+                  <FilterCalendar
+                    label="Dan"
+                    value={customFrom}
+                    max={customTo || undefined}
+                    onChange={handleFromChange}
+                  />
+                  <FilterCalendar
+                    label="Gacha"
+                    value={customTo}
+                    min={customFrom || undefined}
+                    onChange={handleToChange}
+                  />
+                </div>
 
-                  <div className="filter-subsection">
-                    <span className="filter-section-title" id="filter-davr">Davr</span>
-                    <div className="period-tabs period-tabs--compact" role="tablist" aria-labelledby="filter-davr">
-                      {PERIOD_PRESETS.map((preset) => (
-                        <button
-                          key={preset.id}
-                          type="button"
-                          role="tab"
-                          aria-selected={filters.preset === preset.id}
-                          className={filters.preset === preset.id ? 'period-tab is-active' : 'period-tab'}
-                          onClick={() => applyPreset(preset)}
-                        >
-                          {preset.label}
-                        </button>
-                      ))}
-                    </div>
-                    <button
-                      type="button"
-                      className="filter-inline-toggle"
-                      aria-expanded={showCustomDates}
-                      aria-controls="filter-custom-dates"
-                      onClick={() => setShowCustomDates((value) => !value)}
-                    >
-                      Aniq sana oralig‘i
-                      <CaretDown size={14} className={showCustomDates ? 'is-open' : ''} />
-                    </button>
-                    {showCustomDates && (
-                      <form id="filter-custom-dates" className="period-custom period-custom--compact" onSubmit={applyCustom}>
-                        <label>
-                          Dan
-                          <input type="date" value={customFrom} onChange={(event) => setCustomFrom(event.target.value)} />
-                        </label>
-                        <label>
-                          Gacha
-                          <input type="date" value={customTo} onChange={(event) => setCustomTo(event.target.value)} />
-                        </label>
-                        <button type="submit" className="primary-button">Ko‘rish</button>
-                      </form>
-                    )}
-                  </div>
-
-                  <div className="filter-subsection">
+                <div className="filter-panel-meta">
+                  <div className="filter-panel-meta-block">
                     <span className="filter-section-title" id="filter-currency">Valyuta</span>
                     <div className="period-tabs period-tabs--compact" role="tablist" aria-labelledby="filter-currency">
                       {CURRENCY_FILTERS.map((item) => (
@@ -1159,63 +1226,7 @@ function DashboardFiltersMenu({ filters, onChange }) {
                       ))}
                     </div>
                   </div>
-                </section>
-
-                <section className="filter-group" aria-labelledby="filter-group-catalog">
-                  <h3 id="filter-group-catalog" className="filter-group-title">Mahsulot va mijoz</h3>
-                  <div className="filter-group-fields">
-                    <FilterSearchSelect
-                      id="filter-category"
-                      label="Kategoriya"
-                      value={filters.category}
-                      loading={options.loading}
-                      options={options.categories}
-                      getLabel={(item) => item.name}
-                      onChange={(category) => onChange({ category })}
-                    />
-                    <FilterSearchSelect
-                      id="filter-client"
-                      label="Mijoz"
-                      value={filters.client}
-                      loading={options.loading}
-                      options={options.clients}
-                      getLabel={(item) => item.full_name || item.company_name || `#${item.id}`}
-                      onChange={(client) => onChange({ client })}
-                    />
-                    <FilterSearchSelect
-                      id="filter-product"
-                      label="Mahsulot"
-                      value={filters.product}
-                      loading={options.loading}
-                      options={options.products}
-                      getLabel={(item) => `${item.name}${item.serial_number ? ` (${item.serial_number})` : ''}`}
-                      onChange={(product) => onChange({ product })}
-                    />
-                    <div className="filter-field">
-                      <span className="filter-field-label" id="filter-supplier">Yetkazuvchi</span>
-                      <form className="filter-supplier-form" onSubmit={applySupplier}>
-                        <input
-                          type="text"
-                          className="filter-text-input"
-                          placeholder="Yetkazuvchi nomi"
-                          value={supplierDraft}
-                          aria-labelledby="filter-supplier"
-                          onChange={(event) => setSupplierDraft(event.target.value)}
-                        />
-                        <button type="submit" className="secondary-button">Qo‘llash</button>
-                      </form>
-                      {filters.supplier?.trim() && (
-                        <button type="button" className="text-button filter-clear-inline" onClick={clearSupplierDraft}>
-                          Tozalash
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </section>
-
-                <section className="filter-group filter-group--compact" aria-labelledby="filter-group-payment">
-                  <h3 id="filter-group-payment" className="filter-group-title">To‘lov</h3>
-                  <div className="filter-subsection">
+                  <div className="filter-panel-meta-block">
                     <span className="filter-section-title" id="filter-payment">To‘lov holati</span>
                     <div className="period-tabs period-tabs--compact" role="tablist" aria-labelledby="filter-payment">
                       {PAYMENT_STATUS_FILTERS.map((item) => (
@@ -1232,7 +1243,56 @@ function DashboardFiltersMenu({ filters, onChange }) {
                       ))}
                     </div>
                   </div>
-                </section>
+                </div>
+
+                <div className="filter-panel-fields">
+                  <FilterSearchSelect
+                    id="filter-category"
+                    label="Kategoriya"
+                    value={filters.category}
+                    loading={options.loading}
+                    options={options.categories}
+                    getLabel={(item) => item.name}
+                    onChange={(category) => onChange({ category })}
+                  />
+                  <FilterSearchSelect
+                    id="filter-client"
+                    label="Mijoz"
+                    value={filters.client}
+                    loading={options.loading}
+                    options={options.clients}
+                    getLabel={(item) => item.full_name || item.company_name || `#${item.id}`}
+                    onChange={(client) => onChange({ client })}
+                  />
+                  <FilterSearchSelect
+                    id="filter-product"
+                    label="Mahsulot"
+                    value={filters.product}
+                    loading={options.loading}
+                    options={options.products}
+                    getLabel={(item) => `${item.name}${item.serial_number ? ` (${item.serial_number})` : ''}`}
+                    onChange={(product) => onChange({ product })}
+                  />
+                  <div className="filter-field">
+                    <span className="filter-field-label" id="filter-supplier">Yetkazuvchi</span>
+                    <form className="filter-supplier-form" onSubmit={applySupplier}>
+                      <input
+                        type="text"
+                        className="filter-text-input"
+                        placeholder="Yetkazuvchi nomi"
+                        value={supplierDraft}
+                        aria-labelledby="filter-supplier"
+                        onChange={(event) => setSupplierDraft(event.target.value)}
+                      />
+                      <button type="submit" className="secondary-button">Qo‘llash</button>
+                    </form>
+                    {filters.supplier?.trim() && (
+                      <button type="button" className="text-button filter-clear-inline" onClick={clearSupplierDraft}>
+                        Tozalash
+                      </button>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
 
