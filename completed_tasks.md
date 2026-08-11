@@ -195,6 +195,20 @@ Bu ishlar orqali loyiha oldingi oddiy funksionallikdan chiqib, buyurtma, shartno
 ### Tekshiruv natijalari
 - `npm run build` → muvaffaqiyatli.
 
+## 16. FRONTEND_API.md backend kontrakt bo‘yicha yangilandi
+
+### Qaysi fayllar?
+- [FRONTEND_API.md](FRONTEND_API.md)
+- [completed_tasks.md](completed_tasks.md)
+
+### Nima qilindi?
+- Frontend uchun API kontrakt to‘liq qayta yozildi.
+- Auth, refresh token, `abilities`, permission-based UI qoidalari hujjatlashtirildi.
+- Buyurtma, zakaz, shartnoma reestri, ombor, mijoz, sotuv, kassa, xarajat, bildirishnoma, hisobot va Excel export endpointlari yozildi.
+- Valyuta kursi Infinbankdan olinishi va qo‘lda kurs saqlash kontrakti yozildi.
+- Request/response misollari, majburiy maydonlar, status oqimlari, edge-case va frontend checklist qo‘shildi.
+- Didox/Soliq invoice moduli backendda hali yo‘qligi alohida ko‘rsatildi.
+
 ## 15. Sidebar ochilib-yopilishi va chiqish tugmasi
 
 ### Qaysi fayllar?
