@@ -1,6 +1,7 @@
 const API_ROOT = import.meta.env.VITE_API_BASE_URL || '/api/v1'
 const ACCESS_KEY = 'warehouse_access'
 const REFRESH_KEY = 'warehouse_refresh'
+const REQUEST_TIMEOUT_MS = 8000
 
 let refreshPromise = null
 let authFailureHandler = null
@@ -101,11 +102,22 @@ export async function refreshAccessToken() {
 
 async function fetchRequest(path, options, token) {
   const headers = new Headers(options.headers || {})
+  const controller = new AbortController()
+  const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
   if (token) headers.set('Authorization', `Bearer ${token}`)
   if (options.body && !(options.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
   }
-  return fetch(`${API_ROOT}${path}`, { ...options, headers })
+  try {
+    return await fetch(`${API_ROOT}${path}`, { ...options, headers, signal: controller.signal })
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new ApiError('Backend javobi kechikdi. Django server ishlayotganini tekshiring.', 504)
+    }
+    throw new ApiError('Backendga ulanib bo‘lmadi. Django server 127.0.0.1:8000 da ishlashi kerak.', 503)
+  } finally {
+    window.clearTimeout(timeout)
+  }
 }
 
 export async function download(path, filename = 'export.xlsx') {
@@ -157,24 +169,24 @@ export const api = {
   orders: (params = {}) => request(`/orders/${toQuery({ page_size: 20, ...params })}`),
   ordersBulk: (payload) => request('/orders/bulk/', { method: 'POST', body: JSON.stringify(payload) }),
   order: (id) => request(`/orders/${id}/`),
-  zakaz: (params = {}) => request(`/orders/zakaz/${toQuery({ page_size: 50, ...params })}`),
+  zakaz: (params = {}) => request(`/orders/zakaz/${toQuery({ page_size: 30, ...params })}`),
   zakazBulk: (payload) => request('/orders/zakaz/bulk/', { method: 'POST', body: JSON.stringify(payload) }),
-  contracts: (params = {}) => request(`/orders/contracts/${toQuery({ page_size: 50, ...params })}`),
+  contracts: (params = {}) => request(`/orders/contracts/${toQuery({ page_size: 30, ...params })}`),
   productContracts: (id) => request(`/warehouse/products/${id}/contracts/`),
-  categories: (params = {}) => request(`/warehouse/categories/${toQuery({ page_size: 100, ...params })}`),
-  stocks: (params = {}) => request(`/warehouse/stocks/${toQuery({ page_size: 100, ...params })}`),
-  products: (params = {}) => request(`/warehouse/products/${toQuery({ page_size: 50, ...params })}`),
-  clients: (params = {}) => request(`/clients/${toQuery({ page_size: 50, ...params })}`),
-  users: (params = {}) => request(`/auth/users/${toQuery({ page_size: 50, ...params })}`),
+  categories: (params = {}) => request(`/warehouse/categories/${toQuery({ page_size: 30, ...params })}`),
+  stocks: (params = {}) => request(`/warehouse/stocks/${toQuery({ page_size: 30, ...params })}`),
+  products: (params = {}) => request(`/warehouse/products/${toQuery({ page_size: 30, ...params })}`),
+  clients: (params = {}) => request(`/clients/${toQuery({ page_size: 30, ...params })}`),
+  users: (params = {}) => request(`/auth/users/${toQuery({ page_size: 20, ...params })}`),
   registerUser: (payload) => request('/auth/register/', { method: 'POST', body: JSON.stringify(payload) }),
-  notifications: (params = {}) => request(`/notifications/${toQuery({ page_size: 50, ...params })}`),
+  notifications: (params = {}) => request(`/notifications/${toQuery({ page_size: 30, ...params })}`),
   notificationsMarkRead: (id) => request(`/notifications/${id}/mark_read/`, { method: 'POST' }),
   notificationsMarkAllRead: () => request('/notifications/mark_all_read/', { method: 'POST' }),
-  payments: (params = {}) => request(`/cash/payments/${toQuery({ page_size: 50, ...params })}`),
+  payments: (params = {}) => request(`/cash/payments/${toQuery({ page_size: 30, ...params })}`),
   paymentsSummary: () => request('/cash/payments/summary/'),
-  sales: (params = {}) => request(`/sales/${toQuery({ page_size: 50, ...params })}`),
+  sales: (params = {}) => request(`/sales/${toQuery({ page_size: 30, ...params })}`),
   salesBulk: (payload) => request('/sales/bulk/', { method: 'POST', body: JSON.stringify(payload) }),
-  expenses: (params = {}) => request(`/expenses/expenses/${toQuery({ page_size: 50, ...params })}`),
+  expenses: (params = {}) => request(`/expenses/expenses/${toQuery({ page_size: 30, ...params })}`),
   expensesSummary: () => request('/expenses/summary/'),
   expenseTypes: () => request('/expenses/expense-types/?page_size=50'),
   expenseSubtypes: () => request('/expenses/expense-subtypes/?page_size=100'),

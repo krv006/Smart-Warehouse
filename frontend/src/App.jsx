@@ -25,7 +25,7 @@ const navigation = [
 
 const money = (value) => new Intl.NumberFormat('uz-UZ', { maximumFractionDigits: 0 }).format(Number(value || 0))
 const list = (data) => Array.isArray(data) ? data : data?.results || []
-const AUTO_REFRESH_MS = 4000
+const AUTO_REFRESH_MS = 30000
 const workspace = 'Asosiy ombor'
 
 function useClickOutside(ref, onClose, active) {
@@ -246,7 +246,7 @@ function App() {
       }
     }
     syncNotifications()
-    const timer = setInterval(syncNotifications, 12000)
+    const timer = setInterval(syncNotifications, 30000)
     return () => { cancelled = true; clearInterval(timer) }
   }, [session])
 

@@ -195,6 +195,25 @@ Bu ishlar orqali loyiha oldingi oddiy funksionallikdan chiqib, buyurtma, shartno
 ### Tekshiruv natijalari
 - `npm run build` → muvaffaqiyatli.
 
+## 14. Global tunnel/loading optimizatsiyasi
+
+### Qaysi fayllar?
+- [frontend/src/api.js](frontend/src/api.js)
+- [frontend/src/App.jsx](frontend/src/App.jsx)
+- [frontend/vite.config.js](frontend/vite.config.js)
+- [completed_tasks.md](completed_tasks.md)
+
+### Nima qilindi?
+- API so‘rovlariga `8s` timeout qo‘shildi; backend o‘chiq bo‘lsa sahifa uzoq loadingda qolmaydi.
+- Backend ulanmasa foydalanuvchiga aniq xabar chiqadigan qilindi.
+- Auto-refresh `4s` dan `30s` ga o‘zgartirildi.
+- Notification polling `12s` dan `30s` ga o‘zgartirildi.
+- Ro‘yxat endpointlarida `page_size` kamaytirildi: userlar `20`, asosiy ro‘yxatlar `30`.
+- Vite proxy uchun `timeout` va `proxyTimeout` `8000ms` qilindi.
+
+### Tekshiruv natijalari
+- `npm run build` → muvaffaqiyatli.
+
 ## 13. Popup formalar va file input UI yaxshilandi
 
 ### Qaysi fayllar?
