@@ -6,7 +6,21 @@ from rest_framework.serializers import (ModelSerializer, Serializer,
                                         ValidationError, ReadOnlyField,
                                         DecimalField, CharField)
 
-from apps.cash.models import Payment, PaymentTransaction
+from apps.cash.models import ExchangeRate, Payment, PaymentTransaction
+
+
+class ExchangeRateSerializer(ModelSerializer):
+    mb_rate = DecimalField(max_digits=14, decimal_places=2, min_value=Decimal('0'))
+
+    class Meta:
+        model = ExchangeRate
+        fields = ('id', 'currency', 'mb_rate', 'buy_rate', 'sell_rate', 'rate_date', 'source', 'manual_override', 'note', 'created_at')
+        read_only_fields = ('id', 'created_at')
+
+    def validate(self, attrs):
+        if attrs.get('mb_rate') is not None and attrs['mb_rate'] < 0:
+            raise ValidationError({'mb_rate': 'Kurs manfiy bo‘lishi mumkin emas.'})
+        return attrs
 
 
 class PaymentTransactionSerializer(ModelSerializer):

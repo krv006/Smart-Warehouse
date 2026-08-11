@@ -1,0 +1,35 @@
+[project]
+name = "smart-warehouse"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Khazratbek", email = "xazratbek123@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "celery>=5.3",
+    "cryptography>=42.0",
+    "django>=5.2,<6.0",
+    "django-celery-beat>=2.6",
+    "django-cors-headers>=4.0",
+    "django-filter>=24.0",
+    "django-jazzmin>=3.0",
+    "django-mptt>=0.16",
+    "djangorestframework>=3.15",
+    "djangorestframework-simplejwt>=5.3",
+    "drf-spectacular>=0.27",
+    "faker>=25.0",
+    "openpyxl>=3.1",
+    "psycopg2-binary>=2.9",
+    "python-dotenv>=1.0",
+    "redis>=5.0",
+    "requests>=2.31",
+]
+
+[project.scripts]
+smart-warehouse = "smart_warehouse:main"
+
+[build-system]
+requires = ["uv_build>=0.12.3,<0.13.0"]
+build-backend = "uv_build"

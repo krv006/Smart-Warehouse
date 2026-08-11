@@ -5,8 +5,36 @@ from django.db import transaction
 from django.db.models import (CharField, ForeignKey, CASCADE, PROTECT, SET_NULL,
                               DecimalField, DateField, TextField,
                               PositiveIntegerField, BooleanField)
+from django.utils import timezone
 
 from apps.common.models import TimeStampedModel
+
+
+class ExchangeRate(TimeStampedModel):
+    USD = 'USD'
+    CURRENCY_CHOICES = ((USD, 'USD'),)
+
+    currency       = CharField(max_length=3, choices=CURRENCY_CHOICES, default=USD)
+    mb_rate        = DecimalField(max_digits=14, decimal_places=2, default=Decimal('0'))
+    buy_rate       = DecimalField(max_digits=14, decimal_places=2, default=Decimal('0'))
+    sell_rate      = DecimalField(max_digits=14, decimal_places=2, default=Decimal('0'))
+    rate_date      = DateField(default=timezone.localdate)
+    source         = CharField(max_length=50, default='infinbank')
+    manual_override = BooleanField(default=False)
+    note           = TextField(blank=True, null=True)
+
+    class Meta:
+        db_table = 'cash_exchangerate'
+        ordering = ('-rate_date', '-created_at')
+        verbose_name = 'Valyuta kursi'
+        verbose_name_plural = 'Valyuta kurslari'
+
+    def __str__(self):
+        return f'{self.currency} {self.mb_rate} ({self.rate_date})'
+
+    @classmethod
+    def get_latest(cls, currency='USD'):
+        return cls.objects.filter(currency=currency).order_by('-rate_date', '-created_at').first()
 
 
 class Payment(TimeStampedModel):

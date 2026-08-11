@@ -1,7 +1,7 @@
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
-from rest_framework.decorators import (api_view, permission_classes,
-                                       throttle_classes)
+from rest_framework.decorators import (api_view, authentication_classes,
+                                       permission_classes, throttle_classes)
 from rest_framework.mixins import (DestroyModelMixin, ListModelMixin,
                                    RetrieveModelMixin, UpdateModelMixin)
 from rest_framework.permissions import AllowAny
@@ -11,7 +11,12 @@ from rest_framework.viewsets import GenericViewSet
 
 from apps.common.permissions import IsManagement
 from apps.users.models import User
-from apps.users.serializers import LoginSerializer, RegisterOperatorSerializer, UserSerializer
+from apps.users.serializers import (
+    LoginSerializer,
+    RegisterOperatorSerializer,
+    UserSerializer,
+    user_session_payload,
+)
 
 
 class LoginRateThrottle(AnonRateThrottle):
@@ -26,6 +31,7 @@ class LoginRateThrottle(AnonRateThrottle):
 @extend_schema(summary="Login — JWT token olish", tags=["Auth"],
                request=LoginSerializer, responses={200: LoginSerializer}, auth=[])
 @api_view(['POST'])
+@authentication_classes([])
 @permission_classes([AllowAny])
 @throttle_classes([LoginRateThrottle])
 def login(request):
@@ -48,6 +54,12 @@ def register_user(request):
     serializer.is_valid(raise_exception=True)
     serializer.save()
     return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+@extend_schema(summary="Joriy foydalanuvchi va UI ruxsatlari", tags=["Auth"])
+@api_view(['GET'])
+def me(request):
+    return Response(user_session_payload(request.user))
 
 
 @extend_schema(tags=["Users"])

@@ -2,12 +2,24 @@ from django.conf import settings
 from django.db import models, transaction
 from django.db.models import (
     CharField, ForeignKey, CASCADE, PROTECT, SET_NULL,
-    PositiveIntegerField, DecimalField, DateField, DateTimeField, TextField,
+    PositiveIntegerField, DecimalField, DateField, DateTimeField, TextField, FileField,
 )
 from django.db.models import F
 from django.utils import timezone
 
 from apps.common.models import TimeStampedModel
+
+
+def build_contract_number(client=None, *, contract_number=None, contract_date=None):
+    """Shartnoma raqamini avtomatik yaratadi: {tartib}/{DDMM}."""
+    if contract_number:
+        return contract_number.strip()
+    if client is None:
+        return ''
+    date_value = (contract_date or timezone.localdate())
+    date_part = date_value.strftime('%d%m')
+    order_count = Order.objects.filter(contract_date=date_value).count() + 1
+    return f'{order_count}/{date_part}'
 
 
 # ── Order (Mijoz buyurtmasi / bron — HUJJAT) ─────────────────────────────────
@@ -48,6 +60,8 @@ class Order(TimeStampedModel):
                                 help_text='Shartnoma (dogovor) raqami — majburiy')
     contract_date   = DateField(default=timezone.localdate,
                                 help_text='Shartnoma sanasi (Tashkent)')
+    contract_file   = FileField(upload_to='contracts/', null=True, blank=True,
+                                help_text='Shartnoma fayli (Word/PDF)')
     due_date        = DateField(null=True, blank=True,
                                 help_text='Yetkazish muddati (deadline)')
     status          = CharField(max_length=12, choices=STATUS_CHOICES, default=PENDING)
@@ -564,6 +578,11 @@ class Zakaz(TimeStampedModel):
         return (f'Zakaz #{self.pk} — {self.product.name} x{self.quantity} '
                 f'[{self.get_status_display()}]')
 
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        from apps.notifications.models import Notification
+        Notification.notify_delayed_import(self)
+
     @property
     def is_backorder(self):
         """Buyurtmadagi yetishmovchilikdan kelib chiqqan zakazmi?"""
@@ -591,6 +610,7 @@ class Zakaz(TimeStampedModel):
         3. Low-stock bildirishnomalarini tekshiradi.
         """
         from apps.warehouse.models import Stock
+        from apps.expenses.models import Expense, ExpenseType, ExpenseSubType
         from apps.notifications.models import Notification
 
         qty = self.received_qty if self.received_qty > 0 else self.quantity
@@ -603,6 +623,24 @@ class Zakaz(TimeStampedModel):
         )
         stock.quantity = F('quantity') + qty
         stock.save(update_fields=['quantity'])
+
+        if self.unit_price is not None and self.quantity:
+            expense_type, _ = ExpenseType.objects.get_or_create(
+                code=ExpenseType.IMPORT,
+                defaults={'name': 'Import rasxod'},
+            )
+            sub_type, _ = ExpenseSubType.objects.get_or_create(
+                expense_type=expense_type,
+                name='Import',
+            )
+            Expense.objects.create(
+                expense_type=expense_type,
+                sub_type=sub_type,
+                amount=self.unit_price * self.quantity,
+                currency=self.currency,
+                date=timezone.localdate(),
+                comment=f'Zakaz #{self.pk} qabul qilindi — import summasi kassadan chiqarildi.',
+            )
 
         # Taqsimotdan OLDINGI bron holati (keyin farqni aniqlash uchun)
         pending_items = OrderItem.objects.filter(
@@ -631,6 +669,8 @@ class Zakaz(TimeStampedModel):
                       f'(Zakaz #{self.pk}, faktura {self.faktura or "—"}) — '
                       f'{gained} dona avtomatik bron ajratildi.'),
             )
+
+        Notification.resolve_delayed_import_notifications(self)
 
         # Low-stock bildirishnomani yop (agar qoldiq etarli bo'lsa)
         self.product.refresh_from_db()

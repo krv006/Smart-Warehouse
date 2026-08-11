@@ -102,6 +102,35 @@ class Notification(TimeStampedModel):
         cls.objects.filter(product=product, is_read=False,
                            title="Qoldiq kam!").update(is_read=True)
 
+    @classmethod
+    def notify_delayed_import(cls, zakaz):
+        """Etkazuvchidan kelishi kutilgan import kechikkan bo'lsa barcha faol foydalanuvchilarga bildirishnoma."""
+        from django.contrib.auth import get_user_model
+        if not zakaz.expected_date or zakaz.status in (zakaz.RECEIVED, zakaz.CANCELLED):
+            return
+        if zakaz.expected_date >= zakaz.created_at.date():
+            return
+        User = get_user_model()
+        recipients = User.objects.filter(is_active=True)
+        title = "Import kechikdi!"
+        message = (
+            f'"{zakaz.product.name}" mahsuloti uchun import kelishi kutilgan sana '
+            f'{zakaz.expected_date} bo\'lib o\'tgan, lekin hali qabul qilinmagan. '
+            f'Qolgan miqdor: {zakaz.quantity - zakaz.received_qty} dona.'
+        )
+        for recipient in recipients:
+            exists = cls.objects.filter(
+                recipient=recipient, product=zakaz.product, is_read=False, title=title
+            ).exists()
+            if not exists:
+                cls.objects.create(recipient=recipient, product=zakaz.product,
+                                   title=title, message=message)
+
+    @classmethod
+    def resolve_delayed_import_notifications(cls, zakaz):
+        cls.objects.filter(product=zakaz.product, is_read=False,
+                           title="Import kechikdi!").update(is_read=True)
+
 
 class TelegramSettings(TimeStampedModel):
     """Singleton — faqat bitta yozuv bo'lishi kerak (pk=1)."""
