@@ -149,7 +149,7 @@ Timeout: **8 soniya**. Xato klassi: `ApiError(message, status)`.
 | `users(params)` | GET | `/auth/users/` | `page_size=20`, `search`, `role`, `is_active` |
 | `reports(params)` | GET ×4 | parallel (qarang pastda) | dashboard filter params |
 | `monthlyTrend(months, params)` | GET | `/reports/monthly-trend/` | `months` (default 6), filter params |
-| `orders(params)` | GET | `/orders/` | `page_size=20`, `search`, `status`, `client`, `contract_number` |
+| `orders(params)` | GET | `/orders/` | `page_size=20`, `search`, `status`, `client`, `contract_number`, `date_from`, `date_to`, `ordering`, `page` |
 | `order(id)` | GET | `/orders/{id}/` | — |
 | `nextContractNumber(params)` | GET | `/orders/next-contract-number/` | `contract_date` (ixtiyoriy, `YYYY-MM-DD`) |
 | `ordersBulk(payload)` | POST | `/orders/bulk/` | bulk order body |
@@ -164,15 +164,15 @@ Timeout: **8 soniya**. Xato klassi: `ApiError(message, status)`.
 | `products(params)` | GET | `/warehouse/products/` | `page_size=30`, `search`, `category` |
 | `stocks(params)` | GET | `/warehouse/stocks/` | `page_size=30`, `product`, `category`, `status` |
 | `addStock(id, payload)` | POST | `/warehouse/products/{id}/add-stock/` | kirim body |
-| `clients(params)` | GET | `/clients/` | `page_size=30`, `search` |
-| `sales(params)` | GET | `/sales/` | `page_size=30`, `product`, `client`, `sold_date` |
+| `clients(params)` | GET | `/clients/` | `page_size=30`, `search`, `is_active`, `date_from`, `date_to` |
+| `sales(params)` | GET | `/sales/` | `page_size=30`, `product`, `client`, `sold_date`, `date_from`, `date_to`, `search`, `ordering`, `page` |
 | `salesBulk(payload)` | POST | `/sales/bulk/` | bulk sales body |
-| `payments(params)` | GET | `/cash/payments/` | `page_size=30`, `status`, `order`, `sale`, `client`, `currency`, `include_paid` |
+| `payments(params)` | GET | `/cash/payments/` | `page_size=30`, `status`, `order`, `sale`, `client`, `currency`, `include_paid`, `search`, `ordering`, `page` |
 | `paymentsSummary()` | GET | `/cash/payments/summary/` | — |
 | `pay(id, payload)` | POST | `/cash/payments/{id}/pay/` | `{ amount, comment }` |
 | `exchangeRateLatest(refresh)` | GET | `/cash/exchange-rates/latest/` | `refresh=true\|false` |
 | `exchangeRateSettings()` | GET | `/cash/exchange-rates/settings/` | — |
-| `updateExchangeRateSettings(payload)` | PATCH | `/cash/exchange-rates/settings/` | `{ auto_fetch_enabled }` — Management |
+| `updateExchangeRateSettings(payload)` | PATCH | `/cash/exchange-rates/settings/` | `{ auto_fetch_enabled?, preferred_rate_source? }` (`infinbank` \| `manual`) |
 | `companyProfile()` | GET | `/company-profile/` | — |
 | `updateCompanyProfile(payload)` | PATCH | `/company-profile/` | korxona rekvizitlari — Management |
 | `invoices(params)` | GET | `/invoices/` | `page_size=30`, `document_type`, `client`, `search` |
@@ -236,13 +236,13 @@ await api.remove('/auth/users/', id)
 
 ---
 
-## 3. Frontend ↔ Backend xaritasi (`App.jsx`)
+## 3. Frontend ↔ Backend xaritasi (sahifalar va API)
 
 | UI sahifa | `api.js` | Backend path | Eslatma |
 |---|---|---|---|
 | Bosh sahifa | `reports`, `monthlyTrend` | `/reports/*` | Filtrli |
 | Hisobotlar | `reports`, `expensesSummary`, `paymentsSummary`, `export*` | `/reports/*`, `/expenses/summary/`, `/cash/payments/summary/` | Filtrsiz reports |
-| Buyurtmalar | `orders`, `nextContractNumber`, `createForm`, `update`, `fulfillOrder`, `cancelOrder`, `createOrderZakaz` | `/orders/` | Multipart buyurtma |
+| Buyurtmalar | `orders`, `nextContractNumber`, `createForm`, `update`, `fulfillOrder`, `cancelOrder`, `createOrderZakaz` | `/orders/` | Grid; `/buyurtmalar/{id}` tarix paneli |
 | Import | `zakaz`, `create`, `update` | `/orders/zakaz/` | `new_product` inline (manual import) |
 | Shartnomalar | `contracts`, `retrieve` | `/orders/contracts/` | Read-only |
 | Elektron faktura | `invoices`, `invoice`, `createInvoice`, `updateInvoice`, `removeInvoice`, `nextContractNumber`, `companyProfile` | `/invoices/`, `/company-profile/` | Mazmun + preview UI |
@@ -250,13 +250,104 @@ await api.remove('/auth/users/', id)
 | Ombor | `products`, `create`, `update`, `addStock`, `productContracts` | `/warehouse/products/` | `warehouse_create` ability |
 | Kategoriyalar | `categories`, `create`, `update`, `remove` | `/warehouse/categories/` | |
 | Qoldiqlar | `stocks` | `/warehouse/stocks/` | |
-| Mijozlar | `clients`, `create`, `update`, `remove` | `/clients/` | `can_view_clients` |
+| Mijozlar (ro‘yxat) | `clients`, `create`, `update`, `remove` | `/clients/` | Grid + filtr; qator → mijoz kartasi |
+| Mijoz kartasi | `retrieve`, `orders`, `sales`, `payments`, `invoices` | `/clients/{uuid}/`, `/orders/`, … | URL: `/mijozlar/{id}[/{tab}]` — `ClientDetailPage` |
 | Sotuvlar | `sales`, `salesBulk`, `create`, `update` | `/sales/` | |
 | Kassa | `payments`, `pay` | `/cash/payments/` | Paid yashirin |
 | Xarajatlar | `expenses`, `expenseTypes`, `expenseSubtypes`, `createForm`, `updateForm` | `/expenses/expenses/` | Multipart |
 | Foydalanuvchilar | `users`, `registerUser`, `update`, `remove` | `/auth/users/`, `/auth/register/` | |
 | Bildirishnomalar | `notifications`, `notificationsMarkRead`, `notificationsMarkAllRead` | `/notifications/` | 30s polling |
-| Valyuta kursi | `exchangeRateLatest`, `exchangeRateSettings`, `updateExchangeRateSettings`, `create('/cash/exchange-rates/')` | `/cash/exchange-rates/` | Header widget; soatlik auto-fetch toggle |
+| Valyuta kursi | `exchangeRateLatest`, `exchangeRateSettings`, `updateExchangeRateSettings`, `create('/cash/exchange-rates/')` | `/cash/exchange-rates/` | Header `FxRatePanel`: Infinbank / qo‘lda tab, `preferred_rate_source` |
+
+
+### URL va layout (`routes.js`, `routes.jsx`)
+
+| Fayl | Vazifa |
+|---|---|
+| `frontend/src/routes.js` | `PAGE_PATHS`, `parseAppPath()`, `clientDetailPath()`, `orderDetailPath()`, `CLIENT_TABS` |
+| `frontend/src/routes.jsx` | `AppRoutes` — URL → `ClientDetailPage`, `ResourcePage`, dashboard, hisobotlar |
+| `frontend/src/pages/LoginPage.jsx` | JWT login (`api.login` → `saveSession`) |
+| `frontend/src/main.jsx` | `BrowserRouter` |
+
+Asosiy URL lar (react-router):
+
+| Path | Ko‘rinish |
+|---|---|
+| `/`, `/buyurtmalar`, `/import`, … | `PAGE_PATHS` dagi ro‘yxat sahifalari |
+| `/mijozlar/{uuid}` | Mijoz kartasi, tab `umumiy` |
+| `/mijozlar/{uuid}/{tab}` | `buyurtmalar`, `sotuvlar`, `tolovlar`, `hujjatlar`, `tarix` |
+| `/buyurtmalar/{id}` | Buyurtmalar ro‘yxati + `#id` tarix paneli (`initialOrderHistoryId`) |
+
+### Global qidiruv (`GlobalSearch.jsx`)
+
+- Ochish: header tugmasi yoki **Ctrl+K** / **⌘+K** (`useGlobalSearchHotkey`).
+- Kamida **2** belgi; debounce bilan parallel so‘rovlar (`page_size=6`):
+  - Mijozlar → `api.clients({ search })`
+  - Buyurtmalar → `api.orders({ search })`
+  - Mahsulotlar → `api.products({ search })`
+  - Shartnomalar → `api.contracts({ search })`
+- Natija bosilganda: mijoz kartasi, buyurtma detail URL, Ombor yoki Shartnomalar sahifasi.
+
+### Grid ro‘yxatlar, filtr, pagination (`ResourcePage` + `listFilters.js`)
+
+**Grid sahifalar** (`GRID_PAGES` — `App.jsx`): Mijozlar, Buyurtmalar, Sotuvlar, Import, Ombor, Kassa, Xarajatlar.
+
+| Parametr | Qiymat |
+|---|---|
+| `page_size` | 25 (grid); `api.js` defaultlari 20/30 — grid override qiladi) |
+| `page`, `ordering` | Server-side sort (`GRID_SORT_FIELDS` mapping) |
+| Qidiruv | Form submit → query param `search` |
+
+Filtr paneli: `ListFiltersPanel` + `frontend/src/listFilters.js`.
+
+| Modul | Status | Mijoz | Sana |
+|---|---|---|---|
+| Mijozlar | `is_active` | — | ✅ |
+| Buyurtmalar | `status` | ✅ | ✅ |
+| Sotuvlar | — | ✅ | ✅ |
+| Import | `status` | — | ✅ |
+| Ombor | — | — | — |
+| Kassa | `status` | ✅ | ✅ (UI) |
+| Xarajatlar | — | — | ✅ |
+
+`buildListQueryParams(title, filters)` → API query: `status` yoki `is_active`, `client`, `date_from`, `date_to`.
+
+Backend sana maydoni (`apps/common/querysets.apply_date_range`):
+
+| Endpoint | Sana maydoni |
+|---|---|
+| `/clients/` | `created_at` |
+| `/orders/`, `/orders/zakaz/` | `created_at` |
+| `/sales/` | `sold_date` |
+| `/expenses/expenses/` | `date` |
+| `/warehouse/stocks/` | `created_at` (custom) |
+| `/cash/payments/` | hozircha **`date_from`/`date_to` e’tiborga olinmaydi** (UI yuboradi) |
+
+Komponentlar: `DataTable` (sort, tanlash), `TablePagination`, `StatusChangeModal`, `EmptyState`, `SkeletonRows`.
+
+### Bulk amallar (grid)
+
+| Amal | Modullar | API |
+|---|---|---|
+| Tanlangan qatorlarni CSV eksport | Barcha grid sahifalar | Faqat frontend (`exportRowsCsv`) |
+| Status o‘zgartirish (bulk) | Import | Ketma-ket `PATCH /orders/zakaz/{id}/` (`api.update`) — `StatusChangeModal` |
+| Buyurtma fulfill/cancel | Buyurtma (inline yoki modal) | `POST /orders/{id}/fulfill/` \| `/cancel/` |
+
+`api.ordersBulk`, `api.zakazBulk`, `api.salesBulk` — forma yaratishda (ko‘p qatorli POST), grid bulk status uchun emas.
+
+### Mijoz kartasi tablari (`ClientDetailPage.jsx`)
+
+| Tab | API | Eslatma |
+|---|---|---|
+| `umumiy` | `GET /clients/{uuid}/` | Rekvizitlar, CTA (tahrir, yangi buyurtma) |
+| `buyurtmalar` | `GET /orders/?client=&page_size=15` | Pagination |
+| `sotuvlar` | `GET /sales/?client=&page_size=15` | |
+| `tolovlar` | `GET /cash/payments/?client=&page_size=15` | |
+| `hujjatlar` | `GET /invoices/?client=` | |
+| `tarix` | `GET /orders/?client=&page_size=50` | Buyurtma timeline |
+
+Tablar `abilities` bo‘yicha yashirin (`orders_view`, `sales_view`, `cash_view`, `einvoice_view`).
+
 
 ---
 
@@ -283,7 +374,7 @@ Jami **~91** HTTP endpoint (custom actionlar bilan). ✅ = `api.js` da wrapper b
 
 | Method | Path | Query / body | Ruxsat | api.js |
 |---|---|---|---|---|
-| GET | `/` | `page_size`, `search`, `status`, `client`, `contract_number`, `items__product` | Auth, read | ✅ `orders` |
+| GET | `/` | `page_size`, `search`, `status`, `client`, `contract_number`, `items__product`, `date_from`, `date_to`, `ordering`, `page` | Auth, read | ✅ `orders` |
 | POST | `/` | order JSON yoki multipart | Operator+ | ✅ `createForm` |
 | GET | `/{id}/` | — | Auth | ✅ `order` / `retrieve` |
 | PATCH | `/{id}/` | `{ asos, items[] }` | Operator+ | ✅ `update` |
@@ -299,7 +390,7 @@ DELETE yo‘q — bekor qilish `/cancel/` orqali.
 
 | Method | Path | Query / body | Ruxsat | api.js |
 |---|---|---|---|---|
-| GET | `/` | `page_size`, `status`, `zakaz_type`, `payment_status`, `product`, `order`, `contract_number`, `search` | Auth | ✅ `zakaz` |
+| GET | `/` | yuqoridagilar + `date_from`, `date_to`, `ordering`, `page` | Auth | ✅ `zakaz` |
 | POST | `/` | zakaz body yoki `new_product` inline | Auth | ✅ `create` |
 | GET | `/{id}/` | — | Auth | ✅ `retrieve` |
 | PATCH | `/{id}/` | status, received_qty, supplier… | Auth (Manager: status) | ✅ `update` |
@@ -375,7 +466,7 @@ List faqat root node + `children` daraxti.
 
 | Method | Path | Query / body | Ruxsat | api.js |
 |---|---|---|---|---|
-| GET | `/` | `page_size`, `product`, `client`, `sold_date`, `search` | Auth | ✅ `sales` |
+| GET | `/` | `page_size`, `product`, `client`, `sold_date`, `search`, `date_from`, `date_to`, `ordering`, `page` | Auth | ✅ `sales` |
 | POST | `/` | sale body | Operator+ | ✅ `create` |
 | GET/PATCH/DELETE | `/{id}/` | — | Operator+ | ✅ CRUD |
 | POST | `/bulk/` | bulk sales body | Operator+ | ✅ `salesBulk` |
@@ -407,7 +498,7 @@ FIFO ombordan ayiradi. Operator uchun narx/foyda yashirilishi mumkin.
 | PATCH | `/{id}/` | kurs maydonlari | Auth | ❌ |
 | GET | `/latest/` | `refresh=true\|false` | Auth | ✅ `exchangeRateLatest` |
 | GET | `/settings/` | — | Auth | ✅ `exchangeRateSettings` |
-| PATCH | `/settings/` | `{ auto_fetch_enabled: true\|false }` | Management | ✅ `updateExchangeRateSettings` |
+| PATCH | `/settings/` | `{ auto_fetch_enabled?, preferred_rate_source? }` | Auth (PATCH) | ✅ `updateExchangeRateSettings` |
 
 Celery beat: `refresh_infinbank_usd_rate` har **1 soat** (`root/celery.py`). `auto_fetch_enabled=false` bo‘lsa task o‘tkazib yuboriladi.
 
@@ -456,7 +547,7 @@ Mazmun: `content_title`, `content_body` — frontend preview (`DocumentPreviewMo
 
 | Method | Path | Query / body | Ruxsat | api.js |
 |---|---|---|---|---|
-| GET | `/` | `page_size`, `search`, `is_active` | `can_view_clients` | ✅ `clients` |
+| GET | `/` | `page_size`, `search`, `is_active`, `date_from`, `date_to`, `ordering`, `page` | `can_view_clients` | ✅ `clients` |
 | POST/PATCH/DELETE | `/`, `/{uuid}/` | client body | `can_view_clients` | ✅ CRUD |
 
 Primary key — **UUID**. Maxfiy maydonlar bazada shifrlanadi.
@@ -713,31 +804,45 @@ https://www.infinbank.com/uz/private/exchange-rates/
 
 HTML ichida `rates-table` dan `MB kurs` qatori va `USD` ustuni ajratiladi.
 
-### Oxirgi USD kurs
+### Oxirgi USD kurs (kengaytirilgan javob)
 
 ```http
 GET /api/v1/cash/exchange-rates/latest/?refresh=false
 GET /api/v1/cash/exchange-rates/latest/?refresh=true
 ```
 
-`refresh=true` tashqi manbadan qayta olib kelishga urinadi. Agar tashqi manba ishlamasa, backend bazadagi oxirgi kursni fallback qiladi. Fallback ham bo‘lmasa `503`.
+`refresh=true` — Infinbankdan majburiy sync (`sync_today_usd_rate`). Tashqi manba ishlamasa bazadagi oxirgi kurs fallback; yo‘q bo‘lsa `503`.
 
-Javob:
+Javob (faol kurs maydonlari + ikkala manba):
 
 ```json
 {
-  "id": 1,
+  "infinbank": {
+    "currency": "USD",
+    "mb_rate": "11934.61",
+    "source": "infinbank",
+    "manual_override": false,
+    "rate_date": "2026-08-11"
+  },
+  "manual": {
+    "currency": "USD",
+    "mb_rate": "11950.00",
+    "source": "manual",
+    "manual_override": true,
+    "rate_date": "2026-08-11"
+  },
+  "active_source": "infinbank",
+  "preferred_rate_source": "infinbank",
   "currency": "USD",
   "mb_rate": "11934.61",
-  "buy_rate": "11934.61",
-  "sell_rate": "11934.61",
   "rate_date": "2026-08-11",
-  "source": "infinbank",
-  "manual_override": false,
-  "note": "",
-  "created_at": "2026-08-11T..."
+  "source": "infinbank"
 }
 ```
+
+`active_source` / yuqori darajadagi `mb_rate` — hisob-kitobda ishlatiladigan faol yozuv (`get_active_rate_record`). `preferred_rate_source`: `infinbank` | `manual`.
+
+Frontend header: `FxRatePanel` (`App.jsx`) — Infinbank / Qo‘lda tablar, `api.updateExchangeRateSettings({ preferred_rate_source })`, qo‘lda saqlash `POST /cash/exchange-rates/` + `preferred_rate_source: manual`. Qo‘lda kiritish va ↻ yangilash faqat `users_manage` ability (Management UI).
 
 ### Qo‘lda kurs saqlash
 
@@ -745,11 +850,8 @@ Javob:
 POST /api/v1/cash/exchange-rates/
 ```
 
-So‘rov:
-
 ```json
 {
-  "currency": "USD",
   "mb_rate": "11950.00",
   "buy_rate": "11950.00",
   "sell_rate": "11950.00",
@@ -758,30 +860,30 @@ So‘rov:
 }
 ```
 
-Backend `currency=USD`, `source=manual`, `manual_override=true`, `rate_date=today` qilib saqlaydi.
+Backend avtomatik: `currency=USD`, `source=manual`, `rate_date=today`.
 
-### Auto-fetch sozlamasi
+### Sozlamalar
 
 ```http
 GET /api/v1/cash/exchange-rates/settings/
 PATCH /api/v1/cash/exchange-rates/settings/
 ```
 
-So‘rov (PATCH):
+PATCH body (qisman):
 
 ```json
-{ "auto_fetch_enabled": false }
+{
+  "auto_fetch_enabled": true,
+  "preferred_rate_source": "infinbank"
+}
 ```
 
-Javob:
+Javob: `{ "auto_fetch_enabled", "preferred_rate_source", "updated_at" }`.
 
-```json
-{ "auto_fetch_enabled": true, "updated_at": "2026-08-11T..." }
-```
+Frontend: `api.exchangeRateSettings()`, `api.updateExchangeRateSettings(payload)`.
 
-Frontend: `api.exchangeRateSettings()`, `api.updateExchangeRateSettings({ auto_fetch_enabled })`. Faqat Management PATCH qila oladi.
+Celery: `apps.cash.tasks.refresh_infinbank_usd_rate` — har soat Infinbank (`auto_fetch_enabled=true` bo‘lsa).
 
-Celery: `apps.cash.tasks.refresh_infinbank_usd_rate` — har soat Infinbankdan USD kursini oladi (`auto_fetch_enabled=true` bo‘lsa).
 
 ## 8. Buyurtmalar
 
@@ -1211,6 +1313,8 @@ DELETE /api/v1/clients/{uuid}/
 ```
 
 `can_view_clients` ruxsati kerak.
+
+Frontend: ro‘yxat grid (`/mijozlar`), qator bosilganda `/mijozlar/{uuid}` — tablar §3a jadvalida.
 
 So‘rov:
 
@@ -1710,7 +1814,7 @@ Generic CRUD yetarli bo‘lsa yangi metod shart emas — `api.create('/path/', b
 
 ### 3. UI komponentini ulang
 
-`App.jsx` dagi `resources` jadvaliga qo‘shish (ro‘yxat sahifasi):
+`App.jsx` dagi `resources` jadvaliga qo‘shish (ro‘yxat sahifasi). Grid kerak bo‘lsa `GRID_PAGES` va `MODULE_FILTER_FEATURES` (`listFilters.js`) ni yangilang:
 
 ```javascript
 'Yangi modul': { load: api.myFeature, path: '/my-app/items/' },
@@ -1800,6 +1904,10 @@ notifications: 30s
 - Operator uchun narx/foyda maydonlari yo‘q bo‘lishiga UI tayyor bo‘lsin.
 - Mobile’da sidebar emas, bottom navigation ko‘rsatilsin.
 - Desktop sidebar collapse holati saqlansin.
+- Grid sahifalarda `ListFiltersPanel` filtrlari `buildListQueryParams` orqali API ga uzatilsin.
+- Global qidiruv Ctrl+K; kamida 2 belgi.
+- Mijoz kartasi URL tablari `CLIENT_TABS` bilan mos bo‘lsin.
+- USD kurs: `preferred_rate_source` va `latest` javobidagi `infinbank`/`manual` obyektlari bilan ishlansin.
 
 ## 21. Rol matritsasi (11 qoida)
 

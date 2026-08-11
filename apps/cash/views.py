@@ -12,7 +12,8 @@ from apps.cash.serializers import (ExchangeRateSerializer, ExchangeRateSettingsS
                                    PaymentSerializer, PaymentOperatorSerializer,
                                    PaymentUpdateSerializer,
                                    PaymentPaySerializer)
-from apps.cash.services import ExchangeRateFetchError, sync_today_usd_rate
+from apps.cash.services import (ExchangeRateFetchError, get_active_rate_record,
+                                get_today_rate, sync_today_usd_rate)
 from apps.common.permissions import (IsAccountantOrManagement,
                                      IsAccountantWithManagementRead,
                                      IsManagement)
@@ -36,7 +37,7 @@ class ExchangeRateViewSet(ModelViewSet):
 
     def get_permissions(self):
         if self.action == 'rate_settings' and self.request.method == 'PATCH':
-            return [IsManagement()]
+            return [IsAuthenticated()]
         return super().get_permissions()
 
     def perform_create(self, serializer):
@@ -52,24 +53,34 @@ class ExchangeRateViewSet(ModelViewSet):
     @action(detail=False, methods=['get'], url_path='latest')
     def latest(self, request):
         refresh = request.query_params.get('refresh', '').lower() in {'1', 'true', 'yes'}
-        today = timezone.localdate()
-        rate = (
-            ExchangeRate.objects
-            .filter(currency=ExchangeRate.USD, rate_date=today)
-            .order_by('-manual_override', '-created_at')
-            .first()
-        )
-        if refresh or rate is None:
+        settings = ExchangeRateSettings.get_settings()
+        if refresh:
             try:
-                rate, _ = sync_today_usd_rate(force=refresh)
+                sync_today_usd_rate(force=True)
             except ExchangeRateFetchError as exc:
                 fallback = ExchangeRate.get_latest(ExchangeRate.USD)
-                if fallback:
-                    serializer = ExchangeRateSerializer(fallback)
-                    return Response(serializer.data)
-                return Response({'detail': str(exc)}, status=503)
-        serializer = ExchangeRateSerializer(rate)
-        return Response(serializer.data)
+                if not fallback:
+                    return Response({'detail': str(exc)}, status=503)
+        else:
+            auto = get_today_rate(manual=False)
+            if auto is None:
+                try:
+                    sync_today_usd_rate()
+                except ExchangeRateFetchError:
+                    pass
+
+        infinbank = get_today_rate(manual=False)
+        manual = get_today_rate(manual=True)
+        active, active_source = get_active_rate_record()
+        payload = {
+            'infinbank': ExchangeRateSerializer(infinbank).data if infinbank else None,
+            'manual': ExchangeRateSerializer(manual).data if manual else None,
+            'active_source': active_source,
+            'preferred_rate_source': settings.preferred_rate_source,
+        }
+        if active:
+            payload.update(ExchangeRateSerializer(active).data)
+        return Response(payload)
 
     @action(detail=False, methods=['get', 'patch'], url_path='settings')
     def rate_settings(self, request):

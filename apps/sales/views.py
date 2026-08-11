@@ -5,6 +5,7 @@ from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
 from apps.common.permissions import IsOperatorOrManagementWrite
+from apps.common.querysets import apply_date_range
 from apps.sales.models import Sale
 from apps.sales.serializers import (SaleSerializer, SaleOperatorSerializer,
                                     SaleBulkCreateSerializer, _restore_stock)
@@ -33,6 +34,9 @@ class SaleViewSet(ModelViewSet):
     filterset_fields   = ('product', 'sold_date', 'client')
     search_fields      = ('product__name', 'sold_to', 'destination', 'client__company_name')
     ordering_fields    = ('sold_date', 'sold_price', 'quantity')
+
+    def get_queryset(self):
+        return apply_date_range(super().get_queryset(), self.request, field='sold_date')
 
     def get_serializer_class(self):
         # Operator (management/accountant emas) sotuv narxi/foydasini ko'rmaydi

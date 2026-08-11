@@ -1,28 +1,52 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import {
   Warehouse, Bell, Buildings, CaretDown, ChartLineUp,
   ClipboardText, CurrencyCircleDollar, DownloadSimple, Eye, FileText, Funnel, House, MagnifyingGlass,
-  Package, PencilSimple, Plus, SignOut, SpinnerGap, Stack, Tag, Trash, TrendDown, TrendUp, Truck, UserGear, Users, WarningCircle, X, XCircle, DotsThree, CaretLeft, CaretRight, CheckCircle,
+  Package, PencilSimple, Plus, SignOut, SpinnerGap, Trash, TrendDown, TrendUp, Truck, UserGear, Users, WarningCircle, X, XCircle, DotsThree, CaretLeft, CaretRight, CheckCircle, ClockCounterClockwise,
 } from '@phosphor-icons/react'
 import { api, clearStoredSession, refreshAccessToken, saveSession, setAuthFailureHandler, tokenExpiresAt } from './api'
+import DataTable, { BulkActionsBar, StatusBadge, TablePagination } from './components/DataTable'
+import GlobalSearch, { useGlobalSearchHotkey } from './components/GlobalSearch'
+import ClientDetailPage from './components/ClientDetailPage'
+import ListFiltersPanel from './components/ListFiltersPanel'
+import SearchableCombobox from './components/SearchableCombobox'
+import ConfirmDialog from './components/ConfirmDialog'
+import FieldError from './components/FieldError'
+import EmptyState from './components/EmptyState'
+import StatusChangeModal, { InlineStatusSelect } from './components/StatusChangeModal'
+import { buildListQueryParams, emptyStateConfig, exportRowsCsv, hasActiveListFilters } from './listFilters'
+import { clientDetailPath, crumbFromPath, parseAppPath, pathForPage } from './routes'
 
-const navigation = [
+const NAV_GROUPS = {
+  Ombor: [
+    { page: 'Ombor', label: 'Mahsulotlar', ability: 'warehouse_view' },
+    { page: 'Kategoriyalar', label: 'Kategoriyalar', ability: 'categories_view' },
+    { page: 'Qoldiqlar', label: 'Qoldiqlar', ability: 'stocks_view' },
+  ],
+  Moliya: [
+    { page: 'Kassa', label: 'Kassa', ability: 'cash_view' },
+    { page: 'Xarajatlar', label: 'Xarajatlar', ability: 'expenses_view' },
+  ],
+}
+
+const SIDEBAR_NAV = [
   ['Bosh sahifa', House, 'dashboard'],
   ['Buyurtmalar', FileText, 'orders_view'],
   ['Import', Truck, 'procurement_view'],
   ['Shartnomalar', ClipboardText, 'contracts_view'],
-  ['Ombor', Package, 'warehouse_view'],
-  ['Kategoriyalar', Tag, 'categories_view'],
-  ['Qoldiqlar', Stack, 'stocks_view'],
+  ['Ombor', Package, '__group_ombor__'],
   ['Mijozlar', Users, 'clients_view'],
   ['Sotuvlar', TrendUp, 'sales_view'],
-  ['Kassa', CurrencyCircleDollar, 'cash_view'],
-  ['Xarajatlar', ClipboardText, 'expenses_view'],
+  ['Moliya', CurrencyCircleDollar, '__group_moliya__'],
   ['Hisobotlar', ChartLineUp, 'reports_view'],
   ['Elektron faktura', FileText, 'einvoice_view'],
-  ['Foydalanuvchilar', UserGear, 'users_view'],
-  ['Bildirishnomalar', Bell, 'notifications_view'],
 ]
+
+const HIDDEN_PAGES = {
+  Bildirishnomalar: 'notifications_view',
+  Foydalanuvchilar: 'users_view',
+}
 
 const money = (value) => new Intl.NumberFormat('uz-UZ', { maximumFractionDigits: 0 }).format(Number(value || 0))
 const list = (data) => Array.isArray(data) ? data : data?.results || []
@@ -96,11 +120,224 @@ const documentTypeLabels = {
 }
 const documentTypeLabel = (value) => documentTypeLabels[value] || value || 'Hujjat'
 
+function FxRatePanel({ session, notify, compact = false, onSourceChange }) {
+  const [snapshot, setSnapshot] = useState(null)
+  const [manualDraft, setManualDraft] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [sourceSaving, setSourceSaving] = useState(false)
+  const [uiSource, setUiSource] = useState('infinbank')
+  const canManage = can(session, 'users_manage')
+
+  const load = useCallback(async (refresh = false) => {
+    const data = await api.exchangeRateLatest(refresh)
+    setSnapshot(data)
+    setManualDraft(data.manual?.mb_rate ?? '')
+    return data
+  }, [])
+
+  useEffect(() => {
+    load().catch((err) => notify(err.message))
+    const timer = setInterval(() => { load().catch(() => {}) }, AUTO_REFRESH_MS)
+    return () => clearInterval(timer)
+  }, [load, notify])
+
+  const serverSource = snapshot?.preferred_rate_source || snapshot?.active_source || 'infinbank'
+  const activeSource = uiSource
+  const infinRate = snapshot?.infinbank?.mb_rate
+  const manualRate = snapshot?.manual?.mb_rate
+  const displayRate = serverSource === 'manual' && manualRate ? manualRate : (infinRate ?? snapshot?.mb_rate)
+
+  useEffect(() => {
+    setUiSource(serverSource)
+  }, [serverSource])
+
+  const setSource = async (source) => {
+    if (source === 'manual' && !manualRate) {
+      setUiSource('manual')
+      return
+    }
+    setSourceSaving(true)
+    try {
+      await api.updateExchangeRateSettings({ preferred_rate_source: source })
+      await load()
+      onSourceChange?.()
+      notify(source === 'manual' ? 'Hisob-kitobda qo‘lda kurs ishlatiladi.' : 'Hisob-kitobda Infinbank kursi ishlatiladi.', 'success')
+    } catch (err) {
+      notify(err.message)
+    } finally {
+      setSourceSaving(false)
+    }
+  }
+
+  const saveManual = async (event) => {
+    event.preventDefault()
+    if (!canManage || !manualDraft) return
+    setSaving(true)
+    try {
+      await api.create('/cash/exchange-rates/', {
+        currency: 'USD',
+        mb_rate: manualDraft,
+        buy_rate: manualDraft,
+        sell_rate: manualDraft,
+        manual_override: true,
+        note: 'Qo‘lda kiritilgan kurs',
+      })
+      await api.updateExchangeRateSettings({ preferred_rate_source: 'manual' })
+      await load()
+      setUiSource('manual')
+      onSourceChange?.()
+      notify('Qo‘lda kurs saqlandi.', 'success')
+    } catch (err) {
+      notify(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className={compact ? 'fx-card fx-card--dual fx-card--embedded' : 'fx-card fx-card--dual'}>
+      <span className="fx-card-title">{compact ? 'USD kurs (hisob-kitob)' : 'USD MB kurs'}</span>
+      <div className="fx-source-tabs" role="tablist" aria-label="USD kurs manbasi">
+        <button type="button" role="tab" aria-selected={activeSource === 'infinbank'} disabled={sourceSaving} className={activeSource === 'infinbank' ? 'fx-source-tab is-active' : 'fx-source-tab'} onClick={() => setSource('infinbank')}>
+          Infinbank{infinRate ? ` - ${money(infinRate)}` : ''}
+        </button>
+        <button type="button" role="tab" aria-selected={activeSource === 'manual'} disabled={sourceSaving} className={activeSource === 'manual' ? 'fx-source-tab is-active' : 'fx-source-tab'} onClick={() => setSource('manual')}>
+          Qo‘lda
+        </button>
+      </div>
+      <div className="fx-rate-row">
+        <span className="fx-rate-label">Infinbank</span>
+        <strong className="fx-rate-readonly">{infinRate ? money(infinRate) : '—'}</strong>
+        {canManage && (
+          <button type="button" className="fx-refresh" onClick={() => load(true).catch((err) => notify(err.message))} aria-label="Infinbank kursini yangilash" title="Infinbankdan yangilash">
+            ↻
+          </button>
+        )}
+      </div>
+      {canManage ? (
+        <form className="fx-rate-form" onSubmit={saveManual}>
+          <span className="fx-rate-label">Qo‘lda</span>
+          <input type="number" min="0" step="0.01" value={manualDraft} onChange={(event) => setManualDraft(event.target.value)} aria-label="Qo‘lda USD kursi" />
+          <button type="submit" disabled={saving}>{saving ? '…' : 'Saqlash'}</button>
+        </form>
+      ) : (
+        <div className="fx-rate-row">
+          <span className="fx-rate-label">Qo‘lda</span>
+          <strong className="fx-rate-readonly">{manualRate ? money(manualRate) : '—'}</strong>
+        </div>
+      )}
+      <p className="fx-active-note">Hisobda: <b>{displayRate ? `${money(displayRate)} so‘m` : '—'}</b></p>
+    </div>
+  )
+}
+
+function OrderHistoryModal({ orderId, close, notify }) {
+  const [detail, setDetail] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      setLoading(true)
+      setError('')
+      try {
+        const data = await api.retrieve('/orders/', orderId)
+        if (!cancelled) setDetail(data)
+      } catch (err) {
+        if (!cancelled) setError(err.message)
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [orderId])
+
+  const subtitle = useMemo(() => {
+    if (!detail) return ''
+    const firstItem = detail.items?.[0]
+    if (firstItem?.product_name) return firstItem.product_name
+    return detail.client_name || detail.contract_number || `Buyurtma #${orderId}`
+  }, [detail, orderId])
+
+  const history = detail?.history || []
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <div className="editor order-history-modal">
+        <div className="editor-head">
+          <div>
+            <p className="eyebrow">AUDIT</p>
+            <h3>Buyurtma tarixi</h3>
+            {subtitle && <p className="muted">{subtitle}</p>}
+          </div>
+          <button type="button" className="icon-button" onClick={close} aria-label="Yopish"><X size={20} /></button>
+        </div>
+        {loading ? (
+          <div className="order-history-loading"><SpinnerGap size={28} className="spin" /></div>
+        ) : error ? (
+          <p className="contract-detail-error">{error}</p>
+        ) : !history.length ? (
+          <Empty label="Tarix yozuvi topilmadi" />
+        ) : (
+          <ol className="order-timeline">
+            {history.map((entry) => (
+              <li key={entry.id} className="order-timeline-item">
+                <span className="order-timeline-dot" aria-hidden="true" />
+                <div className="order-timeline-body">
+                  <div className="order-timeline-head">
+                    <b>{entry.action_display || entry.action}</b>
+                    <time dateTime={entry.created_at}>{formatDateTimeUz(entry.created_at)}</time>
+                  </div>
+                  {entry.contract_number && (
+                    <p className="order-timeline-meta"><span>Shartnoma:</span> {entry.contract_number}</p>
+                  )}
+                  {entry.asos && (
+                    <p className="order-timeline-meta"><span>Asos:</span> {entry.asos}</p>
+                  )}
+                  {entry.faktura && (
+                    <p className="order-timeline-meta"><span>Faktura:</span> {entry.faktura}</p>
+                  )}
+                  <span className="order-timeline-user" title={entry.changed_by_name || ''}>
+                    {userInitials(entry.changed_by_name)}
+                  </span>
+                </div>
+              </li>
+            ))}
+          </ol>
+        )}
+        <div className="editor-actions">
+          <button type="button" className="secondary-button" onClick={close}>Yopish</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 const formatDateUz = (iso) => {
   if (!iso) return '—'
   const [year, month, day] = String(iso).slice(0, 10).split('-')
   if (!year || !month || !day) return iso
   return `${day}.${month}.${year}`
+}
+
+const formatDateTimeUz = (iso) => {
+  if (!iso) return '—'
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return formatDateUz(iso)
+  const day = String(date.getDate()).padStart(2, '0')
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const year = date.getFullYear()
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  return `${day}.${month}.${year} ${hours}:${minutes}`
+}
+
+const userInitials = (name) => {
+  if (!name) return '—'
+  const parts = String(name).trim().split(/\s+/).filter(Boolean)
+  if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toLowerCase()
+  return String(name).slice(0, 2).toLowerCase()
 }
 
 const UZ_ONES = ['', 'bir', 'ikki', 'uch', "to'rt", 'besh', 'olti', 'yetti', 'sakkiz', "to'qqiz"]
@@ -696,8 +933,101 @@ function can(session, ability) {
   return Boolean(session?.abilities?.[ability])
 }
 
-function allowedNavigation(session) {
-  return navigation.filter(([, , ability]) => can(session, ability))
+function editorSectionTitle(title) {
+  const labels = {
+    Ombor: 'Ombor',
+    Kategoriyalar: 'Kategoriya',
+    Qoldiqlar: 'Qoldiq',
+    Mijozlar: 'Mijoz',
+  }
+  return labels[title] || title
+}
+
+function canNavItem(session, ability) {
+  if (ability === '__group_ombor__') return NAV_GROUPS.Ombor.some((tab) => can(session, tab.ability))
+  if (ability === '__group_moliya__') return NAV_GROUPS.Moliya.some((tab) => can(session, tab.ability))
+  return can(session, ability)
+}
+
+function getSidebarGroupKey(label) {
+  if (label === 'Ombor') return 'Ombor'
+  if (label === 'Moliya') return 'Moliya'
+  return null
+}
+
+function getGroupForPage(page) {
+  for (const [key, tabs] of Object.entries(NAV_GROUPS)) {
+    if (tabs.some((tab) => tab.page === page)) return key
+  }
+  return null
+}
+
+function isPageInGroup(page, groupKey) {
+  return NAV_GROUPS[groupKey]?.some((tab) => tab.page === page)
+}
+
+function isSidebarActive(sidebarLabel, active) {
+  const group = getSidebarGroupKey(sidebarLabel)
+  if (group) return isPageInGroup(active, group)
+  return active === sidebarLabel
+}
+
+function defaultGroupPage(session, groupKey) {
+  return NAV_GROUPS[groupKey]?.find((tab) => can(session, tab.ability))?.page
+}
+
+function allowedSidebar(session) {
+  return SIDEBAR_NAV.filter(([, , ability]) => canNavItem(session, ability))
+}
+
+function getPageDisplayTitle(page) {
+  for (const tabs of Object.values(NAV_GROUPS)) {
+    const tab = tabs.find((item) => item.page === page)
+    if (tab) return tab.label
+  }
+  return page
+}
+
+function pageCrumbLabel(active) {
+  const group = getGroupForPage(active)
+  if (!group) return active
+  return `${group} / ${getPageDisplayTitle(active)}`
+}
+
+function isAccessiblePage(session, page) {
+  if (page === 'Bosh sahifa') return can(session, 'dashboard')
+  if (page === 'Hisobotlar') return can(session, 'reports_view')
+  if (page === 'Elektron faktura') return can(session, 'einvoice_view')
+  if (HIDDEN_PAGES[page]) return can(session, HIDDEN_PAGES[page])
+  const group = getGroupForPage(page)
+  if (group) {
+    const tab = NAV_GROUPS[group].find((item) => item.page === page)
+    return Boolean(tab && can(session, tab.ability))
+  }
+  const sidebarItem = SIDEBAR_NAV.find(([label]) => label === page)
+  if (sidebarItem) return canNavItem(session, sidebarItem[2])
+  return false
+}
+
+function SectionTabs({ groupKey, active, onSelect, session }) {
+  const tabs = NAV_GROUPS[groupKey]?.filter((tab) => can(session, tab.ability)) || []
+  if (tabs.length < 2) return null
+  return (
+    <div className="section-tabs" role="tablist" aria-label={`${groupKey} bo‘limlari`}>
+      {tabs.map((tab) => (
+        <button
+          key={tab.page}
+          type="button"
+          role="tab"
+          aria-selected={active === tab.page}
+          className={active === tab.page ? 'section-tab is-active' : 'section-tab'}
+          onClick={() => onSelect(tab.page)}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  )
 }
 
 const emptyCompanyProfile = () => ({
@@ -797,7 +1127,7 @@ function CompanyProfileModal({ close, notify, session }) {
   )
 }
 
-function ProfileDropdown({ session, onLogout, notify }) {
+function ProfileDropdown({ session, onLogout, notify, onNavigate }) {
   const [open, setOpen] = useState(false)
   const [companyOpen, setCompanyOpen] = useState(false)
   const ref = useRef(null)
@@ -824,6 +1154,13 @@ function ProfileDropdown({ session, onLogout, notify }) {
                 </button>
               )}
             </li>
+            <li>
+              {can(session, 'users_view') && (
+                <button type="button" role="menuitem" onClick={() => { onNavigate('Foydalanuvchilar'); setOpen(false) }}>
+                  <UserGear size={17} />Foydalanuvchilar
+                </button>
+              )}
+            </li>
             <li><button type="button" role="menuitem" onClick={() => { onLogout(); setOpen(false) }}><SignOut size={17} />Chiqish</button></li>
           </ul>
         )}
@@ -835,26 +1172,40 @@ function ProfileDropdown({ session, onLogout, notify }) {
 
 function App() {
   const [session, setSession] = useState(() => JSON.parse(localStorage.getItem('warehouse_user') || 'null'))
-  const [active, setActive] = useState('Bosh sahifa')
+  const location = useLocation()
+  const routerNavigate = useNavigate()
+  const routeInfo = parseAppPath(location.pathname)
+  const active = routeInfo.page || 'Bosh sahifa'
   const [dashboard, setDashboard] = useState(null)
   const [loading, setLoading] = useState(false)
-  const [fxRate, setFxRate] = useState(null)
-  const [fxDraft, setFxDraft] = useState('')
-  const [fxAutoFetch, setFxAutoFetch] = useState(true)
-  const [fxSaving, setFxSaving] = useState(false)
   const [notificationPermission, setNotificationPermission] = useState(() => (typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'default'))
   const [orderModalOpen, setOrderModalOpen] = useState(false)
+  const [orderPrefillClient, setOrderPrefillClient] = useState(null)
+  const [clientEditFromDetail, setClientEditFromDetail] = useState(null)
+  const [globalSearchOpen, setGlobalSearchOpen] = useState(false)
   const [resourceReloadKey, setResourceReloadKey] = useState(0)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('warehouse_sidebar_collapsed') === '1')
   const [dashboardFilters, setDashboardFilters] = useState(() => DEFAULT_DASHBOARD_FILTERS())
   const { toasts, notify, dismiss, pauseToast, resumeToast } = useNotify()
   const seenNotifications = useRef(new Set())
-  const navItems = allowedNavigation(session)
+  const navItems = allowedSidebar(session)
   const primaryMobileNav = navItems.slice(0, 4)
   const secondaryMobileNav = navItems.slice(4)
+  const activeGroup = getGroupForPage(active)
+  useGlobalSearchHotkey(() => setGlobalSearchOpen(true))
+  const navigateToPath = (path) => {
+    routerNavigate(path)
+    setMobileMenuOpen(false)
+  }
   const navigate = (label) => {
-    setActive(label)
+    const group = getSidebarGroupKey(label)
+    if (group) {
+      const page = defaultGroupPage(session, group)
+      if (page) routerNavigate(pathForPage(page))
+    } else {
+      routerNavigate(pathForPage(label))
+    }
     setMobileMenuOpen(false)
   }
   const toggleSidebar = () => {
@@ -912,9 +1263,12 @@ function App() {
   }, [session?.id, notify])
 
   useEffect(() => {
-    if (!session || navItems.some(([label]) => label === active)) return
-    setActive(navItems[0]?.[0] || 'Bosh sahifa')
-  }, [active, navItems, session])
+    if (!session || routeInfo.kind !== 'unknown') return
+    const first = navItems[0]?.[0]
+    if (!first) return
+    const group = getSidebarGroupKey(first)
+    routerNavigate(pathForPage(group ? defaultGroupPage(session, group) || first : first))
+  }, [session, routeInfo.kind, navItems, routerNavigate])
 
   useEffect(() => {
     if (!session) return undefined
@@ -939,28 +1293,6 @@ function App() {
     return () => { cancelled = true; clearInterval(timer) }
   }, [session])
 
-  useEffect(() => {
-    if (!session) return undefined
-    let cancelled = false
-    const loadRate = async () => {
-      try {
-        const [rate, settings] = await Promise.all([
-          api.exchangeRateLatest(),
-          api.exchangeRateSettings().catch(() => ({ auto_fetch_enabled: true })),
-        ])
-        if (!cancelled) {
-          setFxRate(rate)
-          setFxDraft(rate?.mb_rate ?? '')
-          setFxAutoFetch(settings?.auto_fetch_enabled !== false)
-        }
-      } catch (err) {
-        if (!cancelled) notify(err.message)
-      }
-    }
-    loadRate()
-    return () => { cancelled = true }
-  }, [session, notify])
-
   const requestNotifications = useCallback(async () => {
     if (typeof window === 'undefined' || !('Notification' in window)) {
       notify('Brauzer bildirishnomalarini qo‘llab-quvvatlamaydi.', 'warning')
@@ -980,52 +1312,15 @@ function App() {
     }
   }, [notify])
 
-  const toggleFxAutoFetch = async () => {
-    if (!can(session, 'users_manage')) {
-      notify('Avtomatik kursni faqat boshqaruv yoqishi/o‘chirishi mumkin.', 'warning')
-      return
-    }
-    try {
-      const next = !fxAutoFetch
-      await api.updateExchangeRateSettings({ auto_fetch_enabled: next })
-      setFxAutoFetch(next)
-      notify(next ? 'Avtomatik kurs yoqildi.' : 'Avtomatik kurs o‘chirildi.', 'success')
-    } catch (err) {
-      notify(err.message)
-    }
-  }
-
-  const saveFxRate = async (event) => {
-    event.preventDefault()
-    if (!can(session, 'users_manage')) return
-    if (!fxDraft) return
-    setFxSaving(true)
-    try {
-      const rate = await api.create('/cash/exchange-rates/', {
-        currency: 'USD',
-        mb_rate: fxDraft,
-        buy_rate: fxDraft,
-        sell_rate: fxDraft,
-        manual_override: true,
-        note: 'Qo‘lda kiritilgan kurs',
-      })
-      setFxRate(rate)
-      notify('Kurs saqlandi.', 'success')
-    } catch (err) {
-      notify(err.message)
-    } finally {
-      setFxSaving(false)
-    }
-  }
-
   const logout = () => {
     clearStoredSession()
     setSession(null)
   }
 
-  const openOrderEditor = () => {
+  const openOrderEditor = (clientId = null) => {
     if (!can(session, 'orders_manage')) return notify('Bu amalni bajarish uchun ruxsatingiz yo‘q.')
-    setActive('Buyurtmalar')
+    if (clientId) setOrderPrefillClient(clientId)
+    routerNavigate(pathForPage('Buyurtmalar'))
     setOrderModalOpen(true)
   }
 
@@ -1046,8 +1341,8 @@ function App() {
           <b className="workspace-name">{workspace}</b>
         </div>
         <nav>{navItems.map(([label, Icon]) => (
-          <button key={label} onClick={() => navigate(label)} className={active === label ? 'nav-item is-active' : 'nav-item'} title={label}>
-            <span className="nav-icon"><Icon size={20} weight={active === label ? 'fill' : 'regular'} /></span>
+          <button key={label} onClick={() => navigate(label)} className={isSidebarActive(label, active) ? 'nav-item is-active' : 'nav-item'} title={label}>
+            <span className="nav-icon"><Icon size={20} weight={isSidebarActive(label, active) ? 'fill' : 'regular'} /></span>
             <span className="nav-label">{label}</span>
           </button>
         ))}</nav>
@@ -1055,40 +1350,32 @@ function App() {
       </aside>
       <section className="content">
         <header className="topbar">
-          <div className="crumb"><span>Smart ombor</span><span>/</span><b>{active}</b></div>
+          <div className="crumb"><span>Smart ombor</span><span>/</span><b>{crumbFromPath(location.pathname)}</b></div>
           <div className="top-actions">
-            <div className="fx-card">
-              <span>USD MB kurs</span>
-              {can(session, 'users_manage') ? (
-                <form className="fx-rate-form" onSubmit={saveFxRate}>
-                  <input type="number" min="0" step="0.01" value={fxDraft} onChange={(event) => setFxDraft(event.target.value)} aria-label="USD MB kursi" />
-                  <button type="submit" disabled={fxSaving}>{fxSaving ? '…' : 'Saqlash'}</button>
-                </form>
-              ) : (
-                <strong className="fx-rate-readonly">{fxRate?.mb_rate ?? fxDraft ?? '—'}</strong>
-              )}
-              {can(session, 'users_manage') && (
-                <button
-                  type="button"
-                  className={`fx-toggle${fxAutoFetch ? ' is-on' : ''}`}
-                  onClick={toggleFxAutoFetch}
-                  title="Infin Bank avtomatik kurs olish"
-                >
-                  Avto yangilash: {fxAutoFetch ? 'Yoq' : 'O‘ch'}
-                </button>
-              )}
-            </div>
-            <button className="icon-button" aria-label="Qidiruv" title="Buyurtmalarni qidirish" onClick={() => navigate('Buyurtmalar')}><MagnifyingGlass size={20} /></button>
+            <FxRatePanel session={session} notify={notify} onSourceChange={() => loadDashboard(true)} />
+            <button className="icon-button" aria-label="Global qidiruv" title="Qidiruv (Ctrl+K)" onClick={() => setGlobalSearchOpen(true)}><MagnifyingGlass size={20} /></button>
             <NotificationDropdown
               browserPermission={notificationPermission}
               onRequestPermission={requestNotifications}
               onViewAll={() => { if (can(session, 'notifications_view')) navigate('Bildirishnomalar') }}
               notify={notify}
             />
-            <ProfileDropdown session={session} onLogout={logout} notify={notify} />
+            <ProfileDropdown session={session} onLogout={logout} notify={notify} onNavigate={navigate} />
           </div>
         </header>
-        {active === 'Bosh sahifa' && can(session, 'dashboard') && (
+        {routeInfo.kind === 'client-detail' && can(session, 'clients_view') && (
+          <ClientDetailPage
+            clientId={routeInfo.clientId}
+            tab={routeInfo.tab}
+            session={session}
+            notify={notify}
+            onNavigate={navigateToPath}
+            onEditClient={(client) => setClientEditFromDetail(client)}
+            onNewOrder={(client) => openOrderEditor(client.id)}
+            onNewSale={() => { routerNavigate(pathForPage('Sotuvlar')); notify('Yangi sotuv formasi ochiladi.', 'success') }}
+          />
+        )}
+        {routeInfo.kind !== 'client-detail' && active === 'Bosh sahifa' && can(session, 'dashboard') && (
           <Dashboard
             data={dashboard}
             loading={loading && !dashboard}
@@ -1099,29 +1386,59 @@ function App() {
             session={session}
           />
         )}
-        {active === 'Hisobotlar' && can(session, 'reports_view') && <ReportsPage notify={notify} />}
-        {active === 'Elektron faktura' && can(session, 'einvoice_view') && (
+        {routeInfo.kind !== 'client-detail' && active === 'Hisobotlar' && can(session, 'reports_view') && <ReportsPage notify={notify} />}
+        {routeInfo.kind !== 'client-detail' && active === 'Elektron faktura' && can(session, 'einvoice_view') && (
           <EInvoicePage notify={notify} session={session} />
         )}
-        {active !== 'Bosh sahifa' && active !== 'Hisobotlar' && active !== 'Elektron faktura' && navItems.some(([label]) => label === active) && <ResourcePage title={active} notify={notify} reloadKey={resourceReloadKey} session={session} onDataChange={() => loadDashboard(true)} onNavigate={navigate} />}
+        {routeInfo.kind !== 'client-detail' && active !== 'Bosh sahifa' && active !== 'Hisobotlar' && active !== 'Elektron faktura' && isAccessiblePage(session, active) && resources[active] && (
+          <>
+            {activeGroup && (
+              <SectionTabs groupKey={activeGroup} active={active} onSelect={(page) => routerNavigate(pathForPage(page))} session={session} />
+            )}
+            <ResourcePage
+              title={active}
+              notify={notify}
+              reloadKey={resourceReloadKey}
+              session={session}
+              onDataChange={() => loadDashboard(true)}
+              onNavigate={navigate}
+              navigateToPath={navigateToPath}
+              initialOrderHistoryId={routeInfo.kind === 'order-detail' ? routeInfo.orderId : null}
+            />
+          </>
+        )}
+        <GlobalSearch open={globalSearchOpen} onClose={() => setGlobalSearchOpen(false)} session={session} onNavigate={navigateToPath} />
+        {clientEditFromDetail && (
+          <Editor
+            title="Mijozlar"
+            item={clientEditFromDetail}
+            path="/clients/"
+            close={() => setClientEditFromDetail(null)}
+            done={() => { setClientEditFromDetail(null); setResourceReloadKey((v) => v + 1) }}
+            notify={notify}
+            session={session}
+          />
+        )}
         {orderModalOpen && can(session, 'orders_manage') && (
           <OrderEditor
-            close={() => setOrderModalOpen(false)}
+            close={() => { setOrderModalOpen(false); setOrderPrefillClient(null) }}
             done={() => {
               setOrderModalOpen(false)
+              setOrderPrefillClient(null)
               setResourceReloadKey((value) => value + 1)
               loadDashboard(true)
             }}
             notify={notify}
             session={session}
+            prefillClientId={orderPrefillClient}
           />
         )}
       </section>
       {mobileMenuOpen && secondaryMobileNav.length > 0 && (
         <div className="mobile-menu-panel" role="dialog" aria-label="Barcha bo‘limlar">
           {secondaryMobileNav.map(([label, Icon]) => (
-            <button key={label} onClick={() => navigate(label)} className={active === label ? 'mobile-menu-item is-active' : 'mobile-menu-item'}>
-              <Icon size={20} weight={active === label ? 'fill' : 'regular'} />{label}
+            <button key={label} onClick={() => navigate(label)} className={isSidebarActive(label, active) ? 'mobile-menu-item is-active' : 'mobile-menu-item'}>
+              <Icon size={20} weight={isSidebarActive(label, active) ? 'fill' : 'regular'} />{label}
             </button>
           ))}
           <button className="mobile-menu-item danger" onClick={logout}><SignOut size={20} />Chiqish</button>
@@ -1129,8 +1446,8 @@ function App() {
       )}
       <nav className="bottom-nav" aria-label="Mobil menyu">
         {primaryMobileNav.map(([label, Icon]) => (
-          <button key={label} onClick={() => navigate(label)} className={active === label ? 'bottom-nav-item is-active' : 'bottom-nav-item'} title={label}>
-            <Icon size={22} weight={active === label ? 'fill' : 'regular'} />
+          <button key={label} onClick={() => navigate(label)} className={isSidebarActive(label, active) ? 'bottom-nav-item is-active' : 'bottom-nav-item'} title={label}>
+            <Icon size={22} weight={isSidebarActive(label, active) ? 'fill' : 'regular'} />
             <span>{label}</span>
           </button>
         ))}
@@ -1699,7 +2016,6 @@ function Dashboard({ data, loading, period, onPeriodChange, onCreateOrder, onNav
               <div className="product-row" key={product.product || i}>
                 <span className="rank">0{i + 1}</span>
                 <div className="product-name"><b>{product.name}</b><small>{product.serial_number || 'Kodsiz mahsulot'}</small></div>
-                <div className="bar"><i style={{ width: `${Math.min(100, Math.max(12, Number(product.sold_qty || 0) * 8))}%` }} /></div>
                 <b>{product.sold_qty} dona</b>
               </div>
             )) : <Empty label="Sotuv ma’lumotlari hali yo‘q" />}
@@ -2040,6 +2356,108 @@ function rowValue(title, row, session) {
   return row.total_amount ? `${money(row.total_amount)} so‘m` : (row.available_quantity ?? row.total ?? '—')
 }
 
+const GRID_PAGES = new Set(['Mijozlar', 'Buyurtmalar', 'Sotuvlar', 'Import', 'Ombor', 'Kassa', 'Xarajatlar'])
+
+const ORDER_STATUS_BADGES = {
+  pending: { label: 'Kutilmoqda', tone: 'warning' },
+  partial: { label: 'Qisman', tone: 'warning' },
+  reserved: { label: 'Bron', tone: 'info' },
+  fulfilled: { label: 'Yetkazildi', tone: 'success' },
+  cancelled: { label: 'Bekor', tone: 'danger' },
+  new: { label: 'Yangi', tone: 'info' },
+  confirmed: { label: 'Tasdiqlandi', tone: 'info' },
+  received: { label: 'Qabul qilindi', tone: 'success' },
+  paid: { label: 'To‘langan', tone: 'success' },
+  overdue: { label: 'Muddati o‘tgan', tone: 'danger' },
+}
+
+const GRID_SORT_FIELDS = {
+  Mijozlar: { name: 'company_name', created_at: 'created_at', status: 'is_active' },
+  Buyurtmalar: { client: 'created_at', created_at: 'created_at', status: 'status' },
+  Sotuvlar: { product: 'sold_date', created_at: 'sold_date', total: 'sold_date' },
+  Import: { product: 'created_at', created_at: 'created_at', status: 'status' },
+  Ombor: { name: 'name', created_at: 'created_at', quantity: 'name' },
+  Kassa: { client: 'due_date', created_at: 'created_at', status: 'status' },
+  Xarajatlar: { amount: 'date', created_at: 'date' },
+}
+
+function getGridColumns(title, session, { renderStatus } = {}) {
+  const showPrices = can(session, 'prices_view')
+  if (title === 'Mijozlar') {
+    return [
+      { key: 'name', label: 'Nom', sortable: true, exportValue: (row) => row.company_name || row.full_name || '', render: (row) => row.company_name || row.full_name || '—' },
+      { key: 'phone', label: 'Telefon', render: (row) => row.phone || '—' },
+      { key: 'inn', label: 'STIR', render: (row) => row.inn || '—' },
+      { key: 'created_at', label: 'Sana', sortable: true, render: (row) => formatDateUz(row.created_at) },
+      { key: 'status', label: 'Status', sortable: true, render: (row) => (
+        renderStatus?.(row) || (
+          <StatusBadge status={row.is_active ? 'active' : 'inactive'} label={row.is_active ? 'Faol' : 'Nofaol'} tone={row.is_active ? 'success' : 'neutral'} />
+        )
+      ) },
+    ]
+  }
+  if (title === 'Buyurtmalar') {
+    return [
+      { key: 'client', label: 'Mijoz', sortable: true, exportValue: (row) => rowTitle(title, row), render: (row) => rowTitle(title, row) },
+      { key: 'status', label: 'Status', sortable: true, render: (row) => {
+        if (renderStatus) return renderStatus(row)
+        const meta = ORDER_STATUS_BADGES[row.status] || { label: row.status_display || row.status, tone: 'neutral' }
+        return <StatusBadge status={row.status} label={meta.label} tone={meta.tone} />
+      } },
+      { key: 'total', label: 'Summa', exportValue: (row) => rowValue(title, row, session), render: (row) => rowValue(title, row, session) },
+      { key: 'created_at', label: 'Sana', sortable: true, render: (row) => formatDateUz(row.created_at) },
+    ]
+  }
+  if (title === 'Sotuvlar') {
+    return [
+      { key: 'product', label: 'Mahsulot', sortable: true, render: (row) => row.product_name || row.product || '—' },
+      { key: 'client', label: 'Mijoz', render: (row) => row.client_name || row.sold_to || '—' },
+      { key: 'total', label: 'Summa', sortable: true, render: (row) => rowValue(title, row, session) },
+      { key: 'created_at', label: 'Sana', sortable: true, render: (row) => formatDateUz(row.sold_date || row.created_at) },
+    ]
+  }
+  if (title === 'Import') {
+    return [
+      { key: 'product', label: 'Mahsulot', sortable: true, exportValue: (row) => rowTitle(title, row), render: (row) => rowTitle(title, row) },
+      { key: 'status', label: 'Status', sortable: true, render: (row) => {
+        if (renderStatus) return renderStatus(row)
+        const meta = ORDER_STATUS_BADGES[row.status] || { label: row.status_display || row.status, tone: 'neutral' }
+        return <StatusBadge status={row.status} label={meta.label} tone={meta.tone} />
+      } },
+      { key: 'total', label: 'Summa', render: (row) => rowValue(title, row, session) },
+      { key: 'created_at', label: 'Sana', sortable: true, render: (row) => formatDateUz(row.expected_date || row.created_at) },
+    ]
+  }
+  if (title === 'Ombor') {
+    return [
+      { key: 'name', label: 'Mahsulot', sortable: true, render: (row) => row.name || '—' },
+      { key: 'serial', label: 'Seriya', render: (row) => row.serial_number || '—' },
+      { key: 'quantity', label: 'Qoldiq', sortable: true, render: (row) => rowValue(title, row, session) },
+      { key: 'created_at', label: 'Joy', render: (row) => row.warehouse_location || '—' },
+    ]
+  }
+  if (title === 'Kassa') {
+    return [
+      { key: 'client', label: 'Mijoz', sortable: true, render: (row) => row.client_name || '—' },
+      { key: 'status', label: 'Status', sortable: true, render: (row) => {
+        const meta = ORDER_STATUS_BADGES[row.status] || { label: row.status_display || row.status, tone: 'neutral' }
+        return <StatusBadge status={row.status} label={meta.label} tone={meta.tone} />
+      } },
+      { key: 'total', label: 'Summa', render: (row) => rowValue(title, row, session) },
+      { key: 'created_at', label: 'Muddat', sortable: true, render: (row) => formatDateUz(row.due_date) },
+    ]
+  }
+  if (title === 'Xarajatlar') {
+    return [
+      { key: 'type', label: 'Toifa', render: (row) => row.expense_type_name || row.expense_type || '—' },
+      { key: 'amount', label: 'Summa', sortable: true, render: (row) => `${money(row.amount)} ${row.currency || 'UZS'}` },
+      { key: 'created_at', label: 'Sana', sortable: true, render: (row) => formatDateUz(row.date || row.created_at) },
+      { key: 'comment', label: 'Izoh', render: (row) => row.comment || '—' },
+    ]
+  }
+  return []
+}
+
 function ContractDetailModal({ id, close, onNavigate }) {
   const [detail, setDetail] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -2176,11 +2594,20 @@ function ProductContractsModal({ product, rows, close, onViewAll, onViewDetail }
   )
 }
 
-function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onNavigate }) {
+function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onNavigate, navigateToPath, initialOrderHistoryId = null }) {
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [searchTerm, setSearchTerm] = useState('')
+  const [listFilters, setListFilters] = useState({ status: '', client: '', date_from: '', date_to: '' })
+  const [page, setPage] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
+  const [sortKey, setSortKey] = useState('created_at')
+  const [sortDir, setSortDir] = useState('desc')
+  const [selectedIds, setSelectedIds] = useState([])
+  const [statusChange, setStatusChange] = useState(null)
+  const pageSize = 25
+  const useGrid = GRID_PAGES.has(title)
   const [editing, setEditing] = useState(null)
   const [opening, setOpening] = useState(false)
   const [paying, setPaying] = useState(null)
@@ -2188,19 +2615,41 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
   const [stockProduct, setStockProduct] = useState(null)
   const [contractProduct, setContractProduct] = useState(null)
   const [contractDetailId, setContractDetailId] = useState(null)
+  const [orderHistoryId, setOrderHistoryId] = useState(initialOrderHistoryId)
+
+  useEffect(() => {
+    if (initialOrderHistoryId) setOrderHistoryId(initialOrderHistoryId)
+  }, [initialOrderHistoryId])
+
+  const apiSortField = GRID_SORT_FIELDS[title]?.[sortKey] || sortKey
+  const apiOrdering = `${sortDir === 'desc' ? '-' : ''}${apiSortField}`
 
   const load = useCallback(async (silent = false, term = searchTerm) => {
     if (!resources[title]) return
     if (!silent) setLoading(true)
     try {
-      setRows(list(await resources[title].load(term ? { search: term } : {})))
+      const filterParams = useGrid ? buildListQueryParams(title, listFilters) : {}
+      const params = useGrid
+        ? { page, page_size: pageSize, ordering: apiOrdering, ...filterParams, ...(term ? { search: term } : {}) }
+        : (term ? { search: term } : {})
+      const data = await resources[title].load(params)
+      if (data?.results) {
+        setRows(data.results)
+        setTotalCount(data.count || 0)
+      } else {
+        const payload = list(data)
+        setRows(payload)
+        setTotalCount(payload.length)
+      }
+      setSelectedIds([])
     } catch (err) {
       if (!silent) notify(err.message)
     } finally {
       if (!silent) setLoading(false)
     }
-  }, [title, notify, searchTerm])
+  }, [title, notify, searchTerm, page, apiOrdering, useGrid, listFilters])
 
+  useEffect(() => { setPage(1) }, [searchTerm, title, listFilters])
   useEffect(() => { load() }, [load, reloadKey])
   useAutoRefresh(() => load(true))
 
@@ -2267,12 +2716,152 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
     }
   }
 
+  const handleSort = (key) => {
+    if (sortKey === key) setSortDir((value) => (value === 'asc' ? 'desc' : 'asc'))
+    else {
+      setSortKey(key)
+      setSortDir('desc')
+    }
+  }
+
+  const handleRowClick = (row) => {
+    if (title === 'Mijozlar') navigateToPath?.(clientDetailPath(row.id))
+    else if (title === 'Buyurtmalar') navigateToPath?.(`/buyurtmalar/${row.id}`)
+    else if (title === 'Shartnomalar') setContractDetailId(row.id)
+  }
+
+  const selectedRows = useMemo(
+    () => rows.filter((row) => selectedIds.includes(row.id)),
+    [rows, selectedIds],
+  )
+
+  const gridColumns = useMemo(() => getGridColumns(title, session, {
+    renderStatus: (row) => {
+      if (title === 'Buyurtmalar' && can(session, 'orders_manage')) {
+        const locked = ['fulfilled', 'cancelled'].includes(row.status)
+        const options = [
+          { value: row.status, label: ORDER_STATUS_BADGES[row.status]?.label || row.status_display || row.status },
+          ...(!locked ? [
+            { value: '__fulfilled__', label: '→ Yetkazildi' },
+            { value: '__cancelled__', label: '→ Bekor qilindi' },
+          ] : []),
+        ]
+        return (
+          <InlineStatusSelect
+            value={row.status}
+            options={options}
+            disabled={locked}
+            onChange={(next) => {
+              if (next === row.status) return
+              if (next === '__fulfilled__') setStatusChange({ mode: 'order', rows: [row], targetStatus: 'fulfilled' })
+              else if (next === '__cancelled__') setStatusChange({ mode: 'order', rows: [row], targetStatus: 'cancelled' })
+            }}
+          />
+        )
+      }
+      if (title === 'Import' && can(session, 'procurement_manage')) {
+        const locked = ['received', 'cancelled'].includes(row.status)
+        const transitions = {
+          new: ['new', 'confirmed', 'cancelled'],
+          confirmed: ['confirmed', 'received', 'cancelled'],
+          received: ['received'],
+          cancelled: ['cancelled'],
+        }
+        const allowed = transitions[row.status] || [row.status]
+        const options = allowed.map((value) => ({
+          value,
+          label: ORDER_STATUS_BADGES[value]?.label || value,
+        }))
+        return (
+          <InlineStatusSelect
+            value={row.status}
+            options={options}
+            disabled={locked}
+            onChange={(next) => {
+              if (next === row.status) return
+              setStatusChange({ mode: 'import', rows: [row], targetStatus: next })
+            }}
+          />
+        )
+      }
+      const meta = ORDER_STATUS_BADGES[row.status] || { label: row.status_display || row.status, tone: 'neutral' }
+      if (title === 'Mijozlar') {
+        return <StatusBadge status={row.is_active ? 'active' : 'inactive'} label={row.is_active ? 'Faol' : 'Nofaol'} tone={row.is_active ? 'success' : 'neutral'} />
+      }
+      return <StatusBadge status={row.status} label={meta.label} tone={meta.tone} />
+    },
+  }), [title, session])
+
+  const handleBulkExport = () => {
+    if (!selectedRows.length) return
+    exportRowsCsv(`${title.toLowerCase()}-export.csv`, gridColumns, selectedRows)
+    notify(`${selectedRows.length} ta yozuv eksport qilindi.`, 'success')
+  }
+
+  const handleBulkStatus = () => {
+    if (!selectedRows.length || title !== 'Import') return
+    setStatusChange({ mode: 'import', rows: selectedRows, targetStatus: listFilters.status || 'confirmed' })
+  }
+
+  const submitStatusChange = async (payload) => {
+    const { mode, rows: targetRows } = statusChange
+    const targetStatus = payload.targetStatus || statusChange.targetStatus
+    if (mode === 'order') {
+      for (const row of targetRows) {
+        if (targetStatus === 'fulfilled') {
+          await api.fulfillOrder(row.id, payload)
+        } else {
+          await api.cancelOrder(row.id, payload)
+        }
+      }
+      notify('Buyurtma statusi yangilandi.', 'success')
+    } else if (mode === 'import') {
+      for (const row of targetRows) {
+        const body = {
+          status: targetStatus,
+          asos: payload.asos,
+          contract_number: payload.contract_number || row.contract_number,
+          faktura: payload.faktura || row.faktura,
+        }
+        if (targetStatus === 'received') body.received_qty = payload.received_qty || row.quantity
+        await api.update('/orders/zakaz/', row.id, body)
+      }
+      notify('Import statusi yangilandi.', 'success')
+    }
+    setStatusChange(null)
+    refreshAfterChange()
+  }
+
+  const emptyCfg = emptyStateConfig(title)
+  const showEmptyCta = !searchTerm && !hasActiveListFilters(listFilters) && canCreate
+
+  const renderRowActions = (row) => (
+    <>
+      {title === 'Buyurtmalar' && (
+        <button className="row-action" onClick={() => setOrderHistoryId(row.id)} aria-label="Buyurtma tarixi" title="Buyurtma tarixi">
+          <ClockCounterClockwise size={18} />
+        </button>
+      )}
+      {canEditRows && <button className="row-action" disabled={opening} onClick={() => handleEdit(row)} aria-label="Tahrirlash"><PencilSimple size={18} /></button>}
+      {can(session, 'orders_manage') && title === 'Buyurtmalar' && !['fulfilled', 'cancelled'].includes(row.status) && (
+        <>
+          <button className="row-action" onClick={() => setOrderAction({ row, action: 'fulfill' })}>Yetkazish</button>
+          <button className="row-action" onClick={() => setOrderAction({ row, action: 'cancel' })}>Bekor</button>
+        </>
+      )}
+      {can(session, 'warehouse_manage') && title === 'Ombor' && <button className="row-action" onClick={() => setStockProduct(row)} aria-label="Kirim">Kirim</button>}
+      {can(session, 'cash_manage') && title === 'Kassa' && row.remaining !== '0' && (
+        <button className="row-action" onClick={() => setPaying(row)} aria-label="To‘lov"><CurrencyCircleDollar size={18} /></button>
+      )}
+    </>
+  )
+
   return (
     <div className="page resource-page">
       <div className="page-heading">
         <div>
           <p className="eyebrow">MODUL</p>
-          <h1>{title}</h1>
+          <h1>{getPageDisplayTitle(title)}</h1>
           {title === 'Shartnomalar' && (
             <p className="contracts-registry-note">
               Yozuvlar avtomatik yaratiladi (buyurtma, import, kirim). Qo‘lda qo‘shish mumkin emas.
@@ -2288,13 +2877,52 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
       </div>
       <section className="data-panel">
         <div className="panel-head">
-          <div><p className="eyebrow">RO‘YXAT</p><h3>{rows.length} ta yozuv</h3></div>
-          <form className="resource-search" onSubmit={handleSearch}>
-            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Qidirish" aria-label={`${title} qidirish`} />
-            <button type="submit" className="icon-button" aria-label="Qidirish"><MagnifyingGlass size={20} /></button>
-          </form>
+          <div><p className="eyebrow">RO‘YXAT</p><h3>{useGrid ? totalCount : rows.length} ta yozuv</h3></div>
+          <div className="panel-head-actions">
+            {useGrid && <ListFiltersPanel title={title} filters={listFilters} onChange={setListFilters} />}
+            <form className="resource-search" onSubmit={handleSearch}>
+              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Qidirish" aria-label={`${title} qidirish`} />
+              <button type="submit" className="icon-button" aria-label="Qidirish"><MagnifyingGlass size={20} /></button>
+            </form>
+          </div>
         </div>
-        {loading && !rows.length ? <SkeletonRows /> : !rows.length ? (
+        {useGrid && (
+          <BulkActionsBar count={selectedIds.length} onClear={() => setSelectedIds([])}>
+            <button type="button" className="secondary-button" disabled={!selectedIds.length} onClick={handleBulkExport}>
+              <DownloadSimple size={18} />
+              Eksport
+            </button>
+            {title === 'Import' && can(session, 'procurement_manage') && (
+              <button type="button" className="secondary-button" disabled={!selectedIds.length} onClick={handleBulkStatus}>
+                Status o‘zgartirish
+              </button>
+            )}
+          </BulkActionsBar>
+        )}
+        {useGrid ? (
+          <>
+            <DataTable
+              columns={gridColumns}
+              rows={rows}
+              sortKey={sortKey}
+              sortDir={sortDir}
+              onSort={handleSort}
+              loading={loading}
+              onRowClick={['Mijozlar', 'Buyurtmalar', 'Shartnomalar'].includes(title) ? handleRowClick : undefined}
+              renderActions={renderRowActions}
+              emptyLabel={title === 'Shartnomalar' ? 'Hali reestr yozuvi yo‘q.' : emptyCfg.label}
+              emptyCta={showEmptyCta && emptyCfg.cta ? {
+                label: emptyCfg.label,
+                ctaLabel: emptyCfg.cta,
+                onCta: () => setEditing({}),
+              } : null}
+              selectable={useGrid}
+              selectedIds={selectedIds}
+              onSelectionChange={setSelectedIds}
+            />
+            <TablePagination page={page} pageSize={pageSize} total={totalCount} onPageChange={setPage} />
+          </>
+        ) : loading && !rows.length ? <SkeletonRows /> : !rows.length ? (
           title === 'Shartnomalar' ? (
             <Empty label="Hali reestr yozuvi yo‘q. Buyurtma, import yoki ombor kirimi amalga oshganda yozuvlar avtomatik paydo bo‘ladi." />
           ) : (
@@ -2323,7 +2951,6 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
                       <b>{row.title}</b>
                       <small>{row.message}</small>
                     </div>
-                    <span className="bar"><i style={{ width: row.is_read ? '100%' : '38%' }} /></span>
                     <b>{row.is_read ? 'O‘qilgan' : 'Yangi'}</b>
                     <button className="row-action" onClick={() => handleMarkRead(row.id)}>{row.is_read ? '✓' : 'O‘qish'}</button>
                   </>
@@ -2333,9 +2960,13 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
                       <b>{rowTitle(title, row)}</b>
                       <small>{rowMeta(title, row)}</small>
                     </div>
-                    <span className="bar"><i style={{ width: '58%' }} /></span>
                     <b>{rowValue(title, row, session)}</b>
                     <div className="row-actions">
+                      {title === 'Buyurtmalar' && (
+                        <button className="row-action" onClick={() => setOrderHistoryId(row.id)} aria-label="Buyurtma tarixi" title="Buyurtma tarixi">
+                          <ClockCounterClockwise size={18} />
+                        </button>
+                      )}
             {canEditRows && <button className="row-action" disabled={opening} onClick={() => handleEdit(row)} aria-label="Tahrirlash"><PencilSimple size={18} /></button>}
                       {can(session, 'orders_manage') && title === 'Buyurtmalar' && !['fulfilled', 'cancelled'].includes(row.status) && (
                         <>
@@ -2401,7 +3032,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
         : title === 'Foydalanuvchilar'
             ? <UserEditor item={editing.id ? editing : null} close={() => setEditing(null)} done={() => { setEditing(null); refreshAfterChange() }} notify={notify} />
           : title === 'Xarajatlar'
-            ? <ExpenseEditor item={editing.id ? editing : null} close={() => setEditing(null)} done={() => { setEditing(null); refreshAfterChange() }} notify={notify} />
+            ? <ExpenseEditor item={editing.id ? editing : null} close={() => setEditing(null)} done={() => { setEditing(null); refreshAfterChange() }} notify={notify} session={session} />
             : <Editor title={title} item={editing} path={resources[title].path} close={() => setEditing(null)} done={() => { setEditing(null); refreshAfterChange() }} notify={notify} session={session} />
       )}
       {paying && <PaymentEditor item={paying} close={() => setPaying(null)} done={() => { setPaying(null); refreshAfterChange() }} notify={notify} />}
@@ -2420,11 +3051,27 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
             : null}
         />
       )}
+      {orderHistoryId && (
+        <OrderHistoryModal
+          orderId={orderHistoryId}
+          close={() => setOrderHistoryId(null)}
+          notify={notify}
+        />
+      )}
       {contractDetailId && (
         <ContractDetailModal
           id={contractDetailId}
           close={() => setContractDetailId(null)}
           onNavigate={onNavigate}
+        />
+      )}
+      {statusChange && (
+        <StatusChangeModal
+          mode={statusChange.mode}
+          rows={statusChange.rows}
+          targetStatus={statusChange.targetStatus}
+          onClose={() => setStatusChange(null)}
+          onSubmit={submitStatusChange}
         />
       )}
     </div>
@@ -2437,11 +3084,39 @@ const fields = {
   Qoldiqlar: [['product', 'Mahsulot ID', true], ['quantity', 'Miqdor', true], ['reserved_quantity', 'Bron miqdor'], ['warehouse_location', 'Ombordagi joy', true]],
 }
 
+function validateClientForm(form) {
+  const errors = {}
+  if (form.client_type === 'legal') {
+    if (!(form.company_name || '').trim()) errors.company_name = 'Korxona nomi kiritilishi shart'
+    if (!(form.phone || '').trim()) errors.phone = 'Telefon kiritilishi shart'
+  } else {
+    if (!(form.full_name || '').trim()) errors.full_name = 'To‘liq ism kiritilishi shart'
+    if (!(form.pinfl || '').trim()) errors.pinfl = 'JSHR kiritilishi shart'
+    if (!(form.passport_number || '').trim()) errors.passport_number = 'Pasport kiritilishi shart'
+    if (!(form.phone || '').trim()) errors.phone = 'Telefon kiritilishi shart'
+  }
+  if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) errors.email = 'E-mail noto‘g‘ri'
+  return errors
+}
+
+function validateEditorForm(title, form, visibleFields) {
+  const errors = {}
+  if (title === 'Mijozlar') return validateClientForm(form)
+  visibleFields?.forEach(([key, label, required]) => {
+    if (required && !(String(form[key] ?? '').trim())) errors[key] = `${label} kiritilishi shart`
+  })
+  return errors
+}
+
 function Editor({ title, item, path, close, done, notify, session }) {
   const [form, setForm] = useState(() => ({ ...item, client_type: item?.client_type || 'individual' }))
   const [saving, setSaving] = useState(false)
+  const [errors, setErrors] = useState({})
+  const [deleteConfirm, setDeleteConfirm] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [categories, setCategories] = useState([])
   const canManagePrices = can(session, 'prices_manage')
+  const canDelete = Boolean(item?.id && ['Mijozlar', 'Ombor', 'Kategoriyalar', 'Qoldiqlar'].includes(title))
 
   useEffect(() => {
     if (title !== 'Kategoriyalar') return
@@ -2468,6 +3143,12 @@ function Editor({ title, item, path, close, done, notify, session }) {
 
   const submit = async (event) => {
     event.preventDefault()
+    const nextErrors = validateEditorForm(title, form, visibleFields)
+    if (Object.keys(nextErrors).length) {
+      setErrors(nextErrors)
+      return
+    }
+    setErrors({})
     setSaving(true)
     const payload = Object.fromEntries(Object.entries(form).filter(([key, value]) => !['id', 'created_at', 'quantity_in_stock', 'available_quantity', 'reserved_quantity', 'stock_status', 'category_name', 'unit_display'].includes(key) && value !== undefined && value !== ''))
     if (title === 'Ombor') {
@@ -2514,11 +3195,25 @@ function Editor({ title, item, path, close, done, notify, session }) {
     }
   }
 
+  const handleDelete = async () => {
+    setDeleting(true)
+    try {
+      await api.remove(path, item.id)
+      notify('Yozuv o‘chirildi.', 'success')
+      done()
+    } catch (err) {
+      notify(err.message)
+    } finally {
+      setDeleting(false)
+      setDeleteConfirm(false)
+    }
+  }
+
   return (
     <div className="modal-backdrop" role="presentation">
       <form className="editor" onSubmit={submit}>
         <div className="editor-head">
-          <div><p className="eyebrow">{item.id ? 'TAHRIRLASH' : 'YANGI YOZUV'}</p><h3>{title.slice(0, -1)} ma’lumotlari</h3></div>
+          <div><p className="eyebrow">{item.id ? 'TAHRIRLASH' : 'YANGI YOZUV'}</p><h3>{editorSectionTitle(title)} ma’lumotlari</h3></div>
           <button type="button" className="icon-button" onClick={close}><X size={20} /></button>
         </div>
         <div className="form-grid">
@@ -2532,7 +3227,7 @@ function Editor({ title, item, path, close, done, notify, session }) {
               </label>
               {form.client_type === 'legal' ? (
                 <>
-                  <label>Korxona nomi<input required value={form.company_name ?? ''} onChange={(event) => setForm({ ...form, company_name: event.target.value })} /></label>
+                  <label>Korxona nomi<input value={form.company_name ?? ''} onChange={(event) => setForm({ ...form, company_name: event.target.value })} /><FieldError message={errors.company_name} /></label>
                   <label>INN (STIR)<input value={form.inn ?? ''} onChange={(event) => setForm({ ...form, inn: event.target.value })} /></label>
                   <label>Rahbar JSHSHIR<input value={form.director_jshshr ?? ''} onChange={(event) => setForm({ ...form, director_jshshr: event.target.value })} /></label>
                   <label>Rahbar F.I.Sh.<input value={form.director_fish ?? ''} onChange={(event) => setForm({ ...form, director_fish: event.target.value })} /></label>
@@ -2540,18 +3235,18 @@ function Editor({ title, item, path, close, done, notify, session }) {
                   <label>OKED<input value={form.oked ?? ''} onChange={(event) => setForm({ ...form, oked: event.target.value })} /></label>
                   <label>Bank nomi<input value={form.bank_name ?? ''} onChange={(event) => setForm({ ...form, bank_name: event.target.value })} /></label>
                   <label>Hisob raqami<input value={form.bank_account ?? ''} onChange={(event) => setForm({ ...form, bank_account: event.target.value })} /></label>
-                  <label>Telefon<input required value={form.phone ?? ''} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></label>
-                  <label>E-mail<input type="email" value={form.email ?? ''} onChange={(event) => setForm({ ...form, email: event.target.value })} /></label>
+                  <label>Telefon<input value={form.phone ?? ''} onChange={(event) => setForm({ ...form, phone: event.target.value })} /><FieldError message={errors.phone} /></label>
+                  <label>E-mail<input type="email" value={form.email ?? ''} onChange={(event) => setForm({ ...form, email: event.target.value })} /><FieldError message={errors.email} /></label>
                   <label>Manzil<input value={form.address ?? ''} onChange={(event) => setForm({ ...form, address: event.target.value })} /></label>
                   <label className="full-width">Izoh<textarea value={form.comment ?? ''} onChange={(event) => setForm({ ...form, comment: event.target.value })} rows="3" /></label>
                 </>
               ) : (
                 <>
-                  <label>To‘liq ism<input required value={form.full_name ?? ''} onChange={(event) => setForm({ ...form, full_name: event.target.value })} /></label>
-                  <label>JSHR (PINFL)<input required value={form.pinfl ?? ''} onChange={(event) => setForm({ ...form, pinfl: event.target.value })} /></label>
-                  <label>Pasport seriya va raqami<input required value={form.passport_number ?? ''} onChange={(event) => setForm({ ...form, passport_number: event.target.value })} /></label>
-                  <label>Telefon<input required value={form.phone ?? ''} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></label>
-                  <label>E-mail<input type="email" value={form.email ?? ''} onChange={(event) => setForm({ ...form, email: event.target.value })} /></label>
+                  <label>To‘liq ism<input value={form.full_name ?? ''} onChange={(event) => setForm({ ...form, full_name: event.target.value })} /><FieldError message={errors.full_name} /></label>
+                  <label>JSHR (PINFL)<input value={form.pinfl ?? ''} onChange={(event) => setForm({ ...form, pinfl: event.target.value })} /><FieldError message={errors.pinfl} /></label>
+                  <label>Pasport seriya va raqami<input value={form.passport_number ?? ''} onChange={(event) => setForm({ ...form, passport_number: event.target.value })} /><FieldError message={errors.passport_number} /></label>
+                  <label>Telefon<input value={form.phone ?? ''} onChange={(event) => setForm({ ...form, phone: event.target.value })} /><FieldError message={errors.phone} /></label>
+                  <label>E-mail<input type="email" value={form.email ?? ''} onChange={(event) => setForm({ ...form, email: event.target.value })} /><FieldError message={errors.email} /></label>
                   <label>Manzil<input value={form.address ?? ''} onChange={(event) => setForm({ ...form, address: event.target.value })} /></label>
                   <label className="full-width">Izoh<textarea value={form.comment ?? ''} onChange={(event) => setForm({ ...form, comment: event.target.value })} rows="3" /></label>
                 </>
@@ -2577,14 +3272,31 @@ function Editor({ title, item, path, close, done, notify, session }) {
               ) : (
                 <input required={required} value={form[key] ?? ''} type={key === 'email' ? 'email' : ['min_quantity', 'quantity', 'purchase_price', 'selling_price', 'delivery_price'].includes(key) ? 'number' : 'text'} step={['purchase_price', 'selling_price', 'delivery_price'].includes(key) ? '0.01' : undefined} min={['min_quantity', 'quantity'].includes(key) ? '0' : undefined} onChange={(event) => setForm({ ...form, [key]: event.target.value })} />
               )}
+              <FieldError message={errors[key]} />
             </label>
           ))}
         </div>
         <div className="editor-actions">
+          {canDelete && (
+            <button type="button" className="danger-button editor-delete" onClick={() => setDeleteConfirm(true)}>
+              <Trash size={18} />
+              O‘chirish
+            </button>
+          )}
           <button type="button" className="secondary-button" onClick={close}>Bekor qilish</button>
           <button className="primary-button" disabled={saving}>{saving ? <SpinnerGap size={18} className="spin" /> : 'Saqlash'}</button>
         </div>
       </form>
+      {deleteConfirm && (
+        <ConfirmDialog
+          title="Yozuvni o‘chirish"
+          message={`"${rowTitle(title, item)}" yozuvini o‘chirishni tasdiqlaysizmi? Bu amalni qaytarib bo‘lmaydi.`}
+          confirmLabel="Ha, o‘chirish"
+          loading={deleting}
+          onCancel={() => setDeleteConfirm(false)}
+          onConfirm={handleDelete}
+        />
+      )}
     </div>
   )
 }
@@ -2596,15 +3308,26 @@ function SaleEditor({ close, done, notify, item = null, session }) {
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState(() => ({ client: item?.client || '', product: item?.product || '', quantity: item?.quantity || '1', sold_price: item?.sold_price || '', sold_to: item?.sold_to || '', destination: item?.destination || '', sold_date: item?.sold_date || new Date().toISOString().slice(0, 10), comment: item?.comment || '' }))
   const [items, setItems] = useState([{ product: '', quantity: '1', sold_price: '', comment: '' }])
+  const [errors, setErrors] = useState({})
+  const [deleteConfirm, setDeleteConfirm] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
-    Promise.all([api.clients(), api.products()])
+    Promise.all([api.clients({ page_size: 500 }), api.products()])
       .then(([clientData, productData]) => { setClients(list(clientData)); setProducts(list(productData)) })
       .catch((err) => notify(err.message))
   }, [notify])
 
   const submit = async (event) => {
     event.preventDefault()
+    const nextErrors = {}
+    if (item?.id && !form.product) nextErrors.product = 'Mahsulot tanlanishi shart'
+    if (!item?.id && !items.some((row) => row.product)) nextErrors.items = 'Kamida bitta mahsulot tanlang'
+    if (Object.keys(nextErrors).length) {
+      setErrors(nextErrors)
+      return
+    }
+    setErrors({})
     setSaving(true)
     try {
       const payload = {
@@ -2641,6 +3364,20 @@ function SaleEditor({ close, done, notify, item = null, session }) {
     }
   }
 
+  const handleDelete = async () => {
+    setDeleting(true)
+    try {
+      await api.remove('/sales/', item.id)
+      notify('Sotuv o‘chirildi.', 'success')
+      done()
+    } catch (err) {
+      notify(err.message)
+    } finally {
+      setDeleting(false)
+      setDeleteConfirm(false)
+    }
+  }
+
   return (
     <div className="modal-backdrop" role="presentation">
       <form className="editor" onSubmit={submit}>
@@ -2649,10 +3386,18 @@ function SaleEditor({ close, done, notify, item = null, session }) {
           <button type="button" className="icon-button" onClick={close}><X size={20} /></button>
         </div>
         <div className="form-grid">
-          <label>Mijoz<select value={form.client} onChange={(event) => setForm({ ...form, client: event.target.value })}><option value="">Mijoz tanlanmagan</option>{clients.map((client) => <option value={client.id} key={client.id}>{client.company_name || client.full_name}</option>)}</select></label>
+          <SearchableCombobox
+            id="sale-client"
+            label="Mijoz"
+            value={form.client}
+            onChange={(value) => setForm({ ...form, client: value })}
+            options={clients}
+            getLabel={(client) => client.company_name || client.full_name || '—'}
+            placeholder="Mijoz qidirish..."
+          />
           {item?.id ? (
             <>
-              <label>Mahsulot<select required value={form.product} onChange={(event) => setForm({ ...form, product: event.target.value })}><option value="">Mahsulotni tanlang</option>{products.map((product) => <option value={product.id} key={product.id}>{product.name} — {product.serial_number} ({product.unit_display || unitLabel(product.unit)})</option>)}</select></label>
+              <label>Mahsulot<select required value={form.product} onChange={(event) => setForm({ ...form, product: event.target.value })}><option value="">Mahsulotni tanlang</option>{products.map((product) => <option value={product.id} key={product.id}>{product.name} — {product.serial_number} ({product.unit_display || unitLabel(product.unit)})</option>)}</select><FieldError message={errors.product} /></label>
               <label>Miqdor<input required min="1" type="number" value={form.quantity} onChange={(event) => setForm({ ...form, quantity: event.target.value })} /></label>
               {showPrices && <label>Sotuv narxi<input required min="0" step="0.01" type="number" value={form.sold_price} onChange={(event) => setForm({ ...form, sold_price: event.target.value })} /></label>}
             </>
@@ -2668,6 +3413,7 @@ function SaleEditor({ close, done, notify, item = null, session }) {
                 </div>
               ))}
               <button type="button" className="secondary-button add-line-button" onClick={() => setItems([...items, { product: '', quantity: '1', sold_price: '', comment: '' }])}><Plus size={16} />Mahsulot qo‘shish</button>
+              <FieldError message={errors.items} />
             </div>
           )}
           <label>Sotuvchi/kimga<select value={form.sold_to} onChange={(event) => setForm({ ...form, sold_to: event.target.value })}><option value="">Tanlanmagan</option><option value="Mijoz">Mijoz</option><option value="Operator">Operator</option><option value="Boshqa">Boshqa</option></select></label>
@@ -2676,20 +3422,39 @@ function SaleEditor({ close, done, notify, item = null, session }) {
           <label className="full-width">Izoh<textarea value={form.comment} onChange={(event) => setForm({ ...form, comment: event.target.value })} rows="3" /></label>
         </div>
         <div className="editor-actions">
+          {item?.id && (
+            <button type="button" className="danger-button editor-delete" onClick={() => setDeleteConfirm(true)}>
+              <Trash size={18} />
+              O‘chirish
+            </button>
+          )}
           <button type="button" className="secondary-button" onClick={close}>Bekor qilish</button>
           <button className="primary-button" disabled={saving}>{saving ? <SpinnerGap size={18} className="spin" /> : item?.id ? 'Yangilash' : 'Saqlash'}</button>
         </div>
       </form>
+      {deleteConfirm && (
+        <ConfirmDialog
+          title="Sotuvni o‘chirish"
+          message="Bu sotuvni o‘chirishni tasdiqlaysizmi? Ombor qoldig‘i qayta tiklanadi."
+          confirmLabel="Ha, o‘chirish"
+          loading={deleting}
+          onCancel={() => setDeleteConfirm(false)}
+          onConfirm={handleDelete}
+        />
+      )}
     </div>
   )
 }
 
-function ExpenseEditor({ close, done, notify, item = null }) {
+function ExpenseEditor({ close, done, notify, item = null, session }) {
   const [expenseTypes, setExpenseTypes] = useState([])
   const [subTypes, setSubTypes] = useState([])
   const [saving, setSaving] = useState(false)
   const [file, setFile] = useState(null)
   const [form, setForm] = useState(() => ({ expense_type: item?.expense_type || '', sub_type: item?.sub_type || '', amount: item?.amount || '', currency: item?.currency || 'UZS', date: item?.date || new Date().toISOString().slice(0, 10), comment: item?.comment || '' }))
+  const [errors, setErrors] = useState({})
+  const [deleteConfirm, setDeleteConfirm] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     api.expenseTypes()
@@ -2709,6 +3474,14 @@ function ExpenseEditor({ close, done, notify, item = null }) {
 
   const submit = async (event) => {
     event.preventDefault()
+    const nextErrors = {}
+    if (!form.expense_type) nextErrors.expense_type = 'Toifa tanlanishi shart'
+    if (!form.amount || Number(form.amount) <= 0) nextErrors.amount = 'Summa kiritilishi shart'
+    if (Object.keys(nextErrors).length) {
+      setErrors(nextErrors)
+      return
+    }
+    setErrors({})
     setSaving(true)
     try {
       const payload = new FormData()
@@ -2730,6 +3503,20 @@ function ExpenseEditor({ close, done, notify, item = null }) {
     }
   }
 
+  const handleDelete = async () => {
+    setDeleting(true)
+    try {
+      await api.remove('/expenses/expenses/', item.id)
+      notify('Rasxod o‘chirildi.', 'success')
+      done()
+    } catch (err) {
+      notify(err.message)
+    } finally {
+      setDeleting(false)
+      setDeleteConfirm(false)
+    }
+  }
+
   return (
     <div className="modal-backdrop" role="presentation">
       <form className="editor" onSubmit={submit}>
@@ -2738,10 +3525,13 @@ function ExpenseEditor({ close, done, notify, item = null }) {
           <button type="button" className="icon-button" onClick={close}><X size={20} /></button>
         </div>
         <div className="form-grid">
-          <label>Toifa<select required value={form.expense_type} onChange={(event) => setForm({ ...form, expense_type: event.target.value, sub_type: '' })}><option value="">Tanlang</option>{expenseTypes.map((type) => <option value={type.id} key={type.id}>{type.name}</option>)}</select></label>
+          <label>Toifa<select required value={form.expense_type} onChange={(event) => setForm({ ...form, expense_type: event.target.value, sub_type: '' })}><option value="">Tanlang</option>{expenseTypes.map((type) => <option value={type.id} key={type.id}>{type.name}</option>)}</select><FieldError message={errors.expense_type} /></label>
           <label>Turi<select value={form.sub_type} onChange={(event) => setForm({ ...form, sub_type: event.target.value })}><option value="">Tanlanmagan</option>{subTypes.map((type) => <option value={type.id} key={type.id}>{type.name}</option>)}</select></label>
-          <label>Summa<input required min="0" step="0.01" type="number" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
+          <label>Summa<input required min="0" step="0.01" type="number" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /><FieldError message={errors.amount} /></label>
           <label>Valyuta<select value={form.currency} onChange={(event) => setForm({ ...form, currency: event.target.value })}><option value="UZS">UZS</option><option value="USD">USD</option></select></label>
+          {form.currency === 'USD' && session && (
+            <div className="full-width"><FxRatePanel session={session} notify={notify} compact /></div>
+          )}
           <label>Sana<input type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /></label>
           <label className="full-width file-field">Fayl
             <span className="file-picker">
@@ -2753,15 +3543,31 @@ function ExpenseEditor({ close, done, notify, item = null }) {
           <label className="full-width">Izoh<textarea value={form.comment} onChange={(event) => setForm({ ...form, comment: event.target.value })} rows="3" /></label>
         </div>
         <div className="editor-actions">
+          {item?.id && (
+            <button type="button" className="danger-button editor-delete" onClick={() => setDeleteConfirm(true)}>
+              <Trash size={18} />
+              O‘chirish
+            </button>
+          )}
           <button type="button" className="secondary-button" onClick={close}>Bekor qilish</button>
           <button className="primary-button" disabled={saving}>{saving ? <SpinnerGap size={18} className="spin" /> : item?.id ? 'Yangilash' : 'Saqlash'}</button>
         </div>
       </form>
+      {deleteConfirm && (
+        <ConfirmDialog
+          title="Rasxodni o‘chirish"
+          message="Bu rasxod yozuvini o‘chirishni tasdiqlaysizmi?"
+          confirmLabel="Ha, o‘chirish"
+          loading={deleting}
+          onCancel={() => setDeleteConfirm(false)}
+          onConfirm={handleDelete}
+        />
+      )}
     </div>
   )
 }
 
-function OrderEditor({ close, done, notify, item = null, session }) {
+function OrderEditor({ close, done, notify, item = null, session, prefillClientId = null }) {
   const showPrices = can(session, 'prices_manage')
   const [clients, setClients] = useState([])
   const [products, setProducts] = useState([])
@@ -2777,14 +3583,20 @@ function OrderEditor({ close, done, notify, item = null, session }) {
   }
 
   useEffect(() => {
-    Promise.all([api.clients(), api.products()])
+    Promise.all([api.clients({ page_size: 500 }), api.products()])
       .then(([clientData, productData]) => { setClients(list(clientData)); setProducts(list(productData)) })
       .catch((err) => notify(err.message))
   }, [notify])
 
   useEffect(() => {
+    if (!item && prefillClientId) {
+      setForm((current) => ({ ...current, client: prefillClientId }))
+    }
+  }, [item, prefillClientId])
+
+  useEffect(() => {
     if (!item) {
-      setForm({ client: '', contract_number: '', contract_date: todayValue(), due_date: currentYearEndValue(), prepaid_amount: '0', product: '', itemId: null, quantity: '1', unit_price: '', comment: '', asos: '' })
+      setForm({ client: prefillClientId || '', contract_number: '', contract_date: todayValue(), due_date: currentYearEndValue(), prepaid_amount: '0', product: '', itemId: null, quantity: '1', unit_price: '', comment: '', asos: '' })
       setItems([{ product: '', quantity: '1', unit_price: '' }])
       setContractNumberEdited(false)
       return
@@ -2870,7 +3682,15 @@ function OrderEditor({ close, done, notify, item = null, session }) {
           <button type="button" className="icon-button" onClick={close}><X size={20} /></button>
         </div>
         <div className="form-grid">
-          <label>Mijoz<select value={form.client} onChange={(event) => setForm({ ...form, client: event.target.value })}><option value="">Mijoz tanlanmagan</option>{clients.map((client) => <option value={client.id} key={client.id}>{client.company_name || client.full_name}</option>)}</select></label>
+          <SearchableCombobox
+            id="order-client"
+            label="Mijoz"
+            value={form.client}
+            onChange={(value) => setForm({ ...form, client: value })}
+            options={clients}
+            getLabel={(client) => client.company_name || client.full_name || '—'}
+            placeholder="Mijoz qidirish..."
+          />
           <label>Shartnoma raqami<input value={form.contract_number} onChange={(event) => updateContractNumber(event.target.value)} placeholder="Masalan: 12/1108" inputMode="numeric" pattern="[0-9/]*" /></label>
           <label>Shartnoma tuzilgan sana<input type="date" value={form.contract_date} onChange={(event) => setForm({ ...form, contract_date: event.target.value })} /></label>
           <label>Yetkazish muddati<input type="date" readOnly value={form.due_date || currentYearEndValue()} title="Joriy yil 31-dekabr — o‘zgartirib bo‘lmaydi" /></label>
@@ -3179,6 +3999,9 @@ function ZakazEditor({ close, done, notify, item = null, session }) {
             <label>Valyuta<select value={form.currency} onChange={(event) => setForm({ ...form, currency: event.target.value })}><option value="UZS">UZS</option><option value="USD">USD</option></select></label>
             <label>To‘lov statusi<select value={form.payment_status} onChange={(event) => setForm({ ...form, payment_status: event.target.value })}><option value="unpaid">To‘lanmagan</option><option value="partial">Qisman</option><option value="paid">To‘langan</option></select></label>
           </>}
+          {form.currency === 'USD' && showPrices && !isBackorder && (
+            <div className="full-width"><FxRatePanel session={session} notify={notify} compact /></div>
+          )}
           {isManagement && <label>Status<select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value })}><option value="new">Yangi</option><option value="confirmed">Tasdiqlandi</option><option value="received">Qabul qilindi</option><option value="cancelled">Bekor qilindi</option></select></label>}
           <label>Yetkazuvchi<input value={form.supplier} onChange={(event) => setForm({ ...form, supplier: event.target.value })} /></label>
           <label>Shartnoma raqami<input value={form.contract_number} onChange={(event) => setForm({ ...form, contract_number: event.target.value.replace(/[^\d/]/g, '') })} placeholder="12/1108" /></label>
@@ -3910,18 +4733,17 @@ function EInvoicePage({ notify, session }) {
 
           <section className="e-invoice-section">
             <h3>Hamkorning ma’lumotlari</h3>
-            <label className={errors.client ? 'field-invalid' : ''}>Mijoz
-              <select
-                value={editing.client || ''}
-                onChange={(e) => { clearFieldError('client'); setEditing({ ...editing, client: e.target.value }) }}
-                onBlur={handleFieldBlur}
-                aria-invalid={Boolean(errors.client)}
-              >
-                <option value="">Tanlang</option>
-                {clients.map((client) => <option value={client.id} key={client.id}>{client.company_name || client.full_name}</option>)}
-              </select>
-              <EInvoiceFieldError message={errors.client} />
-            </label>
+            <SearchableCombobox
+              id="e-invoice-client"
+              label="Mijoz"
+              value={editing.client || ''}
+              onChange={(value) => { clearFieldError('client'); setEditing({ ...editing, client: value }) }}
+              options={clients}
+              getLabel={(client) => client.company_name || client.full_name || '—'}
+              placeholder="Mijoz qidirish..."
+              error={errors.client}
+              required
+            />
             {selectedClient && (
               <div className="info-grid">
                 <div><dt>STIR/INN</dt><dd>{selectedClient.inn || '—'}</dd></div>

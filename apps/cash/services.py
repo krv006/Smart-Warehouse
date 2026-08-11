@@ -6,7 +6,7 @@ import urllib3
 
 from django.utils import timezone
 
-from apps.cash.models import ExchangeRate, ExchangeRateSettings
+from apps.cash.models import ExchangeRate
 
 
 INFINBANK_EXCHANGE_RATES_URL = 'https://www.infinbank.com/uz/private/exchange-rates/'
@@ -101,22 +101,8 @@ def _request_infinbank(verify=True):
 
 
 def sync_today_usd_rate(*, force=False):
+    """Infinbank kursini yangilaydi — qo'lda kurs alohida saqlanadi va bloklamaydi."""
     today = timezone.localdate()
-    settings = ExchangeRateSettings.get_settings()
-    if not force and not settings.auto_fetch_enabled:
-        latest = ExchangeRate.get_latest(ExchangeRate.USD)
-        if latest:
-            return latest, False
-        raise ExchangeRateFetchError('Avtomatik kurs olish o\'chirilgan.')
-    manual_rate = (
-        ExchangeRate.objects
-        .filter(currency=ExchangeRate.USD, rate_date=today, manual_override=True)
-        .order_by('-created_at')
-        .first()
-    )
-    if manual_rate:
-        return manual_rate, False
-
     mb_rate = fetch_infinbank_usd_mb_rate()
     rate = (
         ExchangeRate.objects
@@ -136,3 +122,29 @@ def sync_today_usd_rate(*, force=False):
     rate.note = f'{INFINBANK_EXCHANGE_RATES_URL} dan avtomatik olingan MB kurs'
     rate.save()
     return rate, True
+
+
+def get_today_rate(*, manual):
+    today = timezone.localdate()
+    return (
+        ExchangeRate.objects
+        .filter(currency=ExchangeRate.USD, rate_date=today, manual_override=manual)
+        .order_by('-created_at')
+        .first()
+    )
+
+
+def get_active_rate_record():
+    from apps.cash.models import ExchangeRateSettings
+
+    settings = ExchangeRateSettings.get_settings()
+    auto = get_today_rate(manual=False) or ExchangeRate.get_latest(ExchangeRate.USD)
+    manual = get_today_rate(manual=True)
+    if settings.preferred_rate_source == ExchangeRateSettings.MANUAL and manual:
+        return manual, ExchangeRateSettings.MANUAL
+    return auto, ExchangeRateSettings.INFINBANK
+
+
+def get_active_mb_rate():
+    record, _ = get_active_rate_record()
+    return record.mb_rate if record else Decimal('0')

@@ -1,4 +1,4 @@
-from django.db import transaction
+from apps.common.querysets import apply_date_range
 import json
 from django.utils import timezone
 from django.utils.dateparse import parse_date
@@ -139,6 +139,9 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
                           'client__company_name', 'contract_number', 'comment')
     ordering_fields    = ('due_date', 'created_at', 'status')
     http_method_names  = ('get', 'post', 'patch', 'head', 'options')
+
+    def get_queryset(self):
+        return apply_date_range(super().get_queryset(), self.request)
 
     def get_serializer_class(self):
         user = self.request.user
@@ -450,6 +453,9 @@ class ZakazViewSet(CreateModelMixin, ListModelMixin,
                           'supplier', 'contract_number', 'faktura', 'comment')
     ordering_fields    = ('expected_date', 'created_at', 'status')
     http_method_names  = ('get', 'post', 'patch', 'head', 'options')
+
+    def get_queryset(self):
+        return apply_date_range(super().get_queryset(), self.request)
 
     def get_serializer_class(self):
         user = self.request.user

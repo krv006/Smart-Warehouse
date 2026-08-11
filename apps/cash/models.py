@@ -196,10 +196,23 @@ class PaymentTransaction(TimeStampedModel):
 
 
 class ExchangeRateSettings(TimeStampedModel):
-    """Valyuta kursi avtomatik olish sozlamalari (singleton)."""
+    """Valyuta kursi sozlamalari (singleton)."""
+
+    INFINBANK = 'infinbank'
+    MANUAL = 'manual'
+    SOURCE_CHOICES = (
+        (INFINBANK, 'Infinbank'),
+        (MANUAL, 'Qo\'lda'),
+    )
 
     auto_fetch_enabled = BooleanField(default=True,
                                       help_text='Infin Bank kursini avtomatik olish')
+    preferred_rate_source = CharField(
+        max_length=10,
+        choices=SOURCE_CHOICES,
+        default=INFINBANK,
+        help_text='USD hisob-kitoblarida qaysi kurs ishlatiladi',
+    )
 
     class Meta:
         db_table = 'cash_exchangerate_settings'

@@ -95,9 +95,12 @@ class ClientSerializer(ModelSerializer):
 class ClientListSerializer(ModelSerializer):
     class Meta:
         model  = Client
-        fields = ('id', 'full_name', 'company_name', 'is_active')
+        fields = ('id', 'full_name', 'company_name', 'client_type', 'phone', 'inn',
+                  'is_active', 'created_at')
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
         data['full_name'] = decrypt(instance.full_name)
+        data['phone'] = decrypt(instance.phone)
+        data['inn'] = decrypt(instance.inn)
         return data
