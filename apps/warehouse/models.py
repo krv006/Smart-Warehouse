@@ -1,3 +1,4 @@
+from django.db import models
 from django.db.models import (CharField, ForeignKey, CASCADE, SET_NULL,
                               PositiveIntegerField, DecimalField, DateTimeField, Sum)
 from mptt.models import MPTTModel, TreeForeignKey
@@ -7,6 +8,25 @@ from apps.common.models import TimeStampedModel
 STATUS_IN_STOCK  = 'in_stock'
 STATUS_LOW_STOCK = 'low_stock'
 STATUS_OUT       = 'out_of_stock'
+
+
+class ProductUnit(models.TextChoices):
+    PIECE = 'piece', 'dona'
+    KG = 'kg', 'kg'
+    GRAM = 'gram', 'gram'
+    TON = 'ton', 'tonna'
+    METER = 'meter', 'metr'
+    CM = 'cm', 'sm'
+    MM = 'mm', 'mm'
+    LITER = 'liter', 'litr'
+    ML = 'ml', 'ml'
+    BOX = 'box', 'quti'
+    PACK = 'pack', 'pachka'
+    SET = 'set', 'komplekt'
+    PAIR = 'pair', 'juft'
+    ROLL = 'roll', 'rulon'
+    BAG = 'bag', 'qop'
+    SHEET = 'sheet', 'list'
 
 
 class Category(MPTTModel):
@@ -38,6 +58,9 @@ class Product(TimeStampedModel):
                                   help_text='Sotuv/ketish narxi — Management belgilaydi')
     source         = CharField(max_length=255, blank=True, null=True,
                                help_text='Qayerdan keldi (yetkazuvchi/manzil)')
+    unit           = CharField(max_length=20, choices=ProductUnit.choices,
+                               default=ProductUnit.PIECE,
+                               help_text='O‘lchov birligi')
     min_quantity   = PositiveIntegerField(default=5,
                                           help_text='Minimal qoldiq chegarasi (notification uchun)')
 

@@ -78,14 +78,18 @@ class Notification(TimeStampedModel):
 
     @classmethod
     def notify_low_stock(cls, product):
-        """Mahsulot qoldig'i min_quantity dan pasayganda Management userlariga bildirishnoma."""
+        """Mavjud qoldiq min_quantity dan pasayganda Management userlariga bildirishnoma."""
         from django.contrib.auth import get_user_model
         User = get_user_model()
+        avail = product.available_quantity
+        if avail <= 0:
+            return
         title   = "Qoldiq kam!"
+        unit = product.get_unit_display()
         message = (
             f'"{product.name}" ({product.serial_number}) mahsuloti qoldig\'i '
-            f'minimal chegaradan ({product.min_quantity} dona) pastga tushdi. '
-            f'Hozirgi qoldiq: {product.quantity_in_stock} dona.'
+            f'minimal chegaradan ({product.min_quantity} {unit}) pastga tushdi. '
+            f'Hozirgi mavjud qoldiq: {avail} {unit}.'
         )
         managers = User.objects.filter(role=User.MANAGEMENT, is_active=True)
         for manager in managers:
@@ -101,6 +105,17 @@ class Notification(TimeStampedModel):
         """Mahsulot qoldig'i min_quantity dan yuqoriga chiqsa, bildirishnomalarni yopadi."""
         cls.objects.filter(product=product, is_read=False,
                            title="Qoldiq kam!").update(is_read=True)
+
+    @classmethod
+    def check_product_stock_level(cls, product):
+        """Bron/sotuv/kirimdan keyin mavjud qoldiqni tekshiradi."""
+        avail = product.available_quantity
+        if avail <= 0:
+            return
+        if avail <= product.min_quantity:
+            cls.notify_low_stock(product)
+        else:
+            cls.resolve_low_stock_notifications(product)
 
     @classmethod
     def notify_delayed_import(cls, zakaz):

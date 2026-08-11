@@ -1,14 +1,43 @@
 # Frontend API qo‘llanma — Smart Warehouse
 
-Bu hujjat frontend uchun amaldagi backend kontraktidir. Bazaviy URL:
+**Maqsad:** Frontend dasturchilar uchun Django REST API bilan ishlash bo‘yicha to‘liq, amaldagi kontrakt — ulanish, auth, barcha endpointlar, `api.js` mapping va yangi funksiya qo‘shish tartibi.
+
+Bazaviy URL:
 
 ```text
 /api/v1
 ```
 
-## 0. Umumiy qoidalar
+Production override: `VITE_API_BASE_URL` (masalan `https://api.example.com/api/v1`).
 
-### Auth
+---
+
+## 1. Kirish — ulanish va umumiy qoidalar
+
+### Vite proxy (development)
+
+Frontend dev server `http://localhost:5173` da ishlaydi. `/api` so‘rovlari Django ga proxy qilinadi:
+
+```javascript
+// frontend/vite.config.js
+proxy: { '/api': { target: 'http://127.0.0.1:8000', timeout: 8000 } }
+```
+
+Demak brauzerda `fetch('/api/v1/auth/me/')` → `http://127.0.0.1:8000/api/v1/auth/me/`.
+
+Backend alohida ishlashi shart:
+
+```bash
+.venv/bin/python manage.py runserver 0.0.0.0:8000
+```
+
+### OpenAPI (qoʻshimcha manba)
+
+Backend Swagger UI: `http://127.0.0.1:8000/` · ReDoc: `/api/redoc/` · Schema: `/api/schema/`
+
+Bu hujjat frontend nuqtai nazaridan qisqartirilgan; batafsil schema — Swagger da.
+
+### Auth (JWT)
 
 Barcha private endpointlar JWT talab qiladi:
 
@@ -91,7 +120,320 @@ Harf bo‘lmaydi. Backend regex:
 
 Bo‘sh yuborilsa backend avtomatik yaratadi.
 
-## 1. Auth va user sessiya
+---
+
+## 2. `api.js` — transport va umumiy patternlar
+
+Manba: `frontend/src/api.js`.
+
+### Sessiya va transport
+
+| Funksiya | Tavsif |
+|---|---|
+| `saveSession({ access, refresh, user })` | `localStorage`: `warehouse_access`, `warehouse_refresh`, `warehouse_user` |
+| `clearStoredSession()` | Sessiyani tozalash |
+| `setAuthFailureHandler(fn)` | 401 refresh muvaffaqiyatsiz bo‘lsa chaqiriladi |
+| `refreshAccessToken()` | `POST /auth/token/refresh/` |
+| `request(path, options)` | JWT bilan so‘rov; 401 da bir marta refresh + retry |
+| `download(path, filename)` | Blob yuklab olish (Excel export) |
+
+Timeout: **8 soniya**. Xato klassi: `ApiError(message, status)`.
+
+### `api` obyekti
+
+| Metod | HTTP | Path | Query / body |
+|---|---|---|---|
+| `login(username, password)` | POST | `/auth/login/` | `{ username, password }` — auth yo‘q |
+| `me()` | GET | `/auth/me/` | — |
+| `registerUser(payload)` | POST | `/auth/register/` | user body |
+| `users(params)` | GET | `/auth/users/` | `page_size=20`, `search`, `role`, `is_active` |
+| `reports(params)` | GET ×4 | parallel (qarang pastda) | dashboard filter params |
+| `monthlyTrend(months, params)` | GET | `/reports/monthly-trend/` | `months` (default 6), filter params |
+| `orders(params)` | GET | `/orders/` | `page_size=20`, `search`, `status`, `client`, `contract_number` |
+| `order(id)` | GET | `/orders/{id}/` | — |
+| `nextContractNumber(params)` | GET | `/orders/next-contract-number/` | `contract_date` (ixtiyoriy, `YYYY-MM-DD`) |
+| `ordersBulk(payload)` | POST | `/orders/bulk/` | bulk order body |
+| `fulfillOrder(id, payload)` | POST | `/orders/{id}/fulfill/` | `{ contract_number, asos, ... }` |
+| `cancelOrder(id, payload)` | POST | `/orders/{id}/cancel/` | `{ contract_number, asos, ... }` |
+| `createOrderZakaz(id, payload)` | POST | `/orders/{id}/create-zakaz/` | zakaz body |
+| `zakaz(params)` | GET | `/orders/zakaz/` | `page_size=30`, `status`, `product`, `order`, `contract_number` |
+| `zakazBulk(payload)` | POST | `/orders/zakaz/bulk/` | bulk zakaz body |
+| `contracts(params)` | GET | `/orders/contracts/` | `page_size=30`, `product`, `contract_number`, `source_type`, `order`, `zakaz` |
+| `productContracts(id)` | GET | `/warehouse/products/{id}/contracts/` | — |
+| `categories(params)` | GET | `/warehouse/categories/` | `page_size=30`, `search` |
+| `products(params)` | GET | `/warehouse/products/` | `page_size=30`, `search`, `category` |
+| `stocks(params)` | GET | `/warehouse/stocks/` | `page_size=30`, `product`, `category`, `status` |
+| `addStock(id, payload)` | POST | `/warehouse/products/{id}/add-stock/` | kirim body |
+| `clients(params)` | GET | `/clients/` | `page_size=30`, `search` |
+| `sales(params)` | GET | `/sales/` | `page_size=30`, `product`, `client`, `sold_date` |
+| `salesBulk(payload)` | POST | `/sales/bulk/` | bulk sales body |
+| `payments(params)` | GET | `/cash/payments/` | `page_size=30`, `status`, `order`, `sale`, `client`, `currency`, `include_paid` |
+| `paymentsSummary()` | GET | `/cash/payments/summary/` | — |
+| `pay(id, payload)` | POST | `/cash/payments/{id}/pay/` | `{ amount, comment }` |
+| `exchangeRateLatest(refresh)` | GET | `/cash/exchange-rates/latest/` | `refresh=true\|false` |
+| `expenses(params)` | GET | `/expenses/expenses/` | `page_size=30`, `expense_type`, `sub_type`, `currency`, `date_from`, `date_to` |
+| `expensesSummary()` | GET | `/expenses/summary/` | — |
+| `expenseTypes()` | GET | `/expenses/expense-types/` | `page_size=50` |
+| `expenseSubtypes()` | GET | `/expenses/expense-subtypes/` | `page_size=100`, `expense_type` |
+| `notifications(params)` | GET | `/notifications/` | `page_size=30`, `is_read` |
+| `notificationsMarkRead(id)` | POST | `/notifications/{id}/mark_read/` | — |
+| `notificationsMarkAllRead()` | POST | `/notifications/mark_all_read/` | — |
+| `exportSales()` | GET | `/reports/excel/sales/` | blob → `sales.xlsx` |
+| `exportStock()` | GET | `/reports/excel/stock/` | blob → `stock.xlsx` |
+| `exportExpenses()` | GET | `/reports/excel/expenses/` | blob → `expenses.xlsx` |
+| `exportPayments()` | GET | `/reports/excel/payments/` | blob → `payments.xlsx` |
+| `retrieve(path, id)` | GET | `{path}{id}/` | — |
+| `create(path, payload)` | POST | `path` | JSON body |
+| `createForm(path, payload)` | POST | `path` | `FormData` yoki JSON |
+| `update(path, id, payload)` | PATCH | `{path}{id}/` | JSON body |
+| `updateForm(path, id, payload)` | PATCH | `{path}{id}/` | `FormData` yoki JSON |
+| `remove(path, id)` | DELETE | `{path}{id}/` | — |
+
+### `api.reports(params)` — parallel chaqiriqlar
+
+Bosh sahifa va Hisobotlar sahifasi shu helperdan foydalanadi. `params` bo‘sh bo‘lsa filtrsiz so‘rov ketadi.
+
+```javascript
+const [summary, warehouse, cash, topProducts] = await api.reports(params)
+```
+
+| # | Endpoint | Query params |
+|---|---|---|
+| 1 | `GET /reports/summary/` | `params` to‘liq (dashboard filtrlari) |
+| 2 | `GET /reports/warehouse/` | **parametr yuborilmaydi** (hozirgi ombor holati) |
+| 3 | `GET /reports/cash/` | `date_from`, `date_to`, `client`, `payment_status` |
+| 4 | `GET /reports/top-products/` | `limit=10` + dashboard filtrlari |
+
+### Generic CRUD helperlar
+
+Ko‘p sahifalar `resources` jadvalidagi `path` bilan generic helperlarni ishlatadi:
+
+```javascript
+// Ro‘yxat
+const rows = list(await api.orders({ search: '12/1108' }))
+
+// Detail
+const detail = await api.retrieve('/orders/', id)
+
+// Yaratish / tahrirlash / o‘chirish
+await api.create('/warehouse/categories/', payload)
+await api.update('/sales/', id, payload)
+await api.createForm('/orders/', formData)   // multipart
+await api.updateForm('/expenses/expenses/', id, formData)
+await api.remove('/auth/users/', id)
+```
+
+`list()` helperi (`App.jsx`) pagination `results` yoki oddiy arrayni qaytaradi.
+
+---
+
+## 3. Frontend ↔ Backend xaritasi (`App.jsx`)
+
+| UI sahifa | `api.js` | Backend path | Eslatma |
+|---|---|---|---|
+| Bosh sahifa | `reports`, `monthlyTrend` | `/reports/*` | Filtrli |
+| Hisobotlar | `reports`, `expensesSummary`, `paymentsSummary`, `export*` | `/reports/*`, `/expenses/summary/`, `/cash/payments/summary/` | Filtrsiz reports |
+| Buyurtmalar | `orders`, `nextContractNumber`, `createForm`, `update`, `fulfillOrder`, `cancelOrder`, `createOrderZakaz` | `/orders/` | Multipart buyurtma |
+| Import (Zakaz) | `zakaz`, `create`, `update` | `/orders/zakaz/` | |
+| Shartnomalar | `contracts`, `retrieve` | `/orders/contracts/` | Read-only |
+| Ombor | `products`, `create`, `update`, `addStock`, `productContracts` | `/warehouse/products/` | |
+| Kategoriyalar | `categories`, `create`, `update`, `remove` | `/warehouse/categories/` | |
+| Qoldiqlar | `stocks` | `/warehouse/stocks/` | |
+| Mijozlar | `clients`, `create`, `update`, `remove` | `/clients/` | `can_view_clients` |
+| Sotuvlar | `sales`, `salesBulk`, `create`, `update` | `/sales/` | |
+| Kassa | `payments`, `pay` | `/cash/payments/` | Paid yashirin |
+| Xarajatlar | `expenses`, `expenseTypes`, `expenseSubtypes`, `createForm`, `updateForm` | `/expenses/expenses/` | Multipart |
+| Foydalanuvchilar | `users`, `registerUser`, `update`, `remove` | `/auth/users/`, `/auth/register/` | |
+| Bildirishnomalar | `notifications`, `notificationsMarkRead`, `notificationsMarkAllRead` | `/notifications/` | 30s polling |
+| Valyuta kursi | `exchangeRateLatest`, `create('/cash/exchange-rates/')` | `/cash/exchange-rates/` | Header widget |
+
+---
+
+## 4. Barcha endpointlar — to‘liq jadval
+
+Jami **~91** HTTP endpoint (custom actionlar bilan). ✅ = `api.js` da wrapper bor.
+
+### Auth — `/api/v1/auth/`
+
+| Method | Path | Query / body | Ruxsat | api.js |
+|---|---|---|---|---|
+| POST | `/login/` | `{ username, password }` | Public, 10/min | ✅ `login` |
+| GET | `/me/` | — | Auth | ✅ `me` |
+| POST | `/token/refresh/` | `{ refresh }` | Public | ✅ `refreshAccessToken` |
+| POST | `/register/` | user fields + parol | Management | ✅ `registerUser` |
+| GET | `/users/` | `page_size`, `search`, `role`, `is_active` | Management | ✅ `users` |
+| GET | `/users/{id}/` | — | Management | ✅ `retrieve` |
+| PATCH | `/users/{id}/` | user fields | Management | ✅ `update` |
+| DELETE | `/users/{id}/` | — | Management | ✅ `remove` |
+
+`POST /users/` **yo‘q** — yangi user faqat `/register/`.
+
+### Buyurtmalar — `/api/v1/orders/`
+
+| Method | Path | Query / body | Ruxsat | api.js |
+|---|---|---|---|---|
+| GET | `/` | `page_size`, `search`, `status`, `client`, `contract_number`, `items__product` | Auth, read | ✅ `orders` |
+| POST | `/` | order JSON yoki multipart | Operator+ | ✅ `createForm` |
+| GET | `/{id}/` | — | Auth | ✅ `order` / `retrieve` |
+| PATCH | `/{id}/` | `{ asos, items[] }` | Operator+ | ✅ `update` |
+| GET | `/next-contract-number/` | `contract_date` | Auth | ✅ `nextContractNumber` |
+| POST | `/bulk/` | bulk order body | Operator+ | ✅ `ordersBulk` |
+| POST | `/{id}/fulfill/` | `{ contract_number, asos, faktura? }` | Operator/Management | ✅ `fulfillOrder` |
+| POST | `/{id}/cancel/` | `{ contract_number, asos, faktura? }` | Operator/Management | ✅ `cancelOrder` |
+| POST | `/{id}/create-zakaz/` | `{ contract_number, asos, supplier?, expected_date? }` | Operator/Management | ✅ `createOrderZakaz` |
+
+DELETE yo‘q — bekor qilish `/cancel/` orqali.
+
+### Zakaz (Import) — `/api/v1/orders/zakaz/`
+
+| Method | Path | Query / body | Ruxsat | api.js |
+|---|---|---|---|---|
+| GET | `/` | `page_size`, `status`, `zakaz_type`, `payment_status`, `product`, `order`, `contract_number`, `search` | Auth | ✅ `zakaz` |
+| POST | `/` | zakaz body | Auth | ✅ `create` |
+| GET | `/{id}/` | — | Auth | ✅ `retrieve` |
+| PATCH | `/{id}/` | status, received_qty, supplier… | Auth (Manager: status) | ✅ `update` |
+| POST | `/bulk/` | bulk zakaz body | Auth | ✅ `zakazBulk` |
+
+`zakaz_type`: `auto` (buyurtmadan) \| `manual`. `payment_status`: `unpaid` \| `partial` \| `paid`.
+
+### Shartnomalar reestri — `/api/v1/orders/contracts/`
+
+| Method | Path | Query | Ruxsat | api.js |
+|---|---|---|---|---|
+| GET | `/` | `page_size`, `product`, `contract_number`, `source_type`, `order`, `zakaz`, `contract_date`, `search` | Auth | ✅ `contracts` |
+| GET | `/{id}/` | — | Auth | ✅ `retrieve` |
+
+Read-only. Yozuvlar tizim avtomatik yaratadi.
+
+### Ombor — `/api/v1/warehouse/`
+
+**Kategoriyalar** `/categories/`
+
+| Method | Path | Query / body | Ruxsat | api.js |
+|---|---|---|---|---|
+| GET | `/` | `search` | Auth, read | ✅ `categories` |
+| POST | `/` | `{ name, parent }` | Operator+ | ✅ `create` |
+| GET/PATCH/DELETE | `/{id}/` | — | Operator+ | ✅ `retrieve`/`update`/`remove` |
+
+List faqat root node + `children` daraxti.
+
+**Mahsulotlar** `/products/`
+
+| Method | Path | Query / body | Ruxsat | api.js |
+|---|---|---|---|---|
+| GET | `/` | `search`, `category`, `purchase_price__isnull`, `selling_price__isnull` | Auth | ✅ `products` |
+| POST | `/` | product body | Operator+ | ✅ `create` |
+| GET/PATCH/DELETE | `/{id}/` | — | Operator+ | ✅ CRUD |
+| POST | `/{id}/add-stock/` | `{ quantity, asos, warehouse_location?, contract_number?, faktura? }` | Operator+ | ✅ `addStock` |
+| GET | `/{id}/contracts/` | — | Auth | ✅ `productContracts` |
+
+**Qoldiqlar** `/stocks/`
+
+| Method | Path | Query / body | Ruxsat | api.js |
+|---|---|---|---|---|
+| GET | `/` | `product`, `warehouse_location`, `category`, `status`, `date_from`, `date_to`, `search` | Auth | ✅ `stocks` |
+| POST/PATCH/DELETE | `/`, `/{id}/` | stock body | Operator+ | ✅ CRUD |
+
+`status`: `in_stock` \| `low_stock` \| `out_of_stock`. Bron bor qoldiqni o‘chirib bo‘lmaydi.
+
+### Sotuvlar — `/api/v1/sales/`
+
+| Method | Path | Query / body | Ruxsat | api.js |
+|---|---|---|---|---|
+| GET | `/` | `page_size`, `product`, `client`, `sold_date`, `search` | Auth | ✅ `sales` |
+| POST | `/` | sale body | Operator+ | ✅ `create` |
+| GET/PATCH/DELETE | `/{id}/` | — | Operator+ | ✅ CRUD |
+| POST | `/bulk/` | bulk sales body | Operator+ | ✅ `salesBulk` |
+
+FIFO ombordan ayiradi. Operator uchun narx/foyda yashirilishi mumkin.
+
+### Kassa — `/api/v1/cash/`
+
+**To‘lovlar** `/payments/`
+
+| Method | Path | Query / body | Ruxsat | api.js |
+|---|---|---|---|---|
+| GET | `/` | `page_size`, `status`, `include_paid`, `client`, `currency`, `order`, `sale`, `due_date`, `search` | Accountant/Management read | ✅ `payments` |
+| POST | `/` | payment body | Accountant | ✅ `create` |
+| GET/PATCH | `/{id}/` | — | Accountant/Management | ✅ `retrieve`/`update` |
+| DELETE | `/{id}/` | — | Management | ✅ `remove` |
+| POST | `/{id}/pay/` | `{ amount, comment }` | Accountant/Management | ✅ `pay` |
+| GET | `/summary/` | — | Accountant/Management | ✅ `paymentsSummary` |
+
+**Ro‘yxatda `paid` yashirin** — `?status=paid` yoki `?include_paid=true`.
+
+**Valyuta kursi** `/exchange-rates/`
+
+| Method | Path | Query / body | Ruxsat | api.js |
+|---|---|---|---|---|
+| GET | `/` | `currency`, `manual_override`, `rate_date` | Auth | ❌ (faqat latest UI da) |
+| GET | `/{id}/` | — | Auth | ❌ |
+| POST | `/` | `{ mb_rate, buy_rate?, sell_rate?, note? }` | Auth | ✅ `create('/cash/exchange-rates/')` |
+| PATCH | `/{id}/` | kurs maydonlari | Auth | ❌ |
+| GET | `/latest/` | `refresh=true\|false` | Auth | ✅ `exchangeRateLatest` |
+
+### Xarajatlar — `/api/v1/expenses/`
+
+| Method | Path | Query / body | Ruxsat | api.js |
+|---|---|---|---|---|
+| GET | `/expense-types/` | `search`, `page_size` | Auth | ✅ `expenseTypes` |
+| GET | `/expense-types/{id}/` | — | Auth | ❌ |
+| GET | `/expense-subtypes/` | `expense_type`, `search` | Auth | ✅ `expenseSubtypes` |
+| POST | `/expense-subtypes/` | subtype body | Accountant+ | ❌ |
+| GET | `/expense-subtypes/{id}/` | — | Auth | ❌ |
+| GET | `/expenses/` | `expense_type`, `sub_type`, `currency`, `responsible`, `date_from`, `date_to`, `search` | Accountant/Management | ✅ `expenses` |
+| POST/PATCH/DELETE | `/expenses/`, `/expenses/{id}/` | JSON yoki multipart | Accountant | ✅ `createForm`/`updateForm` |
+| GET | `/expenses/summary/` | `date_from`, `date_to`, `currency` | Accountant/Management | ❌ (to‘g‘ridan) |
+| GET | `/summary/` | alias yuqoridagi | Accountant/Management | ✅ `expensesSummary` |
+
+### Mijozlar — `/api/v1/clients/`
+
+| Method | Path | Query / body | Ruxsat | api.js |
+|---|---|---|---|---|
+| GET | `/` | `page_size`, `search`, `is_active` | `can_view_clients` | ✅ `clients` |
+| POST/PATCH/DELETE | `/`, `/{uuid}/` | client body | `can_view_clients` | ✅ CRUD |
+
+Primary key — **UUID**. Maxfiy maydonlar bazada shifrlanadi.
+
+### Hisobotlar — `/api/v1/reports/`
+
+| Method | Path | Query | Ruxsat | api.js |
+|---|---|---|---|---|
+| GET | `/summary/` | dashboard filtrlari | Accountant/Management | ✅ `reports` |
+| GET | `/warehouse/` | `date_from`, `date_to` | Accountant/Management | ✅ `reports` (paramsiz) |
+| GET | `/cash/` | `date_from`, `date_to`, `client`, `payment_status` | Accountant/Management | ✅ `reports` |
+| GET | `/expenses/` | `date_from`, `date_to` | Accountant/Management | ❌ |
+| GET | `/top-products/` | `limit`, dashboard filtrlari | Accountant/Management | ✅ `reports` |
+| GET | `/monthly-trend/` | `months`, dashboard filtrlari | Accountant/Management | ✅ `monthlyTrend` |
+| GET | `/excel/sales/` | `date_from`, `date_to` | Accountant/Management | ✅ `exportSales` |
+| GET | `/excel/stock/` | — | Accountant/Management | ✅ `exportStock` |
+| GET | `/excel/expenses/` | `date_from`, `date_to` | Accountant/Management | ✅ `exportExpenses` |
+| GET | `/excel/payments/` | — | Accountant/Management | ✅ `exportPayments` |
+
+### Bildirishnomalar — `/api/v1/notifications/`
+
+| Method | Path | Query / body | Ruxsat | api.js |
+|---|---|---|---|---|
+| GET | `/` | `page_size`, `is_read` | Auth (o‘ziga) | ✅ `notifications` |
+| GET | `/{id}/` | — | Auth | ✅ `retrieve` |
+| POST | `/{id}/mark_read/` | — | Auth | ✅ `notificationsMarkRead` |
+| POST | `/mark_all_read/` | — | Auth | ✅ `notificationsMarkAllRead` |
+
+Javob `mark_all_read`: `{ "status": "ok", "marked_read": 5 }`.
+
+### Backendda bor, `api.js` da wrapper yo‘q
+
+| Endpoint | Sabab / tavsiya |
+|---|---|
+| `GET /reports/expenses/` | Hisobotlar moduli; kerak bo‘lsa `api.js` ga qo‘shing |
+| `GET /expenses/expenses/summary/` | Alias `/expenses/summary/` ishlatiladi |
+| `GET /cash/exchange-rates/` (list) | Hozircha UI da kerak emas |
+| `PATCH /cash/exchange-rates/{id}/` | Qo‘lda kurs — faqat POST ishlatiladi |
+| `POST /expenses/expense-subtypes/` | Admin/accountant; UI da yo‘q |
+
+---
+
+## 5. Auth va user sessiya (batafsil)
 
 ### Login
 
@@ -131,6 +473,8 @@ Javob:
       "orders_manage": true,
       "warehouse_view": true,
       "warehouse_manage": true,
+      "prices_view": true,
+      "prices_manage": true,
       "clients_view": true,
       "clients_manage": true,
       "sales_view": true,
@@ -205,38 +549,42 @@ DELETE /api/v1/auth/users/{id}/
 
 Superuser oddiy manager ro‘yxatida ko‘rinmaydi. Manager superuserni o‘zgartira/o‘chira olmaydi. User o‘zini o‘chira olmaydi.
 
-## 2. Role va UI permission
+## 6. Role va UI permission
 
 Frontend menyuni `abilities` bo‘yicha ko‘rsatadi. Ruxsat yo‘q menu UI’da ko‘rinmasligi kerak.
 
-| Ability | Ma’nosi |
-|---|---|
-| `dashboard` | bosh sahifa statistikasi |
-| `orders_view` | buyurtmalarni ko‘rish |
-| `orders_manage` | buyurtma yaratish/tahrirlash/amallar |
-| `warehouse_view` | mahsulotlarni ko‘rish |
-| `warehouse_manage` | mahsulot/kirim boshqarish |
-| `clients_view` | mijozlarni ko‘rish |
-| `clients_manage` | mijoz CRUD |
-| `sales_view` | sotuvlarni ko‘rish |
-| `sales_manage` | sotuv yaratish/tahrirlash |
-| `cash_view` | kassa ko‘rish |
-| `cash_manage` | to‘lov qabul qilish |
-| `expenses_view` | xarajatlarni ko‘rish |
-| `expenses_manage` | xarajat yaratish/tahrirlash |
-| `reports_view` | hisobotlar |
-| `notifications_view` | bildirishnomalar |
-| `procurement_view` | zakazlar |
-| `procurement_manage` | zakaz yaratish/tahrirlash |
-| `contracts_view` | shartnomalar reestri |
-| `categories_view` | kategoriyalar |
-| `stocks_view` | qoldiqlar |
-| `users_view` | userlarni ko‘rish |
-| `users_manage` | user boshqarish |
+| Ability | Ma’nosi | Kimda |
+|---|---|---|
+| `dashboard` | bosh sahifa statistikasi | Accountant, Management |
+| `orders_view` | buyurtmalarni ko‘rish | hammaga |
+| `orders_manage` | buyurtma yaratish/tahrirlash/amallar | Operator, Management |
+| `warehouse_view` | mahsulotlarni ko‘rish | hammaga |
+| `warehouse_manage` | mahsulot/kirim boshqarish | Operator, Management |
+| `prices_view` | narx/kelish narxi ko‘rish | Accountant, Management |
+| `prices_manage` | narx boshqarish | Management |
+| `clients_view` | mijozlarni ko‘rish | `can_view_clients` |
+| `clients_manage` | mijoz CRUD | `can_view_clients` |
+| `sales_view` | sotuvlarni ko‘rish | hammaga |
+| `sales_manage` | sotuv yaratish/tahrirlash | Operator |
+| `cash_view` | kassa ko‘rish | hammaga (summalar Accountant/Management) |
+| `cash_manage` | to‘lov qabul qilish | Accountant, Management |
+| `expenses_view` | xarajatlarni ko‘rish | hammaga (summalar Accountant/Management) |
+| `expenses_manage` | xarajat yaratish/tahrirlash | Accountant, Management |
+| `reports_view` | hisobotlar | Accountant, Management |
+| `notifications_view` | bildirishnomalar | hammaga |
+| `procurement_view` | zakazlar (Import) | hammaga |
+| `procurement_manage` | zakaz yaratish/tahrirlash | Operator, Management |
+| `contracts_view` | shartnomalar reestri | hammaga |
+| `categories_view` | kategoriyalar | hammaga |
+| `stocks_view` | qoldiqlar | hammaga |
+| `users_view` | userlarni ko‘rish | Management |
+| `users_manage` | user boshqarish | Management |
+
+Frontend: `can(session, 'ability')` — `session.user.abilities` dan o‘qiladi.
 
 Operator uchun narx/foyda maydonlari ayrim javoblarda qaytmaydi. Frontend bunday maydonlar yo‘qligiga tayyor bo‘lsin.
 
-## 3. Valyuta kursi
+## 7. Valyuta kursi
 
 Backend Infinbank sahifasidan USD `MB kurs` ni oladi:
 
@@ -293,7 +641,7 @@ So‘rov:
 
 Backend `currency=USD`, `source=manual`, `manual_override=true`, `rate_date=today` qilib saqlaydi.
 
-## 4. Buyurtmalar
+## 8. Buyurtmalar
 
 Base:
 
@@ -316,6 +664,27 @@ reserved
 fulfilled
 cancelled
 ```
+
+### Keyingi shartnoma raqami
+
+Buyurtma formasi ochilganda frontend avtomatik raqam oladi:
+
+```http
+GET /api/v1/orders/next-contract-number/?contract_date=2026-08-11
+```
+
+`contract_date` berilmasa backend bugungi Tashkent sanasini ishlatadi.
+
+Javob:
+
+```json
+{
+  "contract_number": "12/1108",
+  "contract_date": "2026-08-11"
+}
+```
+
+Frontend: `api.nextContractNumber({ contract_date })`.
 
 ### Detail
 
@@ -460,7 +829,7 @@ So‘rov:
 
 `contract_number` va `asos` majburiy. `faktura`, `supplier`, `expected_date` ixtiyoriy. Har amal history va product contracts reestriga yoziladi.
 
-## 5. Zakazlar
+## 9. Zakazlar
 
 Base:
 
@@ -471,7 +840,7 @@ Base:
 ### Ro‘yxat
 
 ```http
-GET /api/v1/orders/zakaz/?page_size=30&status=new&product=1&order=5&contract_number=12/1108
+GET /api/v1/orders/zakaz/?page_size=30&status=new&zakaz_type=manual&payment_status=unpaid&product=1&order=5&contract_number=12/1108&search=monitor
 ```
 
 Status oqimi:
@@ -558,14 +927,27 @@ Bekor:
 
 Qabul qilinganda ombor to‘ladi, pending/backorder orderlarga avtomatik bron ajratiladi, history va reestr yoziladi.
 
-## 6. Shartnomalar reestri
+## 10. Shartnomalar reestri
+
+Read-only audit jurnali — buyurtma, zakaz va kirim amallaridan avtomatik yozuvlar.
 
 ```http
 GET /api/v1/orders/contracts/?page_size=30&product=1&contract_number=12/1108&source_type=order_created&order=5&zakaz=3
 GET /api/v1/orders/contracts/{id}/
 ```
 
-Read-only.
+Frontend:
+
+- Ro‘yxat: `api.contracts(params)` — sahifa **Shartnomalar**
+- Detail modal: `api.retrieve('/orders/contracts/', id)`
+
+Mahsulot detailidan reestr:
+
+```http
+GET /api/v1/warehouse/products/{id}/contracts/
+```
+
+Frontend: `api.productContracts(productId)`.
 
 `source_type` qiymatlari:
 
@@ -582,13 +964,7 @@ zakaz_cancelled
 stock_in
 ```
 
-Mahsulot detailidan reestr:
-
-```http
-GET /api/v1/warehouse/products/{id}/contracts/
-```
-
-## 7. Ombor
+## 11. Ombor
 
 ### Kategoriyalar
 
@@ -614,7 +990,7 @@ Javobda `children` bor.
 ### Mahsulotlar
 
 ```http
-GET /api/v1/warehouse/products/?page_size=30&search=monitor&category=1
+GET /api/v1/warehouse/products/?page_size=30&search=monitor&category=1&purchase_price__isnull=true&selling_price__isnull=false
 POST /api/v1/warehouse/products/
 GET /api/v1/warehouse/products/{id}/
 PATCH /api/v1/warehouse/products/{id}/
@@ -673,16 +1049,16 @@ POST /api/v1/warehouse/products/{id}/add-stock/
 ### Qoldiqlar
 
 ```http
-GET /api/v1/warehouse/stocks/?page_size=30&product=1&category=2&status=low_stock
+GET /api/v1/warehouse/stocks/?page_size=30&product=1&category=2&warehouse_location=A-1&status=low_stock&date_from=2026-08-01&date_to=2026-08-31&search=monitor
 POST /api/v1/warehouse/stocks/
 GET /api/v1/warehouse/stocks/{id}/
 PATCH /api/v1/warehouse/stocks/{id}/
 DELETE /api/v1/warehouse/stocks/{id}/
 ```
 
-`reserved_quantity` read-only.
+`status`: `in_stock` | `low_stock` | `out_of_stock`. `reserved_quantity` read-only. Broni bor qatorni o‘chirib bo‘lmaydi.
 
-## 8. Mijozlar
+## 12. Mijozlar
 
 ```http
 GET /api/v1/clients/?page_size=30&search=smart
@@ -725,7 +1101,7 @@ GET /api/v1/clients/lookup/?identifier=310776556
 
 Avval local DB, keyin tashqi Soliq provider. Bu hali qo‘shilmagan.
 
-## 9. Sotuvlar
+## 13. Sotuvlar
 
 ```http
 GET /api/v1/sales/?page_size=30&product=1&client=<uuid>&sold_date=2026-08-11
@@ -768,7 +1144,7 @@ Bulk:
 
 Backend FIFO bo‘yicha ombordan ayiradi. Qoldiq yetmasa `400`. Operator javobida foyda/narx maydonlari yashirilishi mumkin.
 
-## 10. Kassa
+## 14. Kassa
 
 ### Payments
 
@@ -779,6 +1155,25 @@ GET /api/v1/cash/payments/{id}/
 PATCH /api/v1/cash/payments/{id}/
 DELETE /api/v1/cash/payments/{id}/
 ```
+
+**Ro‘yxatda to‘langanlar yashirin.** Standart `GET /cash/payments/` faqat faol to‘lovlarni qaytaradi: `pending`, `partial`, `overdue`. `paid` statusdagi yozuvlar ko‘rinmaydi.
+
+To‘liq to‘langanlarni ko‘rish:
+
+```http
+GET /api/v1/cash/payments/?status=paid
+GET /api/v1/cash/payments/?include_paid=true
+```
+
+| Query | Ma’nosi |
+|---|---|
+| `status` | `pending`, `partial`, `paid`, `overdue` |
+| `include_paid=true` | Barcha statuslar, shu jumladan `paid` |
+| `client` | Mijoz UUID |
+| `currency` | `UZS` yoki `USD` |
+| `order`, `sale` | Bog‘langan buyurtma/sotuv ID |
+
+Frontend Kassa sahifasi: `api.payments()` — default holatda faol to‘lovlar.
 
 Payment sotuv yoki orderga bog‘lanadi, ikkalasiga bir vaqtda emas.
 
@@ -834,7 +1229,7 @@ Javob:
 }
 ```
 
-## 11. Xarajatlar
+## 15. Xarajatlar
 
 ### Toifalar
 
@@ -910,7 +1305,7 @@ Javob:
 }
 ```
 
-## 12. Bildirishnomalar
+## 16. Bildirishnomalar
 
 ```http
 GET /api/v1/notifications/?page_size=30&is_read=false
@@ -921,17 +1316,188 @@ POST /api/v1/notifications/mark_all_read/
 
 Frontend browser push permission so‘raydi. Polling 30s. Bir xil toast takror chiqmasligi kerak.
 
-## 13. Hisobotlar
+## 17. Hisobotlar
+
+Ruxsat: `IsAccountantOrManagement` (Accountant / Management). Operator uchun `403`.
+
+### Dashboard filtrlari (bosh sahifa)
+
+Bosh sahifa `api.reports(params)` va `api.monthlyTrend(6, params)` chaqiradi. Umumiy query parametrlar:
+
+| Param | Tur | Ma’nosi |
+|---|---|---|
+| `date_from` | `YYYY-MM-DD` | Davr boshlanishi |
+| `date_to` | `YYYY-MM-DD` | Davr tugashi |
+| `currency` | `UZS` \| `USD` | Valyuta filtri (bo‘sh = hammasi) |
+| `category` | int | Kategoriya ID |
+| `client` | UUID (frontend) | Mijoz ID — `/clients/` dan; backend summary/trend da `client` query qabul qiladi |
+| `supplier` | string | Yetkazuvchi (qisman mos, import/zakaz) |
+| `product` | int | Mahsulot ID |
+| `payment_status` | string | `pending`, `partial`, `paid`, `overdue` |
+
+Default bosh sahifa filtri: bugungi sana (`date_from` = `date_to` = bugun).
+
+Misol:
+
+```http
+GET /api/v1/reports/summary/?date_from=2026-08-01&date_to=2026-08-31&currency=UZS&category=2&payment_status=partial
+```
+
+### Moliyaviy xulosa
 
 ```http
 GET /api/v1/reports/summary/
-GET /api/v1/reports/warehouse/
-GET /api/v1/reports/cash/
-GET /api/v1/reports/expenses/
-GET /api/v1/reports/top-products/
 ```
 
-Accountant/Management.
+Dashboard filtrlari qabul qilinadi (yuqoridagi jadval).
+
+Javob (asosiy maydonlar):
+
+```json
+{
+  "date_from": "2026-08-01",
+  "date_to": "2026-08-31",
+  "currency": "UZS",
+  "category": 2,
+  "client": null,
+  "supplier": null,
+  "product": null,
+  "payment_status": null,
+  "filtered": true,
+  "sales_revenue_total": "45000000",
+  "sales_revenue_uzs": "45000000",
+  "kassa_collected_uzs": "12000000",
+  "kassa_collected_usd": "0",
+  "kassa_collected_today_uzs": "500000",
+  "kassa_collected_today_usd": "0",
+  "import_paid_uzs": "8000000",
+  "import_paid_usd": "0",
+  "import_paid_today_uzs": "0",
+  "import_paid_today_usd": "0",
+  "mb_rate_today": "11934.61",
+  "expenses_uzs": "1200000",
+  "expenses_usd": "0",
+  "commission_earned": "150000",
+  "overdue_payments_count": 3,
+  "report_date": "2026-08-11"
+}
+```
+
+Eslatma: `import_paid_*` — to‘langan MANUAL zakazlar (yetkazuvchi to‘lovi). `kassa_collected_*` — mijoz to‘lov tranzaksiyalari.
+
+### Oylik trend
+
+```http
+GET /api/v1/reports/monthly-trend/?months=6
+```
+
+| Param | Default | Cheklov |
+|---|---|---|
+| `months` | `6` | 1–24 |
+
+Qabul qilinadigan filtrlari: `currency`, `category`, `client`, `supplier`, `product`, `payment_status`. `date_from`/`date_to` ishlatilmaydi — oxirgi N oy avtomatik hisoblanadi.
+
+Javob — array (eng yangi oy birinchi):
+
+```json
+[
+  {
+    "year": 2026,
+    "month": 8,
+    "label": "Avgust 2026",
+    "date_from": "2026-08-01",
+    "date_to": "2026-08-11",
+    "kassa_uzs": "12000000",
+    "import_uzs": "8000000",
+    "import_usd": "0",
+    "sales_uzs": "45000000"
+  }
+]
+```
+
+Frontend: `api.monthlyTrend(6, params)`.
+
+### Ombor hisoboti
+
+```http
+GET /api/v1/reports/warehouse/
+GET /api/v1/reports/warehouse/?date_from=2026-08-01&date_to=2026-08-31
+```
+
+`api.reports()` hozir **warehouse** ga parametr yubormaydi — doim hozirgi ombor holati.
+
+Javob:
+
+```json
+{
+  "total_product_types": 42,
+  "total_quantity": 380,
+  "by_category": [{ "product__category__name": "Med texnika", "total_qty": 120 }],
+  "low_stock": [{ "product__id": 1, "product__name": "...", "quantity": 2, "product__min_quantity": 5 }],
+  "out_of_stock": [{ "product__id": 9, "product__name": "..." }]
+}
+```
+
+### Kassa hisoboti (reports)
+
+```http
+GET /api/v1/reports/cash/?date_from=2026-08-01&date_to=2026-08-31&client=<uuid>&payment_status=overdue
+```
+
+`/cash/payments/summary/` dan farqi: bu endpoint davr va filtr bo‘yicha hisobot; `commission_total` nomi bilan komissiya qaytaradi.
+
+Javob:
+
+```json
+{
+  "total_pending": 3,
+  "total_partial": 2,
+  "total_paid": 10,
+  "total_overdue": 1,
+  "sum_paid_uzs": "15000000",
+  "sum_paid_usd": "0",
+  "commission_total": "150000"
+}
+```
+
+Davr berilganda `sum_paid_uzs` tranzaksiya sanasi bo‘yicha; davrsiz — `paid_amount` yig‘indisi.
+
+### Eng ko‘p sotilgan mahsulotlar
+
+```http
+GET /api/v1/reports/top-products/?limit=10&date_from=2026-08-01&date_to=2026-08-31&category=2&client=<uuid>&product=5
+```
+
+Javob — array:
+
+```json
+[
+  {
+    "product": 1,
+    "name": "Samsung monitor",
+    "serial_number": "SM-G55C",
+    "sold_qty": 24,
+    "current_stock": 8,
+    "min_quantity": 3,
+    "is_low": false
+  }
+]
+```
+
+### Xarajat hisoboti
+
+```http
+GET /api/v1/reports/expenses/?date_from=2026-08-01&date_to=2026-08-31
+```
+
+`api.expensesSummary()` alohida: `GET /expenses/summary/` (xarajatlar moduli).
+
+### Hisobotlar sahifasi vs bosh sahifa
+
+| Sahifa | Chaqiriqlar |
+|---|---|
+| Bosh sahifa | `api.reports(params)` + `api.monthlyTrend(6, params)` — filtrli |
+| Hisobotlar | `api.reports()` filtrsiz + `api.expensesSummary()` + `api.paymentsSummary()` |
 
 Excel export:
 
@@ -939,12 +1505,80 @@ Excel export:
 GET /api/v1/reports/excel/sales/?date_from=2026-08-01&date_to=2026-08-31
 GET /api/v1/reports/excel/stock/
 GET /api/v1/reports/excel/expenses/?date_from=2026-08-01&date_to=2026-08-31
-GET /api/v1/reports/excel/payments/?date_from=2026-08-01&date_to=2026-08-31
+GET /api/v1/reports/excel/payments/
 ```
 
-Frontend blob download qiladi. Operator uchun `403`.
+Frontend: `api.exportSales()`, `api.exportStock()`, `api.exportExpenses()`, `api.exportPayments()` — blob download. Operator uchun `403`.
 
-## 14. Frontend performance va dev/prod
+## 18. Frontendga yangi endpoint qo‘shish
+
+Backend da yangi API paydo bo‘lganda frontend integratsiyasi uchun tartib:
+
+### 1. Backend ni tekshiring
+
+```bash
+# Swagger da endpoint oching
+open http://127.0.0.1:8000/
+
+# yoki schema
+curl http://127.0.0.1:8000/api/schema/ | head
+```
+
+Aniqlang: path, method, permission, query params, request body, response shape.
+
+### 2. `frontend/src/api.js` ga metod qo‘shing
+
+Oddiy GET:
+
+```javascript
+myFeature: (params = {}) => request(`/my-app/items/${toQuery({ page_size: 30, ...params })}`),
+```
+
+POST action:
+
+```javascript
+doAction: (id, payload) => request(`/my-app/items/${id}/action/`, {
+  method: 'POST',
+  body: JSON.stringify(payload),
+}),
+```
+
+Blob export:
+
+```javascript
+exportMyFeature: () => download('/reports/excel/my-feature/', 'my-feature.xlsx'),
+```
+
+Generic CRUD yetarli bo‘lsa yangi metod shart emas — `api.create('/path/', body)` ishlating.
+
+### 3. UI komponentini ulang
+
+`App.jsx` dagi `resources` jadvaliga qo‘shish (ro‘yxat sahifasi):
+
+```javascript
+'Yangi modul': { load: api.myFeature, path: '/my-app/items/' },
+```
+
+Yoki alohida komponentda `useEffect` + `api.myFeature()`.
+
+### 4. Permission va menu
+
+`apps/users/serializers.py` → `user_abilities()` ga yangi ability qo‘shilsa, `App.jsx` navigation va `can(session, 'ability')` tekshiruvini yangilang.
+
+### 5. Hujjatni yangilang
+
+Ushbu `FRONTEND_API.md` ning **§4 jadvali** va tegishli batafsil bo‘limiga endpoint qo‘shing.
+
+### 6. Tekshirish
+
+```bash
+cd frontend && npm run dev    # proxy orqali
+# Login → yangi funksiya → Network tab da /api/v1/... so‘rovini ko‘ring
+```
+
+---
+
+## 19. Frontend performance va dev/prod
 
 Vite dev server:
 
@@ -985,7 +1619,7 @@ resource/dashboard: 30s
 notifications: 30s
 ```
 
-## 15. Frontend checklist
+## 20. Frontend checklist
 
 - JWT access token har so‘rovda yuborilsin.
 - Access token 401 bo‘lsa refresh qilinsin, request bir marta retry bo‘lsin.
@@ -1002,11 +1636,15 @@ notifications: 30s
 - Order tahrirlanganda payments va reports refetch qilinsin.
 - File uploadda `FormData` ishlatilsin.
 - Excel exportda blob download ishlatilsin.
+- Bosh sahifa dashboard filtrlari `api.reports()` va `api.monthlyTrend()` ga uzatilsin.
+- Kassa ro‘yxatida `paid` default yashirin; kerak bo‘lsa `?status=paid` yoki `?include_paid=true`.
+- Buyurtma yaratishda `api.nextContractNumber({ contract_date })` bilan raqam olinadi.
+- Yangi backend endpoint qo‘shilganda `api.js` → UI → `FRONTEND_API.md` §4 jadval yangilansin.
 - Operator uchun narx/foyda maydonlari yo‘q bo‘lishiga UI tayyor bo‘lsin.
 - Mobile’da sidebar emas, bottom navigation ko‘rsatilsin.
 - Desktop sidebar collapse holati saqlansin.
 
-## 16. Hali backendda yo‘q, alohida modul bo‘ladigan qism
+## 21. Hali backendda yo‘q, alohida modul bo‘ladigan qism
 
 Didox uslubidagi to‘liq elektron hisob-faktura moduli hozir backendda yo‘q.
 

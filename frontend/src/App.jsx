@@ -1,15 +1,15 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Warehouse, Bell, Buildings, CaretDown, ChartLineUp,
-  ClipboardText, CurrencyCircleDollar, DownloadSimple, FileText, Funnel, House, MagnifyingGlass,
-  Package, PencilSimple, Plus, SignOut, SpinnerGap, Stack, Tag, TrendDown, TrendUp, Truck, UserGear, Users, WarningCircle, X, XCircle, DotsThree, CaretLeft, CaretRight,
+  ClipboardText, CurrencyCircleDollar, DownloadSimple, Eye, FileText, Funnel, House, MagnifyingGlass,
+  Package, PencilSimple, Plus, SignOut, SpinnerGap, Stack, Tag, TrendDown, TrendUp, Truck, UserGear, Users, WarningCircle, X, XCircle, DotsThree, CaretLeft, CaretRight, CheckCircle,
 } from '@phosphor-icons/react'
 import { api, clearStoredSession, refreshAccessToken, saveSession, setAuthFailureHandler, tokenExpiresAt } from './api'
 
 const navigation = [
   ['Bosh sahifa', House, 'dashboard'],
   ['Buyurtmalar', FileText, 'orders_view'],
-  ['Zakazlar', Truck, 'procurement_view'],
+  ['Import', Truck, 'procurement_view'],
   ['Shartnomalar', ClipboardText, 'contracts_view'],
   ['Ombor', Package, 'warehouse_view'],
   ['Kategoriyalar', Tag, 'categories_view'],
@@ -25,8 +25,54 @@ const navigation = [
 
 const money = (value) => new Intl.NumberFormat('uz-UZ', { maximumFractionDigits: 0 }).format(Number(value || 0))
 const list = (data) => Array.isArray(data) ? data : data?.results || []
+
+function flattenCategories(nodes, depth = 0, result = []) {
+  for (const node of nodes) {
+    result.push({ id: node.id, name: node.name, depth })
+    if (node.children?.length) flattenCategories(node.children, depth + 1, result)
+  }
+  return result
+}
+
+function findCategoryNode(nodes, id) {
+  for (const node of nodes) {
+    if (node.id === id) return node
+    const found = findCategoryNode(node.children || [], id)
+    if (found) return found
+  }
+  return null
+}
+
+function collectDescendantIds(node) {
+  const ids = []
+  for (const child of node?.children || []) {
+    ids.push(child.id)
+    ids.push(...collectDescendantIds(child))
+  }
+  return ids
+}
 const AUTO_REFRESH_MS = 30000
 const workspace = 'Asosiy ombor'
+const productUnits = [
+  ['piece', 'dona'],
+  ['kg', 'kg'],
+  ['gram', 'gram'],
+  ['ton', 'tonna'],
+  ['meter', 'metr'],
+  ['cm', 'sm'],
+  ['mm', 'mm'],
+  ['liter', 'litr'],
+  ['ml', 'ml'],
+  ['box', 'quti'],
+  ['pack', 'pachka'],
+  ['set', 'komplekt'],
+  ['pair', 'juft'],
+  ['roll', 'rulon'],
+  ['bag', 'qop'],
+  ['sheet', 'list'],
+]
+const unitLabel = (value) => productUnits.find(([key]) => key === value)?.[1] || value || 'dona'
+const quantityWithUnit = (value, row = {}) => `${money(value)} ${row.unit_display || unitLabel(row.unit)}`
 
 function useClickOutside(ref, onClose, active) {
   useEffect(() => {
@@ -81,22 +127,299 @@ function formatError(message) {
 
 const asText = (value, fallback = '—') => value === undefined || value === null || value === '' ? fallback : value
 const todayValue = () => new Date().toISOString().slice(0, 10)
+const currentYearEndValue = () => `${new Date().getFullYear()}-12-31`
 
-function ToastStack({ toasts, dismiss }) {
+function monthStartValue(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-01`
+}
+
+function monthEndValue(date = new Date()) {
+  const y = date.getFullYear()
+  const m = date.getMonth()
+  const last = new Date(y, m + 1, 0).getDate()
+  return `${y}-${String(m + 1).padStart(2, '0')}-${String(last).padStart(2, '0')}`
+}
+
+function prevMonthRangeValue() {
+  const d = new Date()
+  d.setDate(1)
+  d.setMonth(d.getMonth() - 1)
+  return { date_from: monthStartValue(d), date_to: monthEndValue(d) }
+}
+
+function yearStartValue() {
+  return `${new Date().getFullYear()}-01-01`
+}
+
+function formatPeriodRange(period) {
+  if (!period?.date_from && !period?.date_to) return 'barcha davr'
+  if (period.date_from === period.date_to) return period.date_from
+  return `${period.date_from || '…'} — ${period.date_to || '…'}`
+}
+
+const CALENDAR_WEEKDAYS = ['Du', 'Se', 'Cho', 'Pa', 'Ju', 'Sha', 'Ya']
+const UZBEK_MONTHS = ['Yanvar', 'Fevral', 'Mart', 'Aprel', 'May', 'Iyun', 'Iyul', 'Avgust', 'Sentabr', 'Oktabr', 'Noyabr', 'Dekabr']
+const CALENDAR_YEAR_SPAN = 10
+
+function calendarYearOptions(centerYear = new Date().getFullYear()) {
+  const years = []
+  for (let year = centerYear - CALENDAR_YEAR_SPAN; year <= centerYear + CALENDAR_YEAR_SPAN; year += 1) {
+    years.push(year)
+  }
+  return years
+}
+
+function parseIsoDate(value) {
+  if (!value) return null
+  const [y, m, d] = value.split('-').map(Number)
+  if (!y || !m || !d) return null
+  return new Date(y, m - 1, d)
+}
+
+function toIsoDate(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+function buildMonthGrid(viewYear, viewMonth) {
+  const startOffset = (new Date(viewYear, viewMonth, 1).getDay() + 6) % 7
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate()
+  const cells = []
+  for (let i = 0; i < startOffset; i += 1) {
+    const d = new Date(viewYear, viewMonth, i - startOffset + 1)
+    cells.push({ date: d, inMonth: false, iso: toIsoDate(d) })
+  }
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const d = new Date(viewYear, viewMonth, day)
+    cells.push({ date: d, inMonth: true, iso: toIsoDate(d) })
+  }
+  while (cells.length % 7 !== 0) {
+    const d = new Date(cells[cells.length - 1].date)
+    d.setDate(d.getDate() + 1)
+    cells.push({ date: d, inMonth: false, iso: toIsoDate(d) })
+  }
+  return cells
+}
+
+function FilterDateRangeCalendar({ dateFrom, dateTo, onChange }) {
+  const [viewDate, setViewDate] = useState(() => parseIsoDate(dateFrom) || new Date())
+  const [pickPhase, setPickPhase] = useState('start')
+  const [anchor, setAnchor] = useState(null)
+  const [yearDropdownOpen, setYearDropdownOpen] = useState(false)
+  const yearDropdownRef = useRef(null)
+
+  useEffect(() => {
+    const parsed = parseIsoDate(dateFrom)
+    if (parsed) setViewDate(parsed)
+  }, [dateFrom])
+
+  useEffect(() => {
+    if (!yearDropdownOpen) return undefined
+    const handleClickOutside = (event) => {
+      if (yearDropdownRef.current && !yearDropdownRef.current.contains(event.target)) {
+        setYearDropdownOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [yearDropdownOpen])
+
+  const viewYear = viewDate.getFullYear()
+  const viewMonth = viewDate.getMonth()
+  const yearOptions = useMemo(() => calendarYearOptions(new Date().getFullYear()), [])
+  const cells = useMemo(() => buildMonthGrid(viewYear, viewMonth), [viewYear, viewMonth])
+  const todayIso = todayValue()
+
+  const highlightFrom = dateFrom
+  const highlightTo = dateTo
+  const rangeLabel = dateFrom && dateTo
+    ? (dateFrom === dateTo ? dateFrom : `${dateFrom} — ${dateTo}`)
+    : 'Sanani tanlang'
+
+  const handleDayClick = (iso) => {
+    if (pickPhase === 'start') {
+      setAnchor(iso)
+      setPickPhase('end')
+      onChange({ date_from: iso, date_to: iso })
+      return
+    }
+    let from = anchor || dateFrom
+    let to = iso
+    if (from > to) [from, to] = [to, from]
+    setPickPhase('start')
+    setAnchor(null)
+    onChange({ date_from: from, date_to: to })
+  }
+
   return (
-    <div className="toast-stack" aria-live="polite">
-      {toasts.map((toast) => (
-        <div key={toast.id} className={`toast toast-${toast.type}`} role="alert">
-          <span className="toast-icon"><WarningCircle size={18} weight="fill" /></span>
-          <div className="toast-body">
-            <b>{toast.type === 'error' ? 'Xatolik' : toast.type === 'success' ? 'Muvaffaqiyatli' : 'Ogohlantirish'}</b>
-            <span>{toast.message}</span>
+    <div className="filter-calendar filter-date-range-calendar" role="group" aria-label="Davr">
+      <div className="filter-calendar-header">
+        <span className="filter-calendar-label">Davr</span>
+        <span className="filter-calendar-value">{rangeLabel}</span>
+      </div>
+      <div className="filter-calendar-widget">
+        <div className="filter-calendar-nav">
+          <button type="button" className="filter-calendar-nav-btn" onClick={() => setViewDate(new Date(viewYear, viewMonth - 1, 1))} aria-label="Oldingi oy">
+            <CaretLeft size={16} />
+          </button>
+          <div className="filter-calendar-nav-title">
+            <span className="filter-calendar-month-name">{UZBEK_MONTHS[viewMonth]}</span>
+            <div className="filter-calendar-year-wrap" ref={yearDropdownRef}>
+              <button
+                type="button"
+                className="filter-calendar-year-btn"
+                onClick={() => setYearDropdownOpen((open) => !open)}
+                aria-expanded={yearDropdownOpen}
+                aria-haspopup="listbox"
+                aria-label={`Yil: ${viewYear}`}
+              >
+                {viewYear}
+                <CaretDown size={12} aria-hidden="true" />
+              </button>
+              {yearDropdownOpen && (
+                <ul className="filter-calendar-year-dropdown" role="listbox" aria-label="Yilni tanlang">
+                  {yearOptions.map((year) => (
+                    <li key={year}>
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={year === viewYear}
+                        className={year === viewYear ? 'is-active' : undefined}
+                        onClick={() => {
+                          setViewDate(new Date(year, viewMonth, 1))
+                          setYearDropdownOpen(false)
+                        }}
+                      >
+                        {year}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
-          <button type="button" className="toast-close" onClick={() => dismiss(toast.id)} aria-label="Yopish">
-            <XCircle size={18} />
+          <button type="button" className="filter-calendar-nav-btn" onClick={() => setViewDate(new Date(viewYear, viewMonth + 1, 1))} aria-label="Keyingi oy">
+            <CaretRight size={16} />
           </button>
         </div>
-      ))}
+        <div className="filter-calendar-weekdays" aria-hidden="true">
+          {CALENDAR_WEEKDAYS.map((day) => (
+            <span key={day} className="filter-calendar-weekday">{day}</span>
+          ))}
+        </div>
+        <div className="filter-calendar-days" role="grid">
+          {cells.map((cell) => {
+            const isStart = highlightFrom === cell.iso
+            const isEnd = highlightTo === cell.iso
+            const isInRange = highlightFrom && highlightTo
+              && cell.iso > highlightFrom && cell.iso < highlightTo
+            const isToday = cell.iso === todayIso
+            return (
+              <button
+                key={cell.iso}
+                type="button"
+                role="gridcell"
+                className={[
+                  'filter-calendar-day',
+                  !cell.inMonth && 'is-outside',
+                  isInRange && 'is-in-range',
+                  isStart && 'is-range-start',
+                  isEnd && 'is-range-end',
+                  (isStart || isEnd) && 'is-selected',
+                  isToday && 'is-today',
+                ].filter(Boolean).join(' ')}
+                onClick={() => handleDayClick(cell.iso)}
+                aria-label={cell.iso}
+                aria-selected={isStart || isEnd}
+              >
+                {cell.date.getDate()}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function periodMetricNote(base, period) {
+  if (period.date_from === todayValue() && period.date_to === todayValue()) return `${base} (bugun)`
+  if (!period.date_from && !period.date_to) return `${base} (barcha davr)`
+  return `${base} (${formatPeriodRange(period)})`
+}
+
+function buildDashboardFilterParams(filters) {
+  const params = {}
+  if (filters?.date_from) params.date_from = filters.date_from
+  if (filters?.date_to) params.date_to = filters.date_to
+  if (filters?.currency) params.currency = filters.currency
+  if (filters?.category) params.category = filters.category
+  if (filters?.client) params.client = filters.client
+  if (filters?.supplier?.trim()) params.supplier = filters.supplier.trim()
+  if (filters?.product) params.product = filters.product
+  if (filters?.payment_status) params.payment_status = filters.payment_status
+  return params
+}
+
+const DEFAULT_DASHBOARD_FILTERS = () => ({
+  preset: 'custom',
+  date_from: todayValue(),
+  date_to: todayValue(),
+  currency: '',
+  category: '',
+  client: '',
+  supplier: '',
+  product: '',
+  payment_status: '',
+})
+
+const CURRENCY_FILTERS = [
+  { id: '', label: 'Hammasi' },
+  { id: 'UZS', label: 'UZS' },
+  { id: 'USD', label: 'USD' },
+]
+
+const PAYMENT_STATUS_FILTERS = [
+  { id: '', label: 'Hammasi' },
+  { id: 'pending', label: 'Kutilmoqda' },
+  { id: 'partial', label: 'Qisman' },
+  { id: 'paid', label: 'To‘langan' },
+  { id: 'overdue', label: 'Kechikkan' },
+]
+
+const TOAST_DURATION = { error: 16000, warning: 12000, success: 7000 }
+
+function ToastStack({ toasts, dismiss, pauseToast, resumeToast }) {
+  const icons = { error: XCircle, success: CheckCircle, warning: WarningCircle }
+  return (
+    <div className="toast-stack" aria-live="polite">
+      {toasts.map((toast) => {
+        const Icon = icons[toast.type] || WarningCircle
+        return (
+          <div
+            key={toast.id}
+            className={`toast toast-${toast.type}`}
+            role="alert"
+            onMouseEnter={() => pauseToast(toast.id)}
+            onMouseLeave={() => resumeToast(toast.id)}
+            onFocus={() => pauseToast(toast.id)}
+            onBlur={() => resumeToast(toast.id)}
+          >
+            <span className="toast-icon"><Icon size={22} weight="fill" /></span>
+            <div className="toast-body">
+              <b>{toast.type === 'error' ? 'Xatolik' : toast.type === 'success' ? 'Muvaffaqiyatli' : 'Ogohlantirish'}</b>
+              <span>{toast.message}</span>
+            </div>
+            <button type="button" className="toast-close" onClick={() => dismiss(toast.id)} aria-label="Yopish">
+              <X size={18} />
+            </button>
+            <span
+              className="toast-progress"
+              style={{ animationDuration: `${toast.durationMs}ms`, animationPlayState: toast.paused ? 'paused' : 'running' }}
+              aria-hidden="true"
+            />
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -112,20 +435,169 @@ function useNotify() {
     if (timer) { clearTimeout(timer); timers.current.delete(id) }
   }, [])
 
+  const scheduleDismiss = useCallback((id, delayMs) => {
+    const timer = setTimeout(() => dismiss(id), delayMs)
+    timers.current.set(id, timer)
+    return timer
+  }, [dismiss])
+
+  const pauseToast = useCallback((id) => {
+    const timer = timers.current.get(id)
+    if (!timer) return
+    clearTimeout(timer)
+    timers.current.delete(id)
+    setToasts((prev) => prev.map((t) => (t.id === id ? { ...t, paused: true } : t)))
+  }, [])
+
+  const resumeToast = useCallback((id) => {
+    setToasts((prev) => {
+      const toast = prev.find((t) => t.id === id)
+      if (!toast?.paused) return prev
+      scheduleDismiss(id, 6000)
+      return prev.map((t) => (t.id === id ? { ...t, paused: false } : t))
+    })
+  }, [scheduleDismiss])
+
   const notify = useCallback((message, type = 'error') => {
     const formatted = formatError(message)
     const key = `${type}:${formatted}`
     const now = Date.now()
     const lastSeen = recent.current.get(key) || 0
-    if (now - lastSeen < 2000) return
+    if (now - lastSeen < 1500) return
     recent.current.set(key, now)
     const id = Date.now() + Math.random()
-    setToasts((prev) => [...prev, { id, message: formatted, type }])
-    const timer = setTimeout(() => dismiss(id), 5000)
-    timers.current.set(id, timer)
-  }, [dismiss])
+    const durationMs = TOAST_DURATION[type] || TOAST_DURATION.error
+    setToasts((prev) => [...prev, { id, message: formatted, type, durationMs, paused: false }])
+    scheduleDismiss(id, durationMs)
+  }, [scheduleDismiss])
 
-  return { toasts, notify, dismiss }
+  return { toasts, notify, dismiss, pauseToast, resumeToast }
+}
+
+function formatRelativeTime(value) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const diffMs = Date.now() - date.getTime()
+  const diffMin = Math.floor(diffMs / 60000)
+  if (diffMin < 1) return 'Hozir'
+  if (diffMin < 60) return `${diffMin} daqiqa oldin`
+  const diffHour = Math.floor(diffMin / 60)
+  if (diffHour < 24) return `${diffHour} soat oldin`
+  const diffDay = Math.floor(diffHour / 24)
+  if (diffDay < 7) return `${diffDay} kun oldin`
+  return date.toLocaleDateString('uz-UZ')
+}
+
+function NotificationDropdown({ onViewAll, notify, onRequestPermission, browserPermission }) {
+  const [open, setOpen] = useState(false)
+  const [items, setItems] = useState([])
+  const [loading, setLoading] = useState(false)
+  const ref = useRef(null)
+  useClickOutside(ref, () => setOpen(false), open)
+
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
+    try {
+      setItems(list(await api.notifications({ page_size: 12 })))
+    } catch (err) {
+      if (!silent) notify(err.message)
+    } finally {
+      if (!silent) setLoading(false)
+    }
+  }, [notify])
+
+  useEffect(() => {
+    load(true)
+    const timer = setInterval(() => load(true), AUTO_REFRESH_MS)
+    return () => clearInterval(timer)
+  }, [load])
+
+  useEffect(() => {
+    if (open) load()
+  }, [open, load])
+
+  const unreadCount = items.filter((item) => !item.is_read).length
+
+  const toggle = () => {
+    setOpen((value) => !value)
+    if (browserPermission !== 'granted') onRequestPermission()
+  }
+
+  const markRead = async (id) => {
+    try {
+      await api.notificationsMarkRead(id)
+      await load(true)
+    } catch (err) {
+      notify(err.message)
+    }
+  }
+
+  const markAllRead = async () => {
+    try {
+      await api.notificationsMarkAllRead()
+      await load(true)
+      notify('Hammasi o‘qilgan deb belgilandi.', 'success')
+    } catch (err) {
+      notify(err.message)
+    }
+  }
+
+  return (
+    <div className="dropdown notification-dropdown" ref={ref}>
+      <button
+        type="button"
+        className="icon-button notification"
+        aria-label="Bildirishnomalar"
+        aria-expanded={open}
+        aria-haspopup="menu"
+        onClick={toggle}
+      >
+        <Bell size={20} />
+        {unreadCount > 0 && <i aria-hidden="true" />}
+      </button>
+      {open && (
+        <div className="dropdown-menu notification-menu" role="menu">
+          <div className="notification-menu-head">
+            <div>
+              <b>Bildirishnomalar</b>
+              {unreadCount > 0 && <small>{unreadCount} ta yangi</small>}
+            </div>
+            {unreadCount > 0 && (
+              <button type="button" className="text-button" onClick={markAllRead}>Hammasini o‘qilgan</button>
+            )}
+          </div>
+          <div className="notification-menu-body">
+            {loading && !items.length ? (
+              <div className="notification-empty"><SpinnerGap size={22} className="spin" />Yuklanmoqda…</div>
+            ) : items.length ? items.map((item) => (
+              <button
+                type="button"
+                key={item.id}
+                className={item.is_read ? 'notification-item is-read' : 'notification-item'}
+                onClick={() => { if (!item.is_read) markRead(item.id) }}
+              >
+                <span className="notification-item-icon"><Bell size={16} weight={item.is_read ? 'regular' : 'fill'} /></span>
+                <span className="notification-item-body">
+                  <b>{item.title}</b>
+                  <span>{item.message}</span>
+                  <small>{formatRelativeTime(item.created_at)}</small>
+                </span>
+                {!item.is_read && <span className="notification-dot" aria-hidden="true" />}
+              </button>
+            )) : (
+              <div className="notification-empty">Bildirishnoma yo‘q</div>
+            )}
+          </div>
+          <div className="notification-menu-foot">
+            <button type="button" className="secondary-button" onClick={() => { onViewAll(); setOpen(false) }}>
+              Barchasini ko‘rish
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 function ProfileDropdown({ session, onLogout }) {
@@ -176,7 +648,8 @@ function App() {
   const [resourceReloadKey, setResourceReloadKey] = useState(0)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('warehouse_sidebar_collapsed') === '1')
-  const { toasts, notify, dismiss } = useNotify()
+  const [dashboardFilters, setDashboardFilters] = useState(() => DEFAULT_DASHBOARD_FILTERS())
+  const { toasts, notify, dismiss, pauseToast, resumeToast } = useNotify()
   const seenNotifications = useRef(new Set())
   const navItems = allowedNavigation(session)
   const primaryMobileNav = navItems.slice(0, 4)
@@ -198,19 +671,29 @@ function App() {
   }, [])
   useTokenRefresh(Boolean(session))
 
-  const loadDashboard = useCallback(async (silent = false) => {
+  const loadDashboard = useCallback(async (silent = false, filters = dashboardFilters) => {
     if (!silent) setLoading(true)
     try {
-      const [summary, warehouse, cash, topProducts] = await api.reports()
-      setDashboard({ summary, warehouse, cash, topProducts })
+      const params = buildDashboardFilterParams(filters)
+      const [[summary, warehouse, cash, topProducts], monthly] = await Promise.all([
+        api.reports(params),
+        api.monthlyTrend(6, params),
+      ])
+      setDashboard({ summary, warehouse, cash, topProducts, monthly })
     } catch (err) {
       if (!silent) notify(err.message)
     } finally {
       if (!silent) setLoading(false)
     }
-  }, [notify])
+  }, [notify, dashboardFilters])
 
-  useEffect(() => { if (session && can(session, 'dashboard')) loadDashboard() }, [session, loadDashboard])
+  const changeDashboardFilters = useCallback((nextFilters) => {
+    setDashboardFilters((current) => ({ ...current, ...nextFilters }))
+  }, [])
+
+  useEffect(() => {
+    if (session && can(session, 'dashboard')) loadDashboard()
+  }, [session, loadDashboard, dashboardFilters])
   useAutoRefresh(() => { if (session && can(session, 'dashboard') && active === 'Bosh sahifa') loadDashboard(true) }, Boolean(session))
 
   useEffect(() => {
@@ -330,7 +813,7 @@ function App() {
   if (!session) return <Login onSuccess={setSession} />
   return (
     <main className={sidebarCollapsed ? 'app-shell sidebar-collapsed' : 'app-shell'}>
-      <ToastStack toasts={toasts} dismiss={dismiss} />
+      <ToastStack toasts={toasts} dismiss={dismiss} pauseToast={pauseToast} resumeToast={resumeToast} />
       <aside className={sidebarCollapsed ? 'sidebar is-collapsed' : 'sidebar'}>
         <div className="brand">
           <span className="brand-mark"><Warehouse size={22} weight="fill" /></span>
@@ -344,11 +827,12 @@ function App() {
           <b className="workspace-name">{workspace}</b>
         </div>
         <nav>{navItems.map(([label, Icon]) => (
-          <button key={label} onClick={() => navigate(label)} className={active === label ? 'nav-item is-active' : 'nav-item'}>
-            <Icon size={19} weight={active === label ? 'fill' : 'regular'} />{label}
+          <button key={label} onClick={() => navigate(label)} className={active === label ? 'nav-item is-active' : 'nav-item'} title={label}>
+            <span className="nav-icon"><Icon size={20} weight={active === label ? 'fill' : 'regular'} /></span>
+            <span className="nav-label">{label}</span>
           </button>
         ))}</nav>
-        <div className="sidebar-bottom"><button className="nav-item" onClick={logout}><SignOut size={19} />Chiqish</button></div>
+        <div className="sidebar-bottom"><button className="nav-item" onClick={logout} title="Chiqish"><span className="nav-icon"><SignOut size={20} /></span><span className="nav-label">Chiqish</span></button></div>
       </aside>
       <section className="content">
         <header className="topbar">
@@ -361,17 +845,29 @@ function App() {
                 <button type="submit" disabled={fxSaving}>{fxSaving ? '…' : 'Saqlash'}</button>
               </div>
             </form>
-            <button className="icon-button" aria-label="Qidiruv" onClick={() => navigate('Buyurtmalar')}><MagnifyingGlass size={20} /></button>
-            <button className="icon-button notification" aria-label="Bildirishnomalar" onClick={() => {
-              if (notificationPermission !== 'granted') requestNotifications()
-              if (can(session, 'notifications_view')) navigate('Bildirishnomalar')
-            }}><Bell size={20} /><i /></button>
+            <button className="icon-button" aria-label="Qidiruv" title="Buyurtmalarni qidirish" onClick={() => navigate('Buyurtmalar')}><MagnifyingGlass size={20} /></button>
+            <NotificationDropdown
+              browserPermission={notificationPermission}
+              onRequestPermission={requestNotifications}
+              onViewAll={() => { if (can(session, 'notifications_view')) navigate('Bildirishnomalar') }}
+              notify={notify}
+            />
             <ProfileDropdown session={session} onLogout={logout} />
           </div>
         </header>
-        {active === 'Bosh sahifa' && can(session, 'dashboard') && <Dashboard data={dashboard} loading={loading && !dashboard} onCreateOrder={openOrderEditor} onNavigate={navigate} session={session} />}
+        {active === 'Bosh sahifa' && can(session, 'dashboard') && (
+          <Dashboard
+            data={dashboard}
+            loading={loading && !dashboard}
+            period={dashboardFilters}
+            onPeriodChange={changeDashboardFilters}
+            onCreateOrder={openOrderEditor}
+            onNavigate={navigate}
+            session={session}
+          />
+        )}
         {active === 'Hisobotlar' && <ReportsPage notify={notify} />}
-        {active !== 'Bosh sahifa' && active !== 'Hisobotlar' && <ResourcePage title={active} notify={notify} reloadKey={resourceReloadKey} session={session} />}
+        {active !== 'Bosh sahifa' && active !== 'Hisobotlar' && <ResourcePage title={active} notify={notify} reloadKey={resourceReloadKey} session={session} onDataChange={() => loadDashboard(true)} onNavigate={navigate} />}
         {orderModalOpen && (
           <OrderEditor
             close={() => setOrderModalOpen(false)}
@@ -381,6 +877,7 @@ function App() {
               loadDashboard(true)
             }}
             notify={notify}
+            session={session}
           />
         )}
       </section>
@@ -396,14 +893,14 @@ function App() {
       )}
       <nav className="bottom-nav" aria-label="Mobil menyu">
         {primaryMobileNav.map(([label, Icon]) => (
-          <button key={label} onClick={() => navigate(label)} className={active === label ? 'bottom-nav-item is-active' : 'bottom-nav-item'}>
+          <button key={label} onClick={() => navigate(label)} className={active === label ? 'bottom-nav-item is-active' : 'bottom-nav-item'} title={label}>
             <Icon size={22} weight={active === label ? 'fill' : 'regular'} />
             <span>{label}</span>
           </button>
         ))}
         {secondaryMobileNav.length > 0 && (
-          <button onClick={() => setMobileMenuOpen((value) => !value)} className={mobileMenuOpen ? 'bottom-nav-item is-active' : 'bottom-nav-item'}>
-            <DotsThree size={25} weight="bold" />
+          <button onClick={() => setMobileMenuOpen((value) => !value)} className={mobileMenuOpen ? 'bottom-nav-item is-active' : 'bottom-nav-item'} aria-label="Ko‘proq bo‘limlar" title="Ko‘proq">
+            <DotsThree size={22} weight="bold" />
             <span>Ko‘proq</span>
           </button>
         )}
@@ -416,7 +913,7 @@ function Login({ onSuccess }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
-  const { toasts, notify, dismiss } = useNotify()
+  const { toasts, notify, dismiss, pauseToast, resumeToast } = useNotify()
 
   const submit = async (event) => {
     event.preventDefault()
@@ -434,7 +931,7 @@ function Login({ onSuccess }) {
 
   return (
     <main className="login-page">
-      <ToastStack toasts={toasts} dismiss={dismiss} />
+      <ToastStack toasts={toasts} dismiss={dismiss} pauseToast={pauseToast} resumeToast={resumeToast} />
       <section className="login-aside">
         <div className="brand"><span className="brand-mark"><Warehouse size={22} weight="fill" /></span><span>smart.<b>ombor</b></span></div>
         <div className="login-copy">
@@ -459,30 +956,503 @@ function Login({ onSuccess }) {
   )
 }
 
-function Dashboard({ data, loading, onCreateOrder, onNavigate, session }) {
+function importPeriodLabel(summary) {
+  const uzs = Number(summary.import_paid_uzs || summary.import_paid_today_uzs || 0)
+  const usd = Number(summary.import_paid_usd || summary.import_paid_today_usd || 0)
+  if (uzs > 0) return `${money(uzs)} so‘m`
+  if (usd > 0) return `$${money(usd)}`
+  return '0 so‘m'
+}
+
+function importPeriodNote(summary) {
+  const usd = Number(summary.import_paid_usd || summary.import_paid_today_usd || 0)
+  const rate = Number(summary.mb_rate_today || 0)
+  if (usd > 0 && rate > 0) return `$${money(usd)} · MB kurs ${money(rate)}`
+  return 'Yetkazuvchi to‘lovi (MB kursida)'
+}
+
+function filterContextNote(filters, lookup = {}) {
+  const extras = []
+  if (filters.category) {
+    const cat = lookup.categories?.find((item) => String(item.id) === String(filters.category))
+    if (cat?.name) extras.push(cat.name)
+  }
+  if (filters.client) {
+    const client = lookup.clients?.find((item) => String(item.id) === String(filters.client))
+    if (client?.full_name || client?.company_name) extras.push(client.full_name || client.company_name)
+  }
+  if (filters.supplier?.trim()) extras.push(filters.supplier.trim())
+  if (filters.product) {
+    const product = lookup.products?.find((item) => String(item.id) === String(filters.product))
+    if (product?.name) extras.push(product.name)
+  }
+  if (filters.payment_status) {
+    const payment = PAYMENT_STATUS_FILTERS.find((item) => item.id === filters.payment_status)
+    if (payment?.label) extras.push(payment.label)
+  }
+  return extras.length ? ` · ${extras.join(', ')}` : ''
+}
+
+function isDefaultDashboardPeriod(filters) {
+  return filters.date_from === todayValue() && filters.date_to === todayValue()
+}
+
+function buildDashboardFilterChips(filters, lookup = {}) {
+  const chips = []
+  if (!isDefaultDashboardPeriod(filters)) {
+    chips.push({
+      key: 'period',
+      label: formatPeriodRange(filters),
+      patch: { preset: 'custom', date_from: todayValue(), date_to: todayValue() },
+    })
+  }
+  if (filters.currency) {
+    const currency = CURRENCY_FILTERS.find((item) => item.id === filters.currency)
+    chips.push({ key: 'currency', label: currency?.label || filters.currency, patch: { currency: '' } })
+  }
+  if (filters.category) {
+    const cat = lookup.categories?.find((item) => String(item.id) === String(filters.category))
+    chips.push({ key: 'category', label: cat?.name || 'Kategoriya', patch: { category: '' } })
+  }
+  if (filters.client) {
+    const client = lookup.clients?.find((item) => String(item.id) === String(filters.client))
+    chips.push({
+      key: 'client',
+      label: client?.full_name || client?.company_name || 'Mijoz',
+      patch: { client: '' },
+    })
+  }
+  if (filters.product) {
+    const product = lookup.products?.find((item) => String(item.id) === String(filters.product))
+    chips.push({ key: 'product', label: product?.name || 'Mahsulot', patch: { product: '' } })
+  }
+  if (filters.supplier?.trim()) {
+    chips.push({ key: 'supplier', label: `Yetkazuvchi: ${filters.supplier.trim()}`, patch: { supplier: '' } })
+  }
+  if (filters.payment_status) {
+    const payment = PAYMENT_STATUS_FILTERS.find((item) => item.id === filters.payment_status)
+    chips.push({ key: 'payment_status', label: payment?.label || filters.payment_status, patch: { payment_status: '' } })
+  }
+  return chips
+}
+
+function FilterSearchSelect({
+  id,
+  label,
+  value,
+  onChange,
+  options,
+  loading,
+  getLabel,
+  getValue = (item) => item.id,
+  emptyLabel = 'Hammasi',
+}) {
+  const [query, setQuery] = useState('')
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLowerCase()
+    if (!needle) return options
+    return options.filter((item) => getLabel(item).toLowerCase().includes(needle))
+  }, [options, query, getLabel])
+
+  useEffect(() => {
+    if (!value) setQuery('')
+  }, [value])
+
+  return (
+    <div className="filter-field">
+      <label className="filter-field-label" htmlFor={id}>{label}</label>
+      {options.length > 8 && (
+        <div className="filter-search-wrap">
+          <MagnifyingGlass size={16} aria-hidden="true" />
+          <input
+            type="search"
+            className="filter-search-input"
+            placeholder="Qidirish..."
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            aria-label={`${label} bo‘yicha qidirish`}
+          />
+        </div>
+      )}
+      <select
+        id={id}
+        className="filter-select"
+        value={value || ''}
+        disabled={loading}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        <option value="">{emptyLabel}</option>
+        {filtered.map((item) => (
+          <option key={getValue(item)} value={getValue(item)}>{getLabel(item)}</option>
+        ))}
+      </select>
+    </div>
+  )
+}
+
+function DashboardFiltersMenu({ filters, onChange }) {
+  const [open, setOpen] = useState(false)
+  const [customFrom, setCustomFrom] = useState(filters.date_from || todayValue())
+  const [customTo, setCustomTo] = useState(filters.date_to || todayValue())
+  const [supplierDraft, setSupplierDraft] = useState(filters.supplier || '')
+  const [options, setOptions] = useState({ categories: [], clients: [], products: [], loading: false })
+  const ref = useRef(null)
+  const menuRef = useRef(null)
+  const optionsLoaded = useRef(false)
+  const closeMenu = useCallback(() => setOpen(false), [])
+  useClickOutside(ref, closeMenu, open)
+
+  const loadOptions = useCallback(() => {
+    if (optionsLoaded.current) return
+    optionsLoaded.current = true
+    setOptions((prev) => ({ ...prev, loading: true }))
+    Promise.all([
+      api.categories({ page_size: 100 }),
+      api.clients({ page_size: 100 }),
+      api.products({ page_size: 200 }),
+    ]).then(([categories, clients, products]) => {
+      setOptions({
+        categories: list(categories),
+        clients: list(clients),
+        products: list(products),
+        loading: false,
+      })
+    }).catch(() => {
+      optionsLoaded.current = false
+      setOptions((prev) => ({ ...prev, loading: false }))
+    })
+  }, [])
+
+  useEffect(() => { loadOptions() }, [loadOptions])
+
+  useEffect(() => {
+    setCustomFrom(filters.date_from || todayValue())
+    setCustomTo(filters.date_to || todayValue())
+    setSupplierDraft(filters.supplier || '')
+  }, [filters.date_from, filters.date_to, filters.supplier])
+
+  useEffect(() => {
+    if (!open) return undefined
+    loadOptions()
+    return undefined
+  }, [open, loadOptions])
+
+  useEffect(() => {
+    if (!open) return undefined
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        closeMenu()
+      }
+      if (event.key === 'Tab' && menuRef.current) {
+        const focusables = menuRef.current.querySelectorAll(
+          'button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        )
+        if (!focusables.length) return
+        const first = focusables[0]
+        const last = focusables[focusables.length - 1]
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault()
+          last.focus()
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault()
+          first.focus()
+        }
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [open, closeMenu])
+
+  useEffect(() => {
+    if (!open || !menuRef.current) return undefined
+    const timer = window.setTimeout(() => {
+      const first = menuRef.current?.querySelector('button, input, select')
+      first?.focus()
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [open])
+
+  const applyDateRange = useCallback((from, to) => {
+    let date_from = from
+    let date_to = to
+    if (date_from && date_to && date_from > date_to) {
+      [date_from, date_to] = [date_to, date_from]
+    }
+    onChange({ preset: 'custom', date_from, date_to })
+  }, [onChange])
+
+  const handleRangeChange = useCallback(({ date_from, date_to }) => {
+    setCustomFrom(date_from)
+    setCustomTo(date_to)
+    applyDateRange(date_from, date_to)
+  }, [applyDateRange])
+
+  const applyCurrency = (currency) => onChange({ currency })
+
+  const applyPaymentStatus = (payment_status) => onChange({ payment_status })
+
+  const applySupplier = (event) => {
+    event.preventDefault()
+    onChange({ supplier: supplierDraft.trim() })
+  }
+
+  const clearSupplierDraft = () => {
+    setSupplierDraft('')
+    onChange({ supplier: '' })
+  }
+
+  const resetFilters = () => {
+    onChange(DEFAULT_DASHBOARD_FILTERS())
+    closeMenu()
+  }
+
+  const removeChip = (patch) => {
+    onChange(patch)
+    if (patch.supplier === '') setSupplierDraft('')
+    if (patch.date_from === todayValue() && patch.date_to === todayValue()) {
+      setCustomFrom(todayValue())
+      setCustomTo(todayValue())
+    }
+  }
+
+  const chips = buildDashboardFilterChips(filters, options)
+  const extraChipCount = chips.filter((chip) => chip.key !== 'period').length
+  const triggerPeriodLabel = formatPeriodRange(filters)
+
+  return (
+    <div className="period-filter-wrap">
+      <div className="period-filter dropdown" ref={ref}>
+        <button
+          type="button"
+          className="secondary-button period-filter-trigger"
+          aria-expanded={open}
+          aria-haspopup="dialog"
+          aria-controls="dashboard-filters-menu"
+          onClick={() => setOpen((value) => !value)}
+        >
+          <Funnel size={18} />
+          Filtrlar
+          <span className="period-filter-current">{triggerPeriodLabel}</span>
+          {extraChipCount > 0 && (
+            <span className="filter-count-badge" aria-label={`${extraChipCount} ta qo‘shimcha filtr`}>
+              +{extraChipCount}
+            </span>
+          )}
+        </button>
+        {open && (
+          <div
+            id="dashboard-filters-menu"
+            ref={menuRef}
+            className="period-filter-menu"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Filtrlar"
+          >
+            <div className="period-filter-head">
+              <div className="period-filter-head-row">
+                <div className="period-filter-head-copy">
+                  <b className="period-filter-head-label">Filtrlar</b>
+                  <p className="period-filter-head-note">O‘zgarishlar darhol qo‘llanadi</p>
+                </div>
+                <button
+                  type="button"
+                  className="icon-button period-filter-close"
+                  onClick={closeMenu}
+                  aria-label="Filtrlarni yopish"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+
+            <div className="period-filter-body">
+              <div className="filter-panel">
+                <div className="filter-panel-dates" aria-labelledby="filter-davr">
+                  <span className="visually-hidden" id="filter-davr">Davr</span>
+                  <FilterDateRangeCalendar
+                    dateFrom={customFrom}
+                    dateTo={customTo}
+                    onChange={handleRangeChange}
+                  />
+                </div>
+
+                <div className="filter-panel-meta">
+                  <div className="filter-panel-meta-block">
+                    <span className="filter-section-title" id="filter-currency">Valyuta</span>
+                    <div className="period-tabs period-tabs--compact" role="tablist" aria-labelledby="filter-currency">
+                      {CURRENCY_FILTERS.map((item) => (
+                        <button
+                          key={item.id || 'all'}
+                          type="button"
+                          role="tab"
+                          aria-selected={filters.currency === item.id}
+                          className={filters.currency === item.id ? 'period-tab is-active' : 'period-tab'}
+                          onClick={() => applyCurrency(item.id)}
+                        >
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="filter-panel-meta-block">
+                    <span className="filter-section-title" id="filter-payment">To‘lov holati</span>
+                    <div className="period-tabs period-tabs--compact" role="tablist" aria-labelledby="filter-payment">
+                      {PAYMENT_STATUS_FILTERS.map((item) => (
+                        <button
+                          key={item.id || 'all'}
+                          type="button"
+                          role="tab"
+                          aria-selected={filters.payment_status === item.id}
+                          className={filters.payment_status === item.id ? 'period-tab is-active' : 'period-tab'}
+                          onClick={() => applyPaymentStatus(item.id)}
+                        >
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="filter-panel-fields">
+                  <FilterSearchSelect
+                    id="filter-category"
+                    label="Kategoriya"
+                    value={filters.category}
+                    loading={options.loading}
+                    options={options.categories}
+                    getLabel={(item) => item.name}
+                    onChange={(category) => onChange({ category })}
+                  />
+                  <FilterSearchSelect
+                    id="filter-client"
+                    label="Mijoz"
+                    value={filters.client}
+                    loading={options.loading}
+                    options={options.clients}
+                    getLabel={(item) => item.full_name || item.company_name || `#${item.id}`}
+                    onChange={(client) => onChange({ client })}
+                  />
+                  <FilterSearchSelect
+                    id="filter-product"
+                    label="Mahsulot"
+                    value={filters.product}
+                    loading={options.loading}
+                    options={options.products}
+                    getLabel={(item) => `${item.name}${item.serial_number ? ` (${item.serial_number})` : ''}`}
+                    onChange={(product) => onChange({ product })}
+                  />
+                  <div className="filter-field">
+                    <span className="filter-field-label" id="filter-supplier">Yetkazuvchi</span>
+                    <form className="filter-supplier-form" onSubmit={applySupplier}>
+                      <input
+                        type="text"
+                        className="filter-text-input"
+                        placeholder="Yetkazuvchi nomi"
+                        value={supplierDraft}
+                        aria-labelledby="filter-supplier"
+                        onChange={(event) => setSupplierDraft(event.target.value)}
+                      />
+                      <button type="submit" className="secondary-button">Qo‘llash</button>
+                    </form>
+                    {filters.supplier?.trim() && (
+                      <button type="button" className="text-button filter-clear-inline" onClick={clearSupplierDraft}>
+                        Tozalash
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="period-filter-footer">
+              {chips.length > 0 ? (
+                <div className="filter-chips" aria-label="Faol filtrlar">
+                  {chips.map((chip) => (
+                    <button
+                      key={chip.key}
+                      type="button"
+                      className="filter-chip"
+                      onClick={() => removeChip(chip.patch)}
+                      aria-label={`${chip.label} filtrini olib tashlash`}
+                    >
+                      <span>{chip.label}</span>
+                      <X size={14} weight="bold" />
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <span className="period-filter-footer-note">Qo‘shimcha filtr tanlanmagan</span>
+              )}
+              <div className="period-filter-footer-actions">
+                {chips.length > 0 && (
+                  <button type="button" className="text-button filter-reset" onClick={resetFilters}>
+                    Barchasini tozalash
+                  </button>
+                )}
+                <button type="button" className="primary-button period-filter-done" onClick={closeMenu}>
+                  Tayyor
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+      {!open && chips.length > 0 && (
+        <div className="filter-chips filter-chips--bar" aria-label="Faol filtrlar">
+          {chips.map((chip) => (
+            <button
+              key={chip.key}
+              type="button"
+              className="filter-chip"
+              onClick={() => removeChip(chip.patch)}
+              aria-label={`${chip.label} filtrini olib tashlash`}
+            >
+              <span>{chip.label}</span>
+              <X size={14} weight="bold" />
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Dashboard({ data, loading, period, onPeriodChange, onCreateOrder, onNavigate, session }) {
   const summary = data?.summary || {}
   const warehouse = data?.warehouse || {}
-  const cash = data?.cash || {}
   const products = data?.topProducts || []
+  const monthly = data?.monthly || []
+  const filterSuffix = filterContextNote(period)
+
+  const kassaValue = period.currency === 'USD'
+    ? `$${money(summary.kassa_collected_usd || 0)}`
+    : `${money(summary.kassa_collected_uzs || summary.kassa_collected_today_uzs || 0)} so‘m`
+  const salesValue = money(summary.sales_revenue_uzs || summary.sales_revenue_total || 0)
+  const kassaNote = (period.currency === 'USD'
+    ? periodMetricNote('Mijoz to‘lovlari (USD)', period)
+    : periodMetricNote('Mijoz to‘lovlari', period)) + filterSuffix
+  const salesNote = periodMetricNote('Faqat sotuvlar (import emas)', period) + filterSuffix
+  const importNote = importPeriodNote(summary) + filterSuffix
+  const overdueNote = (period.payment_status ? 'Filtrlangan to‘lovlar' : 'Hozirgi holat') + filterSuffix
 
   return (
     <div className="page">
-      <div className="page-heading">
-        <div>
-          <p className="eyebrow">BUGUNGI KO‘RINISH</p>
-          <h1>Assalomu alaykum, ishlar nazoratda.</h1>
-        </div>
+      <div className="page-heading page-heading-compact">
         <div className="heading-actions">
-          {can(session, 'orders_manage') && <button className="primary-button" onClick={onCreateOrder}><Plus size={18} />Yangi buyurtma</button>}
+          <DashboardFiltersMenu filters={period} onChange={onPeriodChange} />
+          {can(session, 'orders_manage') && <button className="primary-button" onClick={onCreateOrder}><Plus size={20} />Yangi buyurtma</button>}
         </div>
       </div>
+
       <section className="metric-grid">
-        <Metric icon={CurrencyCircleDollar} label="Bugungi tushum" value={`${money(summary.kassa_collected_uzs)} so‘m`} note="To‘langan hisoblar" trend="up" />
-        <Metric icon={ClipboardText} label="Jami savdo" value={`${money(summary.sales_revenue_total)} so‘m`} note="Davr bo‘yicha" trend="up" />
-        <Metric icon={Package} label="Ombordagi birliklar" value={money(warehouse.total_quantity)} note={`${warehouse.total_product_types || 0} turdagi mahsulot`} trend="neutral" />
-        <Metric icon={FileText} label="Kechikkan to‘lovlar" value={summary.overdue_payments_count || 0} note="E’tibor talab qiladi" trend="down" />
+        <Metric icon={CurrencyCircleDollar} label="Tushum" value={kassaValue} note={kassaNote} trend="up" />
+        <Metric icon={Truck} label="Import" value={importPeriodLabel(summary)} note={importNote} trend="neutral" />
+        <Metric icon={ClipboardText} label="Savdo" value={`${salesValue} so‘m`} note={salesNote} trend="up" />
+        <Metric icon={Package} label="Ombordagi birliklar" value={money(warehouse.total_quantity)} note={`${warehouse.total_product_types || 0} turdagi mahsulot · hozirgi holat`} trend="neutral" />
+        <Metric icon={FileText} label="Kechikkan to‘lovlar" value={summary.overdue_payments_count || 0} note={overdueNote} trend="down" />
       </section>
-      <section className="dashboard-grid">
+      <section className="dashboard-grid dashboard-grid-single">
         <div className="data-panel products-panel">
           <div className="panel-head">
             <div><p className="eyebrow">SOTUVLAR TAHLILI</p><h3>Eng faol mahsulotlar</h3></div>
@@ -499,20 +1469,41 @@ function Dashboard({ data, loading, onCreateOrder, onNavigate, session }) {
             )) : <Empty label="Sotuv ma’lumotlari hali yo‘q" />}
           </div>
         </div>
-        <div className="data-panel cash-panel">
-          <div className="panel-head">
-            <div><p className="eyebrow">KASSA</p><h3>To‘lovlar holati</h3></div>
-            <CurrencyCircleDollar size={25} weight="duotone" />
-          </div>
-          <div className="cash-total"><span>Qabul qilingan</span><b>{money(cash.sum_paid_uzs)} <small>so‘m</small></b></div>
-          <div className="cash-status">
-            <span><i className="status paid" />To‘langan <b>{cash.total_paid || 0}</b></span>
-            <span><i className="status partial" />Qisman <b>{cash.total_partial || 0}</b></span>
-            <span><i className="status overdue" />Kechikkan <b>{cash.total_overdue || 0}</b></span>
-          </div>
-        </div>
       </section>
-      <section className="lower-grid">
+      <section className="data-panel monthly-panel">
+        <div className="panel-head">
+          <div><p className="eyebrow">OYMA-OY</p><h3>Oylik moliyaviy ko‘rinish</h3></div>
+        </div>
+        {loading && !monthly.length ? <SkeletonRows /> : monthly.length ? (
+          <table className="report-table monthly-table">
+            <thead>
+              <tr>
+                <th>Oy</th>
+                <th>Tushum</th>
+                <th>Import</th>
+                <th>Savdo</th>
+              </tr>
+            </thead>
+            <tbody>
+              {monthly.map((row) => (
+                <tr key={`${row.year}-${row.month}`}>
+                  <td><b>{row.label}</b></td>
+                  <td>{money(row.kassa_uzs)} so‘m</td>
+                  <td>
+                    {Number(row.import_uzs) > 0
+                      ? `${money(row.import_uzs)} so‘m`
+                      : Number(row.import_usd) > 0
+                        ? `$${money(row.import_usd)}`
+                        : '—'}
+                  </td>
+                  <td>{money(row.sales_uzs)} so‘m</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : <Empty label="Oylik ma’lumotlar hali yo‘q" />}
+      </section>
+      <section className="lower-grid lower-grid-single">
         <div className="data-panel stock-panel">
           <div className="panel-head">
             <div><p className="eyebrow">OMBOR HOLATI</p><h3>Diqqat talab qiluvchi qoldiqlar</h3></div>
@@ -525,13 +1516,6 @@ function Dashboard({ data, loading, onCreateOrder, onNavigate, session }) {
               <span className="warning-tag">{item.quantity} / min {item.product__min_quantity}</span>
             </div>
           )) : <Empty label="Kritik qoldiq aniqlanmadi" />}
-        </div>
-        <div className="action-panel">
-          <span className="action-icon"><FileText size={23} weight="duotone" /></span>
-          <p className="eyebrow">TEZKOR AMAL</p>
-          <h3>Yangi buyurtmani rasmiylashtiring</h3>
-          <p>Mahsulotlarni tanlang va mijozga tegishli hujjatni bir necha qadamda yarating.</p>
-          {can(session, 'orders_manage') && <button className="light-button" onClick={onCreateOrder}>Buyurtma yaratish <span>→</span></button>}
         </div>
       </section>
     </div>
@@ -670,10 +1654,10 @@ function ReportsPage({ notify }) {
         <section className="data-panel">
           <div className="panel-head"><div><p className="eyebrow">EXCEL EXPORT</p><h3>Hisobot fayllari</h3></div></div>
           <div className="export-grid">
-            <button className="secondary-button" disabled={exporting === 'sales'} onClick={() => exportFile('sales', api.exportSales)}><DownloadSimple size={17} />Sotuvlar</button>
-            <button className="secondary-button" disabled={exporting === 'stock'} onClick={() => exportFile('stock', api.exportStock)}><DownloadSimple size={17} />Ombor</button>
-            <button className="secondary-button" disabled={exporting === 'expenses'} onClick={() => exportFile('expenses', api.exportExpenses)}><DownloadSimple size={17} />Xarajatlar</button>
-            <button className="secondary-button" disabled={exporting === 'payments'} onClick={() => exportFile('payments', api.exportPayments)}><DownloadSimple size={17} />To‘lovlar</button>
+            <button className="secondary-button" disabled={exporting === 'sales'} onClick={() => exportFile('sales', api.exportSales)}><DownloadSimple size={18} />Sotuvlar</button>
+            <button className="secondary-button" disabled={exporting === 'stock'} onClick={() => exportFile('stock', api.exportStock)}><DownloadSimple size={18} />Ombor</button>
+            <button className="secondary-button" disabled={exporting === 'expenses'} onClick={() => exportFile('expenses', api.exportExpenses)}><DownloadSimple size={18} />Xarajatlar</button>
+            <button className="secondary-button" disabled={exporting === 'payments'} onClick={() => exportFile('payments', api.exportPayments)}><DownloadSimple size={18} />To‘lovlar</button>
           </div>
         </section>
       )}
@@ -760,7 +1744,7 @@ function Empty({ label }) {
 
 const resources = {
   'Buyurtmalar': { load: api.orders, path: '/orders/' },
-  'Zakazlar': { load: api.zakaz, path: '/orders/zakaz/' },
+  'Import': { load: api.zakaz, path: '/orders/zakaz/' },
   'Shartnomalar': { load: api.contracts, path: '/orders/contracts/', readonly: true },
   'Ombor': { load: api.products, path: '/warehouse/products/' },
   'Kategoriyalar': { load: api.categories, path: '/warehouse/categories/' },
@@ -775,30 +1759,188 @@ const resources = {
 
 function rowTitle(title, row) {
   if (title === 'Shartnomalar') return row.contract_number || `Reestr #${row.id}`
-  if (title === 'Zakazlar') return row.product_name || `Zakaz #${row.id}`
+  if (title === 'Import') return row.product_name || `Import #${row.id}`
   if (title === 'Qoldiqlar') return row.product_name || row.product || `Qoldiq #${row.id}`
   if (title === 'Foydalanuvchilar') return row.username
   return row.company_name || row.full_name || row.client_name || row.name || `Hujjat #${row.id}`
 }
 
 function rowMeta(title, row) {
-  if (title === 'Shartnomalar') return [row.product_name, row.source_type_display, row.asos].filter(Boolean).join(' • ') || row.created_at || '—'
-  if (title === 'Zakazlar') return [row.status_display || row.status, row.supplier, row.expected_date].filter(Boolean).join(' • ') || '—'
+  if (title === 'Shartnomalar') {
+    const parts = [row.product_name, row.source_type_display]
+    if (row.asos && row.asos !== row.source_type_display) parts.push(row.asos)
+    return parts.filter(Boolean).join(' • ') || row.created_at || '—'
+  }
+  if (title === 'Import') return [row.status_display || row.status, row.supplier, row.expected_date].filter(Boolean).join(' • ') || '—'
   if (title === 'Qoldiqlar') return [row.warehouse_location, `bron: ${row.reserved_quantity || 0}`].filter(Boolean).join(' • ')
   if (title === 'Foydalanuvchilar') return [row.role, row.is_active ? 'faol' : 'bloklangan'].filter(Boolean).join(' • ')
   if (title === 'Mijozlar') return [row.phone, row.passport_number, row.inn].filter(Boolean).join(' • ') || row.created_at || '—'
   return row.serial_number || row.status || row.phone || row.created_at || '—'
 }
 
-function rowValue(title, row) {
-  if (title === 'Zakazlar') return row.total ? `${money(row.total)} ${row.currency || ''}` : `${row.quantity || 0} dona`
-  if (title === 'Qoldiqlar') return `${row.quantity || 0} dona`
+function rowValue(title, row, session) {
+  const showPrices = can(session, 'prices_view')
+  if (title === 'Import') {
+    if (!showPrices || !row.total) return `${row.quantity || 0} dona`
+    return `${money(row.total)} ${row.currency || ''}`
+  }
+  if (title === 'Buyurtmalar') {
+    if (!showPrices) return `${row.total_quantity || 0} dona`
+    return row.total ? `${money(row.total)} so‘m` : `${row.total_quantity || 0} dona`
+  }
+  if (title === 'Qoldiqlar') return quantityWithUnit(row.quantity || 0, row)
+  if (title === 'Ombor') return quantityWithUnit(row.available_quantity ?? row.quantity_in_stock ?? 0, row)
   if (title === 'Shartnomalar') return row.contract_date || '—'
   if (title === 'Foydalanuvchilar') return row.can_view_clients ? 'Mijoz: bor' : 'Mijoz: yo‘q'
+  if (title === 'Sotuvlar') {
+    if (!showPrices) return `${row.quantity || 0} dona`
+    return row.total_amount ? `${money(row.total_amount)} so‘m` : `${row.quantity || 0} dona`
+  }
+  if (title === 'Kassa') {
+    if (!showPrices) return row.status_display || row.status || '—'
+    return row.total_amount ? `${money(row.total_amount)} so‘m` : (row.remaining ? `${money(row.remaining)} qolgan` : '—')
+  }
+  if (!showPrices) return row.quantity || row.total_quantity || '—'
   return row.total_amount ? `${money(row.total_amount)} so‘m` : (row.available_quantity ?? row.total ?? '—')
 }
 
-function ResourcePage({ title, notify, reloadKey = 0, session }) {
+function ContractDetailModal({ id, close, onNavigate }) {
+  const [detail, setDetail] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      setLoading(true)
+      setError('')
+      try {
+        const data = await api.retrieve('/orders/contracts/', id)
+        if (!cancelled) setDetail(data)
+      } catch (err) {
+        if (!cancelled) setError(err.message)
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [id])
+
+  const goTo = (page) => {
+    close()
+    onNavigate?.(page)
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <div className="editor contract-detail-modal">
+        <div className="editor-head">
+          <div>
+            <p className="eyebrow">SHARTNOMA REESTRI</p>
+            <h3>{detail?.contract_number || `Yozuv #${id}`}</h3>
+            {detail?.product_name && <p className="muted">{detail.product_name}</p>}
+          </div>
+          <button type="button" className="icon-button" onClick={close} aria-label="Yopish"><X size={20} /></button>
+        </div>
+        {loading ? (
+          <div className="contract-detail-loading"><SpinnerGap size={28} className="spin" /></div>
+        ) : error ? (
+          <p className="contract-detail-error">{error}</p>
+        ) : detail ? (
+          <>
+            <dl className="contract-detail-grid">
+              <div><dt>Shartnoma raqami</dt><dd>{detail.contract_number || '—'}</dd></div>
+              <div><dt>Sana</dt><dd>{detail.contract_date || '—'}</dd></div>
+              <div><dt>Mahsulot</dt><dd>{detail.product_name || '—'}</dd></div>
+              <div><dt>Manba</dt><dd>{detail.source_type_display || detail.source_type || '—'}</dd></div>
+              <div className="contract-detail-wide"><dt>Asos</dt><dd>{detail.asos || '—'}</dd></div>
+              <div><dt>Faktura</dt><dd>{detail.faktura || '—'}</dd></div>
+              <div><dt>Buyurtma</dt><dd>{detail.order ? `#${detail.order}` : '—'}</dd></div>
+              <div><dt>Import</dt><dd>{detail.zakaz ? `#${detail.zakaz}` : '—'}</dd></div>
+              <div><dt>Yaratgan</dt><dd>{detail.created_by_name || '—'}</dd></div>
+              <div><dt>Yaratilgan vaqt</dt><dd>{detail.created_at || '—'}</dd></div>
+            </dl>
+            {(detail.order || detail.zakaz) && onNavigate && (
+              <div className="contract-detail-links">
+                {detail.order && (
+                  <button type="button" className="secondary-button" onClick={() => goTo('Buyurtmalar')}>
+                    Buyurtmaga o‘tish
+                  </button>
+                )}
+                {detail.zakaz && (
+                  <button type="button" className="secondary-button" onClick={() => goTo('Import')}>
+                    Importga o‘tish
+                  </button>
+                )}
+              </div>
+            )}
+          </>
+        ) : null}
+        <div className="editor-actions">
+          <button type="button" className="primary-button" onClick={close}>Yopish</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ProductContractsModal({ product, rows, close, onViewAll, onViewDetail }) {
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <div className="editor product-contracts-modal">
+        <div className="editor-head">
+          <div>
+            <p className="eyebrow">SHARTNOMALAR REESTRI</p>
+            <h3>{product.name}</h3>
+            <p className="muted">{product.serial_number || 'Seriya raqamsiz mahsulot'}</p>
+          </div>
+          <button type="button" className="icon-button" onClick={close} aria-label="Yopish"><X size={20} /></button>
+        </div>
+        <p className="contracts-intro">
+          Bu mahsulot bo‘yicha qaysi shartnoma, qaysi asos va qaysi amal (buyurtma, import, kirim) bilan ishlaganingizning rasmiy yozuvlari.
+        </p>
+        {rows.length ? (
+          <div className="contracts-list">
+            {rows.map((entry) => (
+              <article
+                className={`contract-card${onViewDetail ? ' contract-card-clickable' : ''}`}
+                key={entry.id}
+                role={onViewDetail ? 'button' : undefined}
+                tabIndex={onViewDetail ? 0 : undefined}
+                onClick={onViewDetail ? () => onViewDetail(entry.id) : undefined}
+                onKeyDown={onViewDetail ? (event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    onViewDetail(entry.id)
+                  }
+                } : undefined}
+              >
+                <div className="contract-card-head">
+                  <b>{entry.contract_number || `Yozuv #${entry.id}`}</b>
+                  <span>{entry.source_type_display || entry.source_type}</span>
+                </div>
+                <p>{entry.asos || 'Asos kiritilmagan'}</p>
+                <small>
+                  {[entry.contract_date, entry.faktura, entry.created_by_name].filter(Boolean).join(' • ')}
+                </small>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <Empty label="Bu mahsulot uchun hali reestr yozuvi yo‘q" />
+        )}
+        <div className="editor-actions">
+          {onViewAll && rows.length > 0 && (
+            <button type="button" className="secondary-button" onClick={onViewAll}>Shartnomalar bo‘limi</button>
+          )}
+          <button type="button" className="primary-button" onClick={close}>Yopish</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onNavigate }) {
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -808,6 +1950,8 @@ function ResourcePage({ title, notify, reloadKey = 0, session }) {
   const [paying, setPaying] = useState(null)
   const [orderAction, setOrderAction] = useState(null)
   const [stockProduct, setStockProduct] = useState(null)
+  const [contractProduct, setContractProduct] = useState(null)
+  const [contractDetailId, setContractDetailId] = useState(null)
 
   const load = useCallback(async (silent = false, term = searchTerm) => {
     if (!resources[title]) return
@@ -824,9 +1968,14 @@ function ResourcePage({ title, notify, reloadKey = 0, session }) {
   useEffect(() => { load() }, [load, reloadKey])
   useAutoRefresh(() => load(true))
 
+  const refreshAfterChange = () => {
+    load(true)
+    onDataChange?.()
+  }
+
   const manageAbilities = {
     'Buyurtmalar': 'orders_manage',
-    'Zakazlar': 'procurement_manage',
+    'Import': 'procurement_manage',
     'Ombor': 'warehouse_manage',
     'Kategoriyalar': 'warehouse_manage',
     'Qoldiqlar': 'warehouse_manage',
@@ -837,7 +1986,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session }) {
     'Foydalanuvchilar': 'users_manage',
   }
   const canManage = can(session, manageAbilities[title])
-  const canCreate = canManage && ['Mijozlar', 'Ombor', 'Buyurtmalar', 'Zakazlar', 'Kategoriyalar', 'Qoldiqlar', 'Sotuvlar', 'Xarajatlar', 'Foydalanuvchilar'].includes(title)
+  const canCreate = canManage && ['Mijozlar', 'Ombor', 'Buyurtmalar', 'Import', 'Kategoriyalar', 'Qoldiqlar', 'Sotuvlar', 'Xarajatlar', 'Foydalanuvchilar'].includes(title)
 
   const handleMarkRead = async (id) => {
     try {
@@ -883,12 +2032,17 @@ function ResourcePage({ title, notify, reloadKey = 0, session }) {
         <div>
           <p className="eyebrow">MODUL</p>
           <h1>{title}</h1>
+          {title === 'Shartnomalar' && (
+            <p className="contracts-registry-note">
+              Yozuvlar avtomatik yaratiladi (buyurtma, import, kirim). Qo‘lda qo‘shish mumkin emas.
+            </p>
+          )}
         </div>
         <div className="heading-actions">
           {title === 'Bildirishnomalar' && (
             <button className="secondary-button" onClick={handleMarkAllRead}>Hammasini o‘qilgan</button>
           )}
-          {canCreate && <button className="primary-button" onClick={() => setEditing({})}><Plus size={18} />Yangi qo‘shish</button>}
+          {canCreate && <button className="primary-button" onClick={() => setEditing({})}><Plus size={20} />Yangi qo‘shish</button>}
         </div>
       </div>
       <section className="data-panel">
@@ -896,13 +2050,31 @@ function ResourcePage({ title, notify, reloadKey = 0, session }) {
           <div><p className="eyebrow">RO‘YXAT</p><h3>{rows.length} ta yozuv</h3></div>
           <form className="resource-search" onSubmit={handleSearch}>
             <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Qidirish" aria-label={`${title} qidirish`} />
-            <button type="submit" className="icon-button" aria-label="Qidirish"><MagnifyingGlass size={19} /></button>
+            <button type="submit" className="icon-button" aria-label="Qidirish"><MagnifyingGlass size={20} /></button>
           </form>
         </div>
-        {loading && !rows.length ? <SkeletonRows /> : (
+        {loading && !rows.length ? <SkeletonRows /> : !rows.length ? (
+          title === 'Shartnomalar' ? (
+            <Empty label="Hali reestr yozuvi yo‘q. Buyurtma, import yoki ombor kirimi amalga oshganda yozuvlar avtomatik paydo bo‘ladi." />
+          ) : (
+            <Empty label="Yozuv topilmadi" />
+          )
+        ) : (
           <div className="product-list">
             {rows.map((row, index) => (
-              <div className="product-row" key={row.id || index}>
+              <div
+                className={`product-row${title === 'Shartnomalar' ? ' product-row-clickable' : ''}`}
+                key={row.id || index}
+                onClick={title === 'Shartnomalar' ? () => setContractDetailId(row.id) : undefined}
+                onKeyDown={title === 'Shartnomalar' ? (event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    setContractDetailId(row.id)
+                  }
+                } : undefined}
+                role={title === 'Shartnomalar' ? 'button' : undefined}
+                tabIndex={title === 'Shartnomalar' ? 0 : undefined}
+              >
                 <span className="rank">{String(index + 1).padStart(2, '0')}</span>
                 {title === 'Bildirishnomalar' ? (
                   <>
@@ -921,26 +2093,56 @@ function ResourcePage({ title, notify, reloadKey = 0, session }) {
                       <small>{rowMeta(title, row)}</small>
                     </div>
                     <span className="bar"><i style={{ width: '58%' }} /></span>
-                    <b>{rowValue(title, row)}</b>
+                    <b>{rowValue(title, row, session)}</b>
                     <div className="row-actions">
-                      {canManage && !resources[title].readonly && <button className="row-action" disabled={opening} onClick={() => handleEdit(row)} aria-label="Tahrirlash"><PencilSimple size={17} /></button>}
+            {canManage && !resources[title].readonly && <button className="row-action" disabled={opening} onClick={() => handleEdit(row)} aria-label="Tahrirlash"><PencilSimple size={18} /></button>}
                       {can(session, 'orders_manage') && title === 'Buyurtmalar' && !['fulfilled', 'cancelled'].includes(row.status) && (
                         <>
                           <button className="row-action" onClick={() => setOrderAction({ row, action: 'fulfill' })}>Yetkazish</button>
                           <button className="row-action" onClick={() => setOrderAction({ row, action: 'cancel' })}>Bekor</button>
-                          {Number(row.backorder_qty || 0) > 0 && <button className="row-action" onClick={() => setOrderAction({ row, action: 'zakaz' })}>Zakaz</button>}
+                          {Number(row.backorder_qty || 0) > 0 && <button className="row-action" onClick={() => setOrderAction({ row, action: 'zakaz' })}>Import</button>}
                         </>
                       )}
                       {can(session, 'warehouse_manage') && title === 'Ombor' && <button className="row-action" onClick={() => setStockProduct(row)} aria-label="Kirim qilish">Kirim</button>}
                       {can(session, 'cash_manage') && title === 'Kassa' && row.remaining !== '0' && (
-                        <button className="row-action" onClick={() => setPaying(row)} aria-label="To‘lov qabul qilish"><CurrencyCircleDollar size={17} /></button>
+                        <button className="row-action" onClick={() => setPaying(row)} aria-label="To‘lov qabul qilish"><CurrencyCircleDollar size={18} /></button>
                       )}
-                      {title === 'Ombor' && <button className="row-action" onClick={async () => {
-                        try {
-                          const rows = list(await api.productContracts(row.id))
-                          notify(rows.length ? `${rows.length} ta shartnoma reestri yozuvi topildi.` : 'Bu mahsulotda shartnoma reestri yo‘q.', rows.length ? 'success' : 'warning')
-                        } catch (err) { notify(err.message) }
-                      }}>Reestr</button>}
+                      {title === 'Shartnomalar' && (
+                        <button
+                          className="row-action"
+                          aria-label="Ko‘rish"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            setContractDetailId(row.id)
+                          }}
+                        >
+                          <Eye size={18} />
+                        </button>
+                      )}
+                      {title === 'Ombor' && (
+                        <button
+                          className="row-action"
+                          title="Mahsulot shartnomalari reestri"
+                          onClick={async (event) => {
+                            event.stopPropagation()
+                            setOpening(true)
+                            try {
+                              const rows = list(await api.productContracts(row.id))
+                              if (!rows.length) {
+                                notify('Bu mahsulot bo‘yicha hali shartnoma reestri yozuvi yo‘q.', 'warning')
+                                return
+                              }
+                              setContractProduct({ product: row, rows })
+                            } catch (err) {
+                              notify(err.message)
+                            } finally {
+                              setOpening(false)
+                            }
+                          }}
+                        >
+                          Reestr
+                        </button>
+                      )}
                     </div>
                   </>
                 )}
@@ -950,41 +2152,90 @@ function ResourcePage({ title, notify, reloadKey = 0, session }) {
         )}
       </section>
       {editing && (title === 'Buyurtmalar'
-        ? <OrderEditor item={editing.id ? editing : null} close={() => setEditing(null)} done={() => { setEditing(null); load() }} notify={notify} />
-        : title === 'Zakazlar'
-          ? <ZakazEditor item={editing.id ? editing : null} close={() => setEditing(null)} done={() => { setEditing(null); load() }} notify={notify} />
+        ? <OrderEditor item={editing.id ? editing : null} close={() => setEditing(null)} done={() => { setEditing(null); refreshAfterChange() }} notify={notify} session={session} />
+        : title === 'Import'
+          ? <ZakazEditor item={editing.id ? editing : null} close={() => setEditing(null)} done={() => { setEditing(null); refreshAfterChange() }} notify={notify} session={session} />
         : title === 'Sotuvlar'
-          ? <SaleEditor item={editing.id ? editing : null} close={() => setEditing(null)} done={() => { setEditing(null); load() }} notify={notify} />
-          : title === 'Foydalanuvchilar'
-            ? <UserEditor item={editing.id ? editing : null} close={() => setEditing(null)} done={() => { setEditing(null); load() }} notify={notify} />
+          ? <SaleEditor item={editing.id ? editing : null} close={() => setEditing(null)} done={() => { setEditing(null); refreshAfterChange() }} notify={notify} session={session} />
+        : title === 'Foydalanuvchilar'
+            ? <UserEditor item={editing.id ? editing : null} close={() => setEditing(null)} done={() => { setEditing(null); refreshAfterChange() }} notify={notify} />
           : title === 'Xarajatlar'
-            ? <ExpenseEditor item={editing.id ? editing : null} close={() => setEditing(null)} done={() => { setEditing(null); load() }} notify={notify} />
-            : <Editor title={title} item={editing} path={resources[title].path} close={() => setEditing(null)} done={() => { setEditing(null); load() }} notify={notify} />
+            ? <ExpenseEditor item={editing.id ? editing : null} close={() => setEditing(null)} done={() => { setEditing(null); refreshAfterChange() }} notify={notify} />
+            : <Editor title={title} item={editing} path={resources[title].path} close={() => setEditing(null)} done={() => { setEditing(null); refreshAfterChange() }} notify={notify} session={session} />
       )}
-      {paying && <PaymentEditor item={paying} close={() => setPaying(null)} done={() => { setPaying(null); load() }} notify={notify} />}
-      {orderAction && <OrderActionEditor item={orderAction.row} action={orderAction.action} close={() => setOrderAction(null)} done={() => { setOrderAction(null); load() }} notify={notify} />}
-      {stockProduct && <StockInEditor item={stockProduct} close={() => setStockProduct(null)} done={() => { setStockProduct(null); load() }} notify={notify} />}
+      {paying && <PaymentEditor item={paying} close={() => setPaying(null)} done={() => { setPaying(null); refreshAfterChange() }} notify={notify} />}
+      {orderAction && <OrderActionEditor item={orderAction.row} action={orderAction.action} close={() => setOrderAction(null)} done={() => { setOrderAction(null); refreshAfterChange() }} notify={notify} />}
+      {stockProduct && <StockInEditor item={stockProduct} close={() => setStockProduct(null)} done={() => { setStockProduct(null); refreshAfterChange() }} notify={notify} />}
+      {contractProduct && (
+        <ProductContractsModal
+          product={contractProduct.product}
+          rows={contractProduct.rows}
+          close={() => setContractProduct(null)}
+          onViewAll={can(session, 'contracts_view') && onNavigate
+            ? () => { setContractProduct(null); onNavigate('Shartnomalar') }
+            : null}
+          onViewDetail={can(session, 'contracts_view')
+            ? (entryId) => { setContractProduct(null); setContractDetailId(entryId) }
+            : null}
+        />
+      )}
+      {contractDetailId && (
+        <ContractDetailModal
+          id={contractDetailId}
+          close={() => setContractDetailId(null)}
+          onNavigate={onNavigate}
+        />
+      )}
     </div>
   )
 }
 
 const fields = {
-  Ombor: [['name', 'Mahsulot nomi', true], ['model', 'Model'], ['serial_number', 'Seriya raqami', true], ['source', 'Manba / yetkazuvchi'], ['min_quantity', 'Minimal qoldiq'], ['quantity', 'Boshlang‘ich miqdor'], ['warehouse_location', 'Ombordagi joy']],
-  Kategoriyalar: [['name', 'Kategoriya nomi', true], ['parent', 'Parent ID']],
+  Ombor: [['name', 'Mahsulot nomi', true], ['model', 'Model'], ['serial_number', 'Seriya raqami', true], ['source', 'Manba / yetkazuvchi'], ['unit', 'O‘lchov birligi'], ['min_quantity', 'Minimal qoldiq'], ['purchase_price', 'Kelish narxi'], ['selling_price', 'Sotuv narxi'], ['quantity', 'Boshlang‘ich miqdor'], ['warehouse_location', 'Ombordagi joy']],
+  Kategoriyalar: [['name', 'Kategoriya nomi', true], ['parent', 'Ota kategoriya']],
   Qoldiqlar: [['product', 'Mahsulot ID', true], ['quantity', 'Miqdor', true], ['reserved_quantity', 'Bron miqdor'], ['warehouse_location', 'Ombordagi joy', true]],
 }
 
-function Editor({ title, item, path, close, done, notify }) {
+function Editor({ title, item, path, close, done, notify, session }) {
   const [form, setForm] = useState(() => ({ ...item, client_type: item?.client_type || 'individual' }))
   const [saving, setSaving] = useState(false)
+  const [categories, setCategories] = useState([])
+  const canManagePrices = can(session, 'prices_manage')
+
+  useEffect(() => {
+    if (title !== 'Kategoriyalar') return
+    api.categories({ page_size: 200 })
+      .then((data) => setCategories(list(data)))
+      .catch((err) => notify(err.message))
+  }, [title, notify])
+
+  const parentOptions = useMemo(() => {
+    if (title !== 'Kategoriyalar') return []
+    const flat = flattenCategories(categories)
+    if (!item?.id) return flat
+    const node = findCategoryNode(categories, item.id)
+    const excluded = new Set([item.id, ...collectDescendantIds(node)])
+    return flat.filter((cat) => !excluded.has(cat.id))
+  }, [title, categories, item?.id])
+  const visibleFields = title === 'Ombor'
+    ? fields[title].filter(([key]) => {
+      if (key === 'purchase_price' || key === 'selling_price' || key === 'min_quantity') return canManagePrices
+      return true
+    })
+    : fields[title]
 
   const submit = async (event) => {
     event.preventDefault()
     setSaving(true)
-    const payload = Object.fromEntries(Object.entries(form).filter(([key, value]) => !['id', 'created_at', 'quantity_in_stock', 'available_quantity', 'reserved_quantity', 'stock_status', 'category_name'].includes(key) && value !== undefined && value !== ''))
+    const payload = Object.fromEntries(Object.entries(form).filter(([key, value]) => !['id', 'created_at', 'quantity_in_stock', 'available_quantity', 'reserved_quantity', 'stock_status', 'category_name', 'unit_display'].includes(key) && value !== undefined && value !== ''))
     if (title === 'Ombor') {
       if (payload.min_quantity) payload.min_quantity = Number(payload.min_quantity)
       if (payload.quantity) payload.quantity = Number(payload.quantity)
+      if (!canManagePrices) {
+        delete payload.purchase_price
+        delete payload.selling_price
+        delete payload.min_quantity
+      }
     }
     if (title === 'Qoldiqlar') {
       if (payload.product) payload.product = Number(payload.product)
@@ -996,8 +2247,10 @@ function Editor({ title, item, path, close, done, notify }) {
     }
     if (title === 'Mijozlar') {
       if (payload.client_type === 'individual') {
-        const fullName = [payload.last_name, payload.first_name, payload.middle_name].filter(Boolean).join(' ').trim()
-        payload.full_name = fullName
+        payload.full_name = (payload.full_name || '').trim()
+        payload.first_name = ''
+        payload.last_name = ''
+        payload.middle_name = ''
         payload.company_name = ''
         payload.inn = ''
       } else {
@@ -1031,7 +2284,7 @@ function Editor({ title, item, path, close, done, notify }) {
             <>
               <label>Tur
                 <select value={form.client_type || 'individual'} onChange={(event) => setForm({ ...form, client_type: event.target.value })}>
-                  <option value="individual">Fizik shaxs</option>
+                  <option value="individual">Jismoniy shaxs</option>
                   <option value="legal">Yuridik shaxs</option>
                 </select>
               </label>
@@ -1046,11 +2299,9 @@ function Editor({ title, item, path, close, done, notify }) {
                 </>
               ) : (
                 <>
-                  <label>Ism<input required value={form.first_name ?? ''} onChange={(event) => setForm({ ...form, first_name: event.target.value })} /></label>
-                  <label>Familiya<input required value={form.last_name ?? ''} onChange={(event) => setForm({ ...form, last_name: event.target.value })} /></label>
-                  <label>Otasining ismi<input required value={form.middle_name ?? ''} onChange={(event) => setForm({ ...form, middle_name: event.target.value })} /></label>
-                  <label>PINFL<input required value={form.pinfl ?? ''} onChange={(event) => setForm({ ...form, pinfl: event.target.value })} /></label>
-                  <label>Pasport raqami<input required value={form.passport_number ?? ''} onChange={(event) => setForm({ ...form, passport_number: event.target.value })} /></label>
+                  <label>To‘liq ism<input required value={form.full_name ?? ''} onChange={(event) => setForm({ ...form, full_name: event.target.value })} /></label>
+                  <label>JSHR (PINFL)<input required value={form.pinfl ?? ''} onChange={(event) => setForm({ ...form, pinfl: event.target.value })} /></label>
+                  <label>Pasport seriya va raqami<input required value={form.passport_number ?? ''} onChange={(event) => setForm({ ...form, passport_number: event.target.value })} /></label>
                   <label>Telefon<input required value={form.phone ?? ''} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></label>
                   <label>E-mail<input type="email" value={form.email ?? ''} onChange={(event) => setForm({ ...form, email: event.target.value })} /></label>
                   <label>Manzil<input value={form.address ?? ''} onChange={(event) => setForm({ ...form, address: event.target.value })} /></label>
@@ -1058,9 +2309,22 @@ function Editor({ title, item, path, close, done, notify }) {
                 </>
               )}
             </>
-          ) : fields[title].map(([key, label, required]) => (
+          ) : visibleFields?.map(([key, label, required]) => (
             <label key={key}>{label}
-              <input required={required} value={form[key] ?? ''} type={key === 'email' ? 'email' : key === 'min_quantity' || key === 'quantity' ? 'number' : 'text'} onChange={(event) => setForm({ ...form, [key]: event.target.value })} />
+              {key === 'unit' ? (
+                <select required value={form.unit || 'piece'} onChange={(event) => setForm({ ...form, unit: event.target.value })}>
+                  {productUnits.map(([value, name]) => <option value={value} key={value}>{name}</option>)}
+                </select>
+              ) : key === 'parent' ? (
+                <select value={form.parent ?? ''} onChange={(event) => setForm({ ...form, parent: event.target.value })}>
+                  <option value="">Asosiy kategoriya (yuqori daraja)</option>
+                  {parentOptions.map((cat) => (
+                    <option value={cat.id} key={cat.id}>{`${'— '.repeat(cat.depth)}${cat.name}`}</option>
+                  ))}
+                </select>
+              ) : (
+                <input required={required} value={form[key] ?? ''} type={key === 'email' ? 'email' : ['min_quantity', 'quantity', 'purchase_price', 'selling_price'].includes(key) ? 'number' : 'text'} step={['purchase_price', 'selling_price'].includes(key) ? '0.01' : undefined} min={['min_quantity', 'quantity'].includes(key) ? '0' : undefined} onChange={(event) => setForm({ ...form, [key]: event.target.value })} />
+              )}
             </label>
           ))}
         </div>
@@ -1073,7 +2337,8 @@ function Editor({ title, item, path, close, done, notify }) {
   )
 }
 
-function SaleEditor({ close, done, notify, item = null }) {
+function SaleEditor({ close, done, notify, item = null, session }) {
+  const showPrices = can(session, 'prices_manage')
   const [clients, setClients] = useState([])
   const [products, setProducts] = useState([])
   const [saving, setSaving] = useState(false)
@@ -1094,7 +2359,7 @@ function SaleEditor({ close, done, notify, item = null }) {
         client: form.client || null,
         product: Number(form.product),
         quantity: Number(form.quantity),
-        sold_price: Number(form.sold_price || 0),
+        ...(showPrices ? { sold_price: Number(form.sold_price || 0) } : {}),
         sold_to: form.sold_to || '',
         destination: form.destination || '',
         sold_date: form.sold_date || new Date().toISOString().slice(0, 10),
@@ -1107,7 +2372,12 @@ function SaleEditor({ close, done, notify, item = null }) {
           sold_to: form.sold_to || '',
           destination: form.destination || '',
           sold_date: form.sold_date || new Date().toISOString().slice(0, 10),
-          items: items.filter((row) => row.product).map((row) => ({ product: Number(row.product), quantity: Number(row.quantity), sold_price: row.sold_price, comment: row.comment || '' })),
+          items: items.filter((row) => row.product).map((row) => ({
+            product: Number(row.product),
+            quantity: Number(row.quantity),
+            ...(showPrices ? { sold_price: row.sold_price } : {}),
+            comment: row.comment || '',
+          })),
         })
       } else await api.create('/sales/', payload)
       notify(item?.id ? 'Sotuv yangilandi.' : 'Sotuv saqlandi.', 'success')
@@ -1130,18 +2400,18 @@ function SaleEditor({ close, done, notify, item = null }) {
           <label>Mijoz<select value={form.client} onChange={(event) => setForm({ ...form, client: event.target.value })}><option value="">Mijoz tanlanmagan</option>{clients.map((client) => <option value={client.id} key={client.id}>{client.company_name || client.full_name}</option>)}</select></label>
           {item?.id ? (
             <>
-              <label>Mahsulot<select required value={form.product} onChange={(event) => setForm({ ...form, product: event.target.value })}><option value="">Mahsulotni tanlang</option>{products.map((product) => <option value={product.id} key={product.id}>{product.name} — {product.serial_number}</option>)}</select></label>
+              <label>Mahsulot<select required value={form.product} onChange={(event) => setForm({ ...form, product: event.target.value })}><option value="">Mahsulotni tanlang</option>{products.map((product) => <option value={product.id} key={product.id}>{product.name} — {product.serial_number} ({product.unit_display || unitLabel(product.unit)})</option>)}</select></label>
               <label>Miqdor<input required min="1" type="number" value={form.quantity} onChange={(event) => setForm({ ...form, quantity: event.target.value })} /></label>
-              <label>Sotuv narxi<input required min="0" step="0.01" type="number" value={form.sold_price} onChange={(event) => setForm({ ...form, sold_price: event.target.value })} /></label>
+              {showPrices && <label>Sotuv narxi<input required min="0" step="0.01" type="number" value={form.sold_price} onChange={(event) => setForm({ ...form, sold_price: event.target.value })} /></label>}
             </>
           ) : (
             <div className="full-width line-items">
               <div className="line-head"><b>Mahsulotlar</b></div>
               {items.map((row, index) => (
                 <div className="line-item" key={index}>
-                  <select required value={row.product} onChange={(event) => setItems(items.map((itemRow, i) => i === index ? { ...itemRow, product: event.target.value } : itemRow))}><option value="">Mahsulot</option>{products.map((product) => <option value={product.id} key={product.id}>{product.name} — {product.serial_number}</option>)}</select>
+                  <select required value={row.product} onChange={(event) => setItems(items.map((itemRow, i) => i === index ? { ...itemRow, product: event.target.value } : itemRow))}><option value="">Mahsulot</option>{products.map((product) => <option value={product.id} key={product.id}>{product.name} — {product.serial_number} ({product.unit_display || unitLabel(product.unit)})</option>)}</select>
                   <input required min="1" type="number" value={row.quantity} onChange={(event) => setItems(items.map((itemRow, i) => i === index ? { ...itemRow, quantity: event.target.value } : itemRow))} />
-                  <input required min="0" step="0.01" type="number" placeholder="Narx" value={row.sold_price} onChange={(event) => setItems(items.map((itemRow, i) => i === index ? { ...itemRow, sold_price: event.target.value } : itemRow))} />
+                  {showPrices && <input required min="0" step="0.01" type="number" placeholder="Narx" value={row.sold_price} onChange={(event) => setItems(items.map((itemRow, i) => i === index ? { ...itemRow, sold_price: event.target.value } : itemRow))} />}
                   <button type="button" className="row-action" disabled={items.length === 1} onClick={() => setItems(items.filter((_, i) => i !== index))}>O‘chirish</button>
                 </div>
               ))}
@@ -1239,16 +2509,19 @@ function ExpenseEditor({ close, done, notify, item = null }) {
   )
 }
 
-function OrderEditor({ close, done, notify, item = null }) {
+function OrderEditor({ close, done, notify, item = null, session }) {
+  const showPrices = can(session, 'prices_manage')
   const [clients, setClients] = useState([])
   const [products, setProducts] = useState([])
   const [saving, setSaving] = useState(false)
   const [file, setFile] = useState(null)
-  const [form, setForm] = useState({ client: '', contract_number: '', contract_date: new Date().toISOString().slice(0, 10), due_date: '', prepaid_amount: '0', product: '', itemId: null, quantity: '1', unit_price: '', comment: '', asos: '' })
+  const [form, setForm] = useState({ client: '', contract_number: '', contract_date: todayValue(), due_date: currentYearEndValue(), prepaid_amount: '0', product: '', itemId: null, quantity: '1', unit_price: '', comment: '', asos: '' })
   const [items, setItems] = useState([{ product: '', quantity: '1', unit_price: '' }])
+  const [contractNumberEdited, setContractNumberEdited] = useState(false)
 
   const updateContractNumber = (value) => {
     setForm({ ...form, contract_number: value.replace(/[^\d/]/g, '') })
+    setContractNumberEdited(true)
   }
 
   useEffect(() => {
@@ -1259,14 +2532,15 @@ function OrderEditor({ close, done, notify, item = null }) {
 
   useEffect(() => {
     if (!item) {
-      setForm({ client: '', contract_number: '', contract_date: new Date().toISOString().slice(0, 10), due_date: '', prepaid_amount: '0', product: '', itemId: null, quantity: '1', unit_price: '', comment: '', asos: '' })
+      setForm({ client: '', contract_number: '', contract_date: todayValue(), due_date: currentYearEndValue(), prepaid_amount: '0', product: '', itemId: null, quantity: '1', unit_price: '', comment: '', asos: '' })
       setItems([{ product: '', quantity: '1', unit_price: '' }])
+      setContractNumberEdited(false)
       return
     }
     setForm({
       client: item.client || '',
       contract_number: item.contract_number || '',
-      contract_date: item.contract_date || new Date().toISOString().slice(0, 10),
+      contract_date: item.contract_date || todayValue(),
       due_date: item.due_date || '',
       prepaid_amount: item.prepaid_amount ?? '0',
       product: item.items?.[0]?.product || '',
@@ -1276,7 +2550,19 @@ function OrderEditor({ close, done, notify, item = null }) {
       comment: item.comment || '',
       asos: '',
     })
+    setContractNumberEdited(Boolean(item.contract_number))
   }, [item])
+
+  useEffect(() => {
+    if (item?.id || contractNumberEdited || !form.contract_date) return
+    let cancelled = false
+    api.nextContractNumber({ contract_date: form.contract_date })
+      .then((data) => {
+        if (!cancelled) setForm((current) => ({ ...current, contract_number: data.contract_number || '' }))
+      })
+      .catch((err) => notify(err.message))
+    return () => { cancelled = true }
+  }, [item?.id, contractNumberEdited, form.contract_date, notify])
 
   const submit = async (event) => {
     event.preventDefault()
@@ -1288,13 +2574,13 @@ function OrderEditor({ close, done, notify, item = null }) {
           contract_number: form.contract_number || '',
           contract_date: form.contract_date || null,
           due_date: form.due_date || null,
-          prepaid_amount: Number(form.prepaid_amount || 0),
+          prepaid_amount: showPrices ? Number(form.prepaid_amount || 0) : 0,
           comment: form.comment || '',
           asos: form.asos,
         }
         if (form.itemId) {
           payload.items = [{ id: form.itemId, quantity: Number(form.quantity) }]
-          if (form.unit_price !== '') payload.items[0].unit_price = form.unit_price
+          if (showPrices && form.unit_price !== '') payload.items[0].unit_price = form.unit_price
         }
         await api.update('/orders/', item.id, payload)
         notify('Buyurtma yangilandi.', 'success')
@@ -1304,9 +2590,13 @@ function OrderEditor({ close, done, notify, item = null }) {
         if (form.contract_number) payload.append('contract_number', form.contract_number)
         if (form.contract_date) payload.append('contract_date', form.contract_date)
         if (form.due_date) payload.append('due_date', form.due_date)
-        payload.append('prepaid_amount', form.prepaid_amount || '0')
+        if (showPrices) payload.append('prepaid_amount', form.prepaid_amount || '0')
         payload.append('comment', form.comment || '')
-        payload.append('items', JSON.stringify(items.filter((row) => row.product).map((row) => ({ product: Number(row.product), quantity: Number(row.quantity), unit_price: row.unit_price || null }))))
+        payload.append('items', JSON.stringify(items.filter((row) => row.product).map((row) => ({
+          product: Number(row.product),
+          quantity: Number(row.quantity),
+          ...(showPrices && row.unit_price ? { unit_price: row.unit_price } : {}),
+        }))))
         if (file) payload.append('contract_file', file)
         const created = await api.createForm('/orders/', payload)
         const number = created?.contract_number || form.contract_number || 'avtomatik'
@@ -1330,29 +2620,29 @@ function OrderEditor({ close, done, notify, item = null }) {
         <div className="form-grid">
           <label>Mijoz<select value={form.client} onChange={(event) => setForm({ ...form, client: event.target.value })}><option value="">Mijoz tanlanmagan</option>{clients.map((client) => <option value={client.id} key={client.id}>{client.company_name || client.full_name}</option>)}</select></label>
           <label>Shartnoma raqami<input value={form.contract_number} onChange={(event) => updateContractNumber(event.target.value)} placeholder="Masalan: 12/1108" inputMode="numeric" pattern="[0-9/]*" /></label>
-          <label>Shartnoma sanasi<input type="date" value={form.contract_date} onChange={(event) => setForm({ ...form, contract_date: event.target.value })} /></label>
+          <label>Shartnoma tuzilgan sana<input type="date" value={form.contract_date} onChange={(event) => setForm({ ...form, contract_date: event.target.value })} /></label>
+          <label>Yetkazish muddati<input type="date" value={form.due_date} onChange={(event) => setForm({ ...form, due_date: event.target.value })} /></label>
           {item?.id ? (
             <>
-              <label>Mahsulot<select required value={form.product} onChange={(event) => setForm({ ...form, product: event.target.value })}><option value="">Mahsulotni tanlang</option>{products.map((product) => <option value={product.id} key={product.id}>{product.name} — {product.serial_number}</option>)}</select></label>
+              <label>Mahsulot<select required value={form.product} onChange={(event) => setForm({ ...form, product: event.target.value })}><option value="">Mahsulotni tanlang</option>{products.map((product) => <option value={product.id} key={product.id}>{product.name} — {product.serial_number} ({product.unit_display || unitLabel(product.unit)})</option>)}</select></label>
               <label>Miqdor<input required min="1" type="number" value={form.quantity} onChange={(event) => setForm({ ...form, quantity: event.target.value })} /></label>
-              <label>Birlik narxi<input type="number" min="0" step="0.01" value={form.unit_price} onChange={(event) => setForm({ ...form, unit_price: event.target.value })} /></label>
+              {showPrices && <label>Birlik narxi<input type="number" min="0" step="0.01" value={form.unit_price} onChange={(event) => setForm({ ...form, unit_price: event.target.value })} /></label>}
             </>
           ) : (
             <div className="full-width line-items">
               <div className="line-head"><b>Mahsulotlar</b></div>
               {items.map((row, index) => (
                 <div className="line-item" key={index}>
-                  <select required value={row.product} onChange={(event) => setItems(items.map((itemRow, i) => i === index ? { ...itemRow, product: event.target.value } : itemRow))}><option value="">Mahsulot</option>{products.map((product) => <option value={product.id} key={product.id}>{product.name} — {product.serial_number}</option>)}</select>
+                  <select required value={row.product} onChange={(event) => setItems(items.map((itemRow, i) => i === index ? { ...itemRow, product: event.target.value } : itemRow))}><option value="">Mahsulot</option>{products.map((product) => <option value={product.id} key={product.id}>{product.name} — {product.serial_number} ({product.unit_display || unitLabel(product.unit)})</option>)}</select>
                   <input required min="1" type="number" value={row.quantity} onChange={(event) => setItems(items.map((itemRow, i) => i === index ? { ...itemRow, quantity: event.target.value } : itemRow))} />
-                  <input type="number" min="0" step="0.01" placeholder="Birlik narxi" value={row.unit_price} onChange={(event) => setItems(items.map((itemRow, i) => i === index ? { ...itemRow, unit_price: event.target.value } : itemRow))} />
+                  {showPrices && <input type="number" min="0" step="0.01" placeholder="Birlik narxi" value={row.unit_price} onChange={(event) => setItems(items.map((itemRow, i) => i === index ? { ...itemRow, unit_price: event.target.value } : itemRow))} />}
                   <button type="button" className="row-action" disabled={items.length === 1} onClick={() => setItems(items.filter((_, i) => i !== index))}>O‘chirish</button>
                 </div>
               ))}
               <button type="button" className="secondary-button add-line-button" onClick={() => setItems([...items, { product: '', quantity: '1', unit_price: '' }])}><Plus size={16} />Mahsulot qo‘shish</button>
             </div>
           )}
-          <label>Oldindan to‘lov<input type="number" min="0" step="0.01" value={form.prepaid_amount} onChange={(event) => setForm({ ...form, prepaid_amount: event.target.value })} /></label>
-          <label>Yetkazish muddati<input type="date" value={form.due_date} onChange={(event) => setForm({ ...form, due_date: event.target.value })} /></label>
+          {showPrices && <label>Oldindan to‘lov<input type="number" min="0" step="0.01" value={form.prepaid_amount} onChange={(event) => setForm({ ...form, prepaid_amount: event.target.value })} /></label>}
           {item?.id && <label className="full-width">Tahrirlash sababi<input required value={form.asos} onChange={(event) => setForm({ ...form, asos: event.target.value })} placeholder="Nima uchun o‘zgartirilayotganini yozing" /></label>}
           <label className="full-width file-field">Shartnoma fayli
             <span className="file-picker">
@@ -1375,7 +2665,7 @@ function OrderEditor({ close, done, notify, item = null }) {
 function OrderActionEditor({ item, action, close, done, notify }) {
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({ contract_number: item.contract_number || '', asos: '', faktura: '', supplier: '', expected_date: '' })
-  const labels = { fulfill: 'Yetkazib berish', cancel: 'Buyurtmani bekor qilish', zakaz: 'Zakaz yaratish' }
+  const labels = { fulfill: 'Yetkazib berish', cancel: 'Buyurtmani bekor qilish', zakaz: 'Import yaratish' }
 
   const submit = async (event) => {
     event.preventDefault()
@@ -1411,7 +2701,10 @@ function OrderActionEditor({ item, action, close, done, notify }) {
   )
 }
 
-function ZakazEditor({ close, done, notify, item = null }) {
+function ZakazEditor({ close, done, notify, item = null, session }) {
+  const showPrices = can(session, 'prices_manage')
+  const isManagement = can(session, 'prices_manage')
+  const isBackorder = item?.zakaz_type === 'backorder'
   const [products, setProducts] = useState([])
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState(() => ({
@@ -1444,9 +2737,14 @@ function ZakazEditor({ close, done, notify, item = null }) {
       if (payload.product) payload.product = Number(payload.product)
       if (payload.quantity) payload.quantity = Number(payload.quantity)
       if (payload.received_qty) payload.received_qty = Number(payload.received_qty)
+      if (!showPrices || isBackorder) {
+        delete payload.unit_price
+        delete payload.currency
+        delete payload.payment_status
+      }
       if (item?.id) await api.update('/orders/zakaz/', item.id, payload)
       else await api.create('/orders/zakaz/', payload)
-      notify(item?.id ? 'Zakaz yangilandi.' : 'Zakaz yaratildi.', 'success')
+      notify(item?.id ? 'Import yangilandi.' : 'Import yaratildi.', 'success')
       done()
     } catch (err) {
       notify(err.message)
@@ -1458,15 +2756,19 @@ function ZakazEditor({ close, done, notify, item = null }) {
   return (
     <div className="modal-backdrop" role="presentation">
       <form className="editor" onSubmit={submit}>
-        <div className="editor-head"><div><p className="eyebrow">{item?.id ? 'ZAKAZ TAHRIRI' : 'YANGI ZAKAZ'}</p><h3>Yetkazuvchidan buyurtma</h3></div><button type="button" className="icon-button" onClick={close} aria-label="Yopish"><X size={20} /></button></div>
+        <div className="editor-head"><div><p className="eyebrow">{item?.id ? 'IMPORT TAHRIRI' : 'YANGI IMPORT'}</p><h3>Yetkazuvchidan import</h3></div><button type="button" className="icon-button" onClick={close} aria-label="Yopish"><X size={20} /></button></div>
         <div className="form-grid">
-          <label>Mahsulot<select required disabled={Boolean(item?.order_contract)} value={form.product} onChange={(event) => setForm({ ...form, product: event.target.value })}><option value="">Mahsulotni tanlang</option>{products.map((product) => <option value={product.id} key={product.id}>{product.name} — {product.serial_number}</option>)}</select></label>
-          <label>Miqdor<input required min="1" type="number" value={form.quantity} onChange={(event) => setForm({ ...form, quantity: event.target.value })} /></label>
-          <label>Qabul qilingan<input min="0" type="number" value={form.received_qty} onChange={(event) => setForm({ ...form, received_qty: event.target.value })} /></label>
-          <label>Narx<input required={!item?.id} min="0" step="0.01" type="number" value={form.unit_price} onChange={(event) => setForm({ ...form, unit_price: event.target.value })} /></label>
-          <label>Valyuta<select value={form.currency} onChange={(event) => setForm({ ...form, currency: event.target.value })}><option value="UZS">UZS</option><option value="USD">USD</option></select></label>
-          <label>Status<select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value })}><option value="new">Yangi</option><option value="confirmed">Tasdiqlandi</option><option value="received">Qabul qilindi</option><option value="cancelled">Bekor qilindi</option></select></label>
-          <label>To‘lov statusi<select value={form.payment_status} onChange={(event) => setForm({ ...form, payment_status: event.target.value })}><option value="unpaid">To‘lanmagan</option><option value="partial">Qisman</option><option value="paid">To‘langan</option></select></label>
+          <div className={`import-top-row${isManagement ? ' has-received' : ''}`}>
+            <label className="field-product">Mahsulot<select required disabled={Boolean(item?.order_contract)} value={form.product} onChange={(event) => setForm({ ...form, product: event.target.value })}><option value="">Mahsulotni tanlang</option>{products.map((product) => <option value={product.id} key={product.id}>{product.name} — {product.serial_number} ({product.unit_display || unitLabel(product.unit)})</option>)}</select></label>
+            <label className="field-qty">Miqdor<input required min="1" type="number" value={form.quantity} onChange={(event) => setForm({ ...form, quantity: event.target.value })} disabled={isBackorder && !isManagement} /></label>
+            {isManagement && <label className="field-received">Qabul qilingan<input min="0" type="number" value={form.received_qty} onChange={(event) => setForm({ ...form, received_qty: event.target.value })} /></label>}
+          </div>
+          {showPrices && !isBackorder && <>
+            <label>Narx<input required={!item?.id && showPrices} min="0" step="0.01" type="number" value={form.unit_price} onChange={(event) => setForm({ ...form, unit_price: event.target.value })} /></label>
+            <label>Valyuta<select value={form.currency} onChange={(event) => setForm({ ...form, currency: event.target.value })}><option value="UZS">UZS</option><option value="USD">USD</option></select></label>
+            <label>To‘lov statusi<select value={form.payment_status} onChange={(event) => setForm({ ...form, payment_status: event.target.value })}><option value="unpaid">To‘lanmagan</option><option value="partial">Qisman</option><option value="paid">To‘langan</option></select></label>
+          </>}
+          {isManagement && <label>Status<select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value })}><option value="new">Yangi</option><option value="confirmed">Tasdiqlandi</option><option value="received">Qabul qilindi</option><option value="cancelled">Bekor qilindi</option></select></label>}
           <label>Yetkazuvchi<input value={form.supplier} onChange={(event) => setForm({ ...form, supplier: event.target.value })} /></label>
           <label>Shartnoma raqami<input value={form.contract_number} onChange={(event) => setForm({ ...form, contract_number: event.target.value.replace(/[^\d/]/g, '') })} placeholder="12/1108" /></label>
           <label>Shartnoma sanasi<input type="date" value={form.contract_date} onChange={(event) => setForm({ ...form, contract_date: event.target.value })} /></label>

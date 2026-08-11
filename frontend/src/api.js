@@ -165,8 +165,18 @@ export async function request(path, options = {}) {
 export const api = {
   login: (username, password) => request('/auth/login/', { method: 'POST', skipAuth: true, body: JSON.stringify({ username, password }) }),
   me: () => request('/auth/me/'),
-  reports: () => Promise.all([request('/reports/summary/'), request('/reports/warehouse/'), request('/reports/cash/'), request('/reports/top-products/')]),
+  reports: (params = {}) => {
+    const q = toQuery(params)
+    return Promise.all([
+      request(`/reports/summary/${q}`),
+      request('/reports/warehouse/'),
+      request(`/reports/cash/${q}`),
+      request(`/reports/top-products/${toQuery({ limit: 10, ...params })}`),
+    ])
+  },
+  monthlyTrend: (months = 6, params = {}) => request(`/reports/monthly-trend/${toQuery({ months, ...params })}`),
   orders: (params = {}) => request(`/orders/${toQuery({ page_size: 20, ...params })}`),
+  nextContractNumber: (params = {}) => request(`/orders/next-contract-number/${toQuery(params)}`),
   ordersBulk: (payload) => request('/orders/bulk/', { method: 'POST', body: JSON.stringify(payload) }),
   order: (id) => request(`/orders/${id}/`),
   zakaz: (params = {}) => request(`/orders/zakaz/${toQuery({ page_size: 30, ...params })}`),
