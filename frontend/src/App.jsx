@@ -17,6 +17,7 @@ import EmptyState from './components/EmptyState'
 import StatusChangeModal, { InlineStatusSelect } from './components/StatusChangeModal'
 import { buildListQueryParams, emptyStateConfig, exportRowsCsv, hasActiveListFilters } from './listFilters'
 import { clientDetailPath, crumbFromPath, parseAppPath, pathForPage } from './routes'
+import { clientOptionLabel, clientSearchText, fetchClient, searchClients } from './lib/clients'
 
 const NAV_GROUPS = {
   Ombor: [
@@ -3277,8 +3278,10 @@ function SaleEditor({ close, done, notify, item = null, session }) {
             value={form.client}
             onChange={(value) => setForm({ ...form, client: value })}
             options={clients}
-            getLabel={(client) => client.company_name || client.full_name || '—'}
-            placeholder="Mijoz qidirish..."
+            onSearch={can(session, 'clients_view') ? searchClients : undefined}
+            getLabel={clientOptionLabel}
+            getSearchText={clientSearchText}
+            placeholder="F.I.Sh, INN/STIR, JSHSHIR, passport, kompaniya, email..."
           />
           {item?.id ? (
             <>
@@ -4090,7 +4093,7 @@ function BuyurtmalarPage({ notify, session, initialInvoiceId = null, prefillClie
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState(null)
-  const [clients, setClients] = useState([])
+  const [selectedClientDetail, setSelectedClientDetail] = useState(null)
   const [products, setProducts] = useState([])
   const [company, setCompany] = useState(null)
   const [saving, setSaving] = useState(false)
@@ -4137,12 +4140,6 @@ function BuyurtmalarPage({ notify, session, initialInvoiceId = null, prefillClie
       setRows(list(invoiceData))
       setProducts(list(productData))
       setCompany(profile)
-      if (can(session, 'clients_view')) {
-        const clientData = await api.clients({ page_size: 200 })
-        setClients(list(clientData))
-      } else {
-        setClients([])
-      }
     } catch (err) {
       notify(err.message)
     } finally {
@@ -4151,6 +4148,18 @@ function BuyurtmalarPage({ notify, session, initialInvoiceId = null, prefillClie
   }, [notify, session])
 
   useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    if (!editing?.client || !can(session, 'clients_view')) {
+      setSelectedClientDetail(null)
+      return undefined
+    }
+    let cancelled = false
+    fetchClient(editing.client)
+      .then((detail) => { if (!cancelled) setSelectedClientDetail(detail) })
+      .catch((err) => { if (!cancelled) { setSelectedClientDetail(null); notify(err.message) } })
+    return () => { cancelled = true }
+  }, [editing?.client, session, notify])
 
   const closeEditor = () => {
     setContractNumberEdited(false)
@@ -4366,7 +4375,7 @@ function BuyurtmalarPage({ notify, session, initialInvoiceId = null, prefillClie
     }
   }
 
-  const selectedClient = clients.find((c) => String(c.id) === String(editing?.client))
+  const selectedClient = selectedClientDetail
 
   return (
     <div className="page e-invoice-page">
@@ -4479,9 +4488,12 @@ function BuyurtmalarPage({ notify, session, initialInvoiceId = null, prefillClie
               label="Mijoz"
               value={editing.client || ''}
               onChange={(value) => { clearFieldError('client'); setEditing({ ...editing, client: value }) }}
-              options={clients}
-              getLabel={(client) => client.company_name || client.full_name || '—'}
-              placeholder="Mijoz qidirish..."
+              options={[]}
+              selectedOption={selectedClientDetail}
+              onSearch={can(session, 'clients_view') ? searchClients : undefined}
+              getLabel={clientOptionLabel}
+              getSearchText={clientSearchText}
+              placeholder="F.I.Sh, INN/STIR, JSHSHIR, passport, kompaniya, email..."
               error={errors.client}
               required
             />

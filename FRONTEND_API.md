@@ -357,10 +357,33 @@ Forma editorlari mahsulotlarni **mustaqil** yuklaydi; mijozlar faqat `clients_vi
 
 | Komponent | Mahsulot | Mijoz |
 |---|---|---|
-| `SaleEditor` | `api.products({ page_size: 500 })` | `api.clients(...)` — faqat `clients_view` |
-| `BuyurtmalarPage` | `api.products({ page_size: 200 })` | `api.clients(...)` — faqat `clients_view` |
+| `SaleEditor` | `api.products({ page_size: 500 })` | `SearchableCombobox` + `searchClients()` (`onSearch`) |
+| `BuyurtmalarPage` | `api.products({ page_size: 200 })` | `SearchableCombobox` + `searchClients()`; tanlangan mijoz `fetchClient()` |
 
-`clients_view` yo‘q bo‘lsa mijoz combobox bo‘sh qoladi; 403 xato chiqmasligi uchun `api.clients()` chaqirilmaydi.
+`clients_view` yo‘q bo‘lsa mijoz combobox ishlamaydi; 403 xato chiqmasligi uchun `api.clients()` chaqirilmaydi.
+
+### Mijoz qidiruv combobox (`SearchableCombobox` + `lib/clients.js`)
+
+Buyurtmalar editoridagi **Hamkorning ma’lumotlari** va **Sotuv** editoridagi mijoz maydoni server qidiruv ishlatadi:
+
+| Frontend | Backend |
+|---|---|
+| `searchClients(query)` → `api.clients({ search: query, page_size: 20 })` | `ClientSearchFilter` (`apps/clients/filters.py`) |
+| `fetchClient(id)` → `GET /clients/{uuid}/` | To‘liq rekvizitlar (hamkor info-grid, preview) |
+| `clientOptionLabel()` | Ro‘yxat yorlig‘i: nom + INN/JSHSHIR/passport |
+| `clientSearchText()` | Lokal fallback (Sotuv editoridagi oldindan yuklangan ro‘yxat) |
+
+**Qidiriladigan maydonlar** (`search` parametri):
+
+| Tur | Maydonlar |
+|---|---|
+| F.I.Sh | `full_name`, `first_name`, `last_name`, `middle_name`, `director_fish` |
+| INN / STIR | `inn` |
+| JSHSHIR | `pinfl` (jismoniy), `director_jshshr` (yuridik) |
+| Passport | `passport_number` |
+| Boshqa | `company_name`, `email` |
+
+Shifrlangan maydonlar serverda ochiladi. Kamida **2** belgi; debounce **280 ms** (`SearchableCombobox`). Tanlangan mijoz `GET /clients/{uuid}/` orqali to‘liq yuklanadi (STIR, bank, MFO, manzil va hokazo).
 
 ### `FxRatePanel` rejimlari (`App.jsx`)
 
@@ -682,7 +705,7 @@ Backend mahsulotdan `product_name`, `barcode`, `identification_code`, `unit`, na
 
 **Narx ko‘rinishi:** `prices_view` yo‘q foydalanuvchilar uchun qator narxlari (`unit_price`, `delivery_amount`, `vat_amount`, `total_amount`) va invoice jami maydonlari (`total_delivery`, `total_vat`, `grand_total`) javobdan olib tashlanadi. Frontend `BuyurtmalarPage` da `can(session, 'prices_view')` bilan jami blokni yashiradi.
 
-Frontend: `BuyurtmalarPage` — ro‘yxat, tahrir, `DocumentPreviewModal` (mazmun + jadval + rekvizitlar). Mahsulot va mijozlar mustaqil yuklanadi; `api.clients()` faqat `clients_view` bo‘lsa.
+Frontend: `BuyurtmalarPage` — ro‘yxat, tahrir, `DocumentPreviewModal` (mazmun + jadval + rekvizitlar). Mahsulot mustaqil yuklanadi. **Hamkorning ma’lumotlari** — `SearchableCombobox` + `searchClients()` (§3, mijoz qidiruv jadvali); tanlangan mijoz `fetchClient()` bilan to‘liq yuklanadi.
 
 Korxona profili (`GET/PATCH /company-profile/`) previewda «Bajaruvchi» blokida ishlatiladi.
 
@@ -847,7 +870,7 @@ Frontend menyuni `abilities` bo‘yicha ko‘rsatadi. Ruxsat yo‘q menu UI’da
 
 - `procurement_manage` — import **yaratish/tahrirlash**; status o‘zgartirish emas.
 - `order_status_manage` — import gridda inline status va bulk status (`confirmed` → `received` …).
-- `clients_view` — `SaleEditor`, `BuyurtmalarPage` da `api.clients()` chaqiriladi.
+- `clients_view` — `SaleEditor`, `BuyurtmalarPage` da `searchClients()` / `fetchClient()` (`clients_view` bo‘lmasa combobox o‘chiriladi).
 - `users_manage` — `FxRatePanel` tab almashtirish, qo‘lda saqlash, Infinbank ↻ yangilash.
 - `prices_view` — invoice qator narxlari va `total_delivery` / `total_vat` / `grand_total`.
 
@@ -867,6 +890,7 @@ Operator uchun narx/foyda maydonlari ayrim javoblarda qaytmaydi. Frontend bunday
 | Mijoz kartasi URL | `clients_view` | `routes.jsx`, `App.jsx` |
 | Global qidiruv — mijozlar | `clients_view` | `GlobalSearch.jsx` |
 | Global qidiruv — buyurtmalar | `einvoice_view` | `GlobalSearch.jsx` |
+| Hamkor / mijoz combobox (Buyurtmalar, Sotuv) | `clients_view` | `SearchableCombobox`, `lib/clients.js` |
 | Editor mijoz combobox | `clients_view` | `SaleEditor`, `BuyurtmalarPage` |
 | Editor mahsulot combobox | (ability shart emas) | `api.products()` doim chaqiriladi |
 | Invoice jami / qator narxlari | `prices_view` | `BuyurtmalarPage`, backend serializer |
@@ -2047,7 +2071,7 @@ notifications: 30s
 - USD kurs: `preferred_rate_source` va `latest` javobidagi `infinbank`/`manual` obyektlari bilan ishlansin.
 - `FxRatePanel`: topbar — `header` (read-only Infinbank); editorlar — `compact` (tablar + ixtiyoriy ↻ / qo‘lda input). FX boshqaruv — `users_manage`.
 - Import grid status (inline + bulk) — `order_status_manage`, `procurement_manage` emas.
-- `SaleEditor`, `BuyurtmalarPage`: `api.products()` doim; `api.clients()` faqat `clients_view`.
+- `SaleEditor`, `BuyurtmalarPage`: `api.products()` doim; mijoz qidiruv — `searchClients()` + `fetchClient()` faqat `clients_view`.
 - `DataTable` Amallar ustuni: `.row-actions` flex wrapper; grid da `flex-wrap: nowrap`, tugmalar 36px balandlik.
 - Invoice javobida `prices_view` yo‘q bo‘lsa `total_delivery`, `total_vat`, `grand_total` ham yo‘q.
 
