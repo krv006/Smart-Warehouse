@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, FileText, PencilSimple, Plus, SpinnerGap, TrendUp } from '@phosphor-icons/react'
+import { ArrowLeft, PencilSimple, Plus, SpinnerGap, TrendUp } from '@phosphor-icons/react'
 import { api } from '../api'
 import DataTable, { StatusBadge, TablePagination } from './DataTable'
 import { clientDetailPath, pathForPage } from '../routes'
@@ -12,16 +12,12 @@ const TAB_LABELS = {
   buyurtmalar: 'Buyurtmalar',
   sotuvlar: 'Sotuvlar',
   tolovlar: 'To‘lovlar',
-  hujjatlar: 'Hujjatlar',
-  tarix: 'Tarix',
 }
 
-const ORDER_STATUS = {
-  pending: { label: 'Kutilmoqda', tone: 'warning' },
-  partial: { label: 'Qisman', tone: 'warning' },
-  reserved: { label: 'Bron', tone: 'info' },
-  fulfilled: { label: 'Yetkazildi', tone: 'success' },
-  cancelled: { label: 'Bekor', tone: 'danger' },
+const documentTypeLabels = {
+  contract_sk: 'Shartnoma (SK)',
+  invoice: 'Hisob-faktura',
+  act: 'Dalolatnoma',
 }
 
 function can(session, ability) {
@@ -56,10 +52,9 @@ export default function ClientDetailPage({
   const [client, setClient] = useState(null)
   const [loading, setLoading] = useState(true)
   const [tabLoading, setTabLoading] = useState(false)
-  const [orders, setOrders] = useState([])
+  const [invoices, setInvoices] = useState([])
   const [sales, setSales] = useState([])
   const [payments, setPayments] = useState([])
-  const [invoices, setInvoices] = useState([])
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
 
@@ -81,9 +76,9 @@ export default function ClientDetailPage({
     if (!clientId) return
     setTabLoading(true)
     try {
-      if (tab === 'buyurtmalar' && can(session, 'orders_view')) {
-        const data = await api.orders({ client: clientId, page, page_size: 15, ordering: '-created_at' })
-        setOrders(list(data))
+      if (tab === 'buyurtmalar' && can(session, 'einvoice_view')) {
+        const data = await api.invoices({ client: clientId, page, page_size: 15, ordering: '-created_at' })
+        setInvoices(list(data))
         setTotal(data.count ?? list(data).length)
       } else if (tab === 'sotuvlar' && can(session, 'sales_view')) {
         const data = await api.sales({ client: clientId, page, page_size: 15, ordering: '-sold_date' })
@@ -93,14 +88,6 @@ export default function ClientDetailPage({
         const data = await api.payments({ client: clientId, page, page_size: 15 })
         setPayments(list(data))
         setTotal(data.count ?? list(data).length)
-      } else if (tab === 'hujjatlar' && can(session, 'einvoice_view')) {
-        const data = await api.invoices({ client: clientId, page_size: 30 })
-        setInvoices(list(data))
-        setTotal(list(data).length)
-      } else if (tab === 'tarix') {
-        const data = await api.orders({ client: clientId, page_size: 50, ordering: '-created_at' })
-        setOrders(list(data))
-        setTotal(list(data).length)
       }
     } catch (err) {
       notify(err.message)
@@ -120,11 +107,10 @@ export default function ClientDetailPage({
   }, [tab, client, page, loadTabData])
 
   const tabs = useMemo(() => (
-    ['umumiy', 'buyurtmalar', 'sotuvlar', 'tolovlar', 'hujjatlar', 'tarix'].filter((key) => {
-      if (key === 'buyurtmalar') return can(session, 'orders_view')
+    ['umumiy', 'buyurtmalar', 'sotuvlar', 'tolovlar'].filter((key) => {
+      if (key === 'buyurtmalar') return can(session, 'einvoice_view')
       if (key === 'sotuvlar') return can(session, 'sales_view')
       if (key === 'tolovlar') return can(session, 'cash_view')
-      if (key === 'hujjatlar') return can(session, 'einvoice_view')
       return true
     })
   ), [session])
@@ -170,7 +156,7 @@ export default function ClientDetailPage({
               <PencilSimple size={18} />Tahrir
             </button>
           )}
-          {can(session, 'orders_manage') && (
+          {can(session, 'einvoice_manage') && (
             <button type="button" className="secondary-button" onClick={() => onNewOrder?.(client)}>
               <Plus size={18} />Yangi buyurtma
             </button>
@@ -216,15 +202,12 @@ export default function ClientDetailPage({
             <DataTable
               loading={tabLoading}
               columns={[
-                { key: 'contract_number', label: 'Shartnoma', render: (r) => r.contract_number || `#${r.id}` },
-                { key: 'status', label: 'Status', render: (r) => {
-                  const s = ORDER_STATUS[r.status] || { label: r.status, tone: 'neutral' }
-                  return <StatusBadge status={r.status} label={s.label} tone={s.tone} />
-                } },
-                { key: 'total', label: 'Summa', render: (r) => `${money(r.total)} so‘m` },
-                { key: 'created_at', label: 'Sana', render: (r) => formatDate(r.created_at) },
+                { key: 'contract_number', label: 'Shartnoma', render: (r) => r.contract_number || r.name || `#${r.id}` },
+                { key: 'document_type', label: 'Turi', render: (r) => r.document_type_display || documentTypeLabels[r.document_type] || r.document_type || '—' },
+                { key: 'total', label: 'Summa', render: (r) => `${money(r.grand_total ?? r.total ?? 0)} so‘m` },
+                { key: 'created_at', label: 'Sana', render: (r) => formatDate(r.created_at || r.contract_date) },
               ]}
-              rows={orders}
+              rows={invoices}
               onRowClick={(row) => onNavigate(`/buyurtmalar/${row.id}`)}
               emptyLabel="Buyurtma yo‘q"
             />
@@ -263,47 +246,6 @@ export default function ClientDetailPage({
             />
             <TablePagination page={page} pageSize={15} total={total} onPageChange={setPage} />
           </>
-        )}
-
-        {tab === 'hujjatlar' && (
-          <DataTable
-            loading={tabLoading}
-            columns={[
-              { key: 'name', label: 'Nomi', render: (r) => r.name || r.contract_number },
-              { key: 'document_type', label: 'Turi' },
-              { key: 'contract_number', label: 'Shartnoma' },
-              { key: 'created_at', label: 'Sana', render: (r) => formatDate(r.created_at) },
-            ]}
-            rows={invoices}
-            onRowClick={() => onNavigate(pathForPage('Elektron faktura'))}
-            emptyLabel="Hujjat yo‘q"
-          />
-        )}
-
-        {tab === 'tarix' && (
-          <ol className="order-timeline client-activity-timeline">
-            {tabLoading && !orders.length ? (
-              <li className="order-timeline-item"><SpinnerGap size={22} className="spin" /></li>
-            ) : orders.map((order) => (
-              <li key={order.id} className="order-timeline-item">
-                <span className="order-timeline-dot" aria-hidden="true" />
-                <div className="order-timeline-body">
-                  <div className="order-timeline-head">
-                    <b>Buyurtma {order.contract_number || `#${order.id}`}</b>
-                    <time>{formatDate(order.created_at)}</time>
-                  </div>
-                  <p className="order-timeline-meta">
-                    <span>Status:</span> {ORDER_STATUS[order.status]?.label || order.status}
-                    {order.total ? ` · ${money(order.total)} so‘m` : ''}
-                  </p>
-                  <button type="button" className="text-button" onClick={() => onNavigate(`/buyurtmalar/${order.id}`)}>
-                    Ko‘rish <FileText size={14} />
-                  </button>
-                </div>
-              </li>
-            ))}
-            {!tabLoading && !orders.length && <li className="order-timeline-empty">Faoliyat yozuvi yo‘q</li>}
-          </ol>
         )}
       </section>
     </div>

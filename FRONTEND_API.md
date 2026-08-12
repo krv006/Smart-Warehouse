@@ -25,7 +25,7 @@ Production override: `VITE_API_BASE_URL` (masalan `https://api.example.com/api/v
 | 7 | Valyuta kursi (backend + `FxRatePanel`) |
 | 8–16 | Modul bo‘yicha batafsil (buyurtma, zakaz, ombor, …) |
 | 17 | Hisobotlar |
-| 17a | Elektron faktura (batafsil) |
+| 17a | Buyurtmalar — `/invoices/` (batafsil) |
 | 18–22 | Yangi endpoint qo‘shish, performance, checklist, rol matritsasi |
 
 ---
@@ -195,7 +195,7 @@ Timeout: **8 soniya**. Xato klassi: `ApiError(message, status)`.
 | `updateCompanyProfile(payload)` | PATCH | `/company-profile/` | korxona rekvizitlari — Management |
 | `invoices(params)` | GET | `/invoices/` | `page_size=30`, `document_type`, `client`, `search` |
 | `invoice(id)` | GET | `/invoices/{id}/` | — |
-| `createInvoice(payload)` | POST | `/invoices/` | elektron faktura + `lines[]` |
+| `createInvoice(payload)` | POST | `/invoices/` | buyurtma (invoice) + `lines[]` |
 | `updateInvoice(id, payload)` | PATCH | `/invoices/{id}/` | — |
 | `removeInvoice(id)` | DELETE | `/invoices/{id}/` | Management |
 | `expenses(params)` | GET | `/expenses/expenses/` | `page_size=30`, `expense_type`, `sub_type`, `currency`, `date_from`, `date_to` |
@@ -260,10 +260,9 @@ await api.remove('/auth/users/', id)
 |---|---|---|---|
 | Bosh sahifa | `reports`, `monthlyTrend` | `/reports/*` | Filtrli |
 | Hisobotlar | `reports`, `expensesSummary`, `paymentsSummary`, `export*` | `/reports/*`, `/expenses/summary/`, `/cash/payments/summary/` | Filtrsiz reports |
-| Buyurtmalar | `orders`, `nextContractNumber`, `createForm`, `update`, `fulfillOrder`, `cancelOrder`, `createOrderZakaz` | `/orders/` | Grid; `/buyurtmalar/{id}` tarix paneli |
+| Buyurtmalar | `invoices`, `invoice`, `createInvoice`, `updateInvoice`, `removeInvoice`, `nextContractNumber`, `companyProfile` | `/invoices/`, `/company-profile/` | `BuyurtmalarPage` — ro‘yxat + editor, preview; `/buyurtmalar/{uuid}` tahrir |
 | Import | `zakaz`, `create`, `update` | `/orders/zakaz/` | `new_product` inline (manual import); inline/bulk status — faqat `order_status_manage` |
 | Shartnomalar | `contracts`, `retrieve` | `/orders/contracts/` | Read-only |
-| Elektron faktura | `invoices`, `invoice`, `createInvoice`, `updateInvoice`, `removeInvoice`, `nextContractNumber`, `companyProfile` | `/invoices/`, `/company-profile/` | Mazmun + preview UI |
 | Korxona profili | `companyProfile`, `updateCompanyProfile` | `/company-profile/` | Profil dropdown |
 | Ombor | `products`, `create`, `update`, `addStock`, `productContracts` | `/warehouse/products/` | `warehouse_create` ability |
 | Kategoriyalar | `categories`, `create`, `update`, `remove` | `/warehouse/categories/` | |
@@ -282,7 +281,7 @@ await api.remove('/auth/users/', id)
 
 | Fayl | Vazifa |
 |---|---|
-| `frontend/src/routes.js` | `PAGE_PATHS`, `parseAppPath()`, `clientDetailPath()`, `orderDetailPath()`, `CLIENT_TABS` |
+| `frontend/src/routes.js` | `PAGE_PATHS`, `parseAppPath()`, `clientDetailPath()`, `invoiceDetailPath()`, `CLIENT_TABS` |
 | `frontend/src/routes.jsx` | `AppRoutes` — URL → `ClientDetailPage`, `ResourcePage`, dashboard, hisobotlar |
 | `frontend/src/pages/LoginPage.jsx` | JWT login (`api.login` → `saveSession`) |
 | `frontend/src/main.jsx` | `BrowserRouter` |
@@ -293,22 +292,22 @@ Asosiy URL lar (react-router):
 |---|---|
 | `/`, `/buyurtmalar`, `/import`, … | `PAGE_PATHS` dagi ro‘yxat sahifalari |
 | `/mijozlar/{uuid}` | Mijoz kartasi, tab `umumiy` |
-| `/mijozlar/{uuid}/{tab}` | `buyurtmalar`, `sotuvlar`, `tolovlar`, `hujjatlar`, `tarix` |
-| `/buyurtmalar/{id}` | Buyurtmalar ro‘yxati + `#id` tarix paneli (`initialOrderHistoryId`) |
+| `/mijozlar/{uuid}/{tab}` | `buyurtmalar`, `sotuvlar`, `tolovlar` |
+| `/buyurtmalar/{uuid}` | Buyurtmalar ro‘yxati + shu invoice tahriri (`initialInvoiceId`) |
 
 ### Global qidiruv (`GlobalSearch.jsx`)
 
 - Ochish: header tugmasi yoki **Ctrl+K** / **⌘+K** (`useGlobalSearchHotkey`).
 - Kamida **2** belgi; debounce bilan parallel so‘rovlar (`page_size=6`):
   - Mijozlar → `api.clients({ search })`
-  - Buyurtmalar → `api.orders({ search })`
+  - Buyurtmalar → `api.invoices({ search })`
   - Mahsulotlar → `api.products({ search })`
   - Shartnomalar → `api.contracts({ search })`
 - Natija bosilganda: mijoz kartasi, buyurtma detail URL, Ombor yoki Shartnomalar sahifasi.
 
 ### Grid ro‘yxatlar, filtr, pagination (`ResourcePage` + `listFilters.js`)
 
-**Grid sahifalar** (`GRID_PAGES` — `App.jsx`): Mijozlar, Buyurtmalar, Sotuvlar, Import, Ombor, Kassa, Xarajatlar.
+**Grid sahifalar** (`GRID_PAGES` — `App.jsx`): Mijozlar, Sotuvlar, Import, Ombor, Kassa, Xarajatlar. **Buyurtmalar** alohida `BuyurtmalarPage` (`/invoices/`).
 
 | Parametr | Qiymat |
 |---|---|
@@ -321,7 +320,6 @@ Filtr paneli: `ListFiltersPanel` + `frontend/src/listFilters.js`.
 | Modul | Status | Mijoz | Sana |
 |---|---|---|---|
 | Mijozlar | `is_active` | — | ✅ |
-| Buyurtmalar | `status` | ✅ | ✅ |
 | Sotuvlar | — | ✅ | ✅ |
 | Import | `status` | — | ✅ |
 | Ombor | — | — | — |
@@ -357,9 +355,8 @@ Forma editorlari mahsulotlarni **mustaqil** yuklaydi; mijozlar faqat `clients_vi
 
 | Komponent | Mahsulot | Mijoz |
 |---|---|---|
-| `OrderEditor` | `api.products({ page_size: 500 })` | `api.clients(...)` — faqat `clients_view` |
 | `SaleEditor` | `api.products({ page_size: 500 })` | `api.clients(...)` — faqat `clients_view` |
-| `EInvoicePage` | `api.products({ page_size: 200 })` | `api.clients(...)` — faqat `clients_view` |
+| `BuyurtmalarPage` | `api.products({ page_size: 200 })` | `api.clients(...)` — faqat `clients_view` |
 
 `clients_view` yo‘q bo‘lsa mijoz combobox bo‘sh qoladi; 403 xato chiqmasligi uchun `api.clients()` chaqirilmaydi.
 
@@ -380,7 +377,6 @@ Backend: `PATCH /cash/exchange-rates/settings/` va `POST /cash/exchange-rates/` 
 |---|---|---|
 | Tanlangan qatorlarni CSV eksport | Barcha grid sahifalar | Faqat frontend (`exportRowsCsv`) |
 | Status o‘zgartirish (inline + bulk) | Import | `order_status_manage` ability; ketma-ket `PATCH /orders/zakaz/{id}/` — `StatusChangeModal` |
-| Buyurtma fulfill/cancel | Buyurtma (inline yoki modal) | `POST /orders/{id}/fulfill/` \| `/cancel/` |
 
 `api.ordersBulk`, `api.zakazBulk`, `api.salesBulk` — forma yaratishda (ko‘p qatorli POST), grid bulk status uchun emas.
 
@@ -389,13 +385,11 @@ Backend: `PATCH /cash/exchange-rates/settings/` va `POST /cash/exchange-rates/` 
 | Tab | API | Eslatma |
 |---|---|---|
 | `umumiy` | `GET /clients/{uuid}/` | Rekvizitlar, CTA (tahrir, yangi buyurtma) |
-| `buyurtmalar` | `GET /orders/?client=&page_size=15` | Pagination |
+| `buyurtmalar` | `GET /invoices/?client=&page_size=15` | Invoice ro‘yxati; qator → `/buyurtmalar/{uuid}` |
 | `sotuvlar` | `GET /sales/?client=&page_size=15` | |
 | `tolovlar` | `GET /cash/payments/?client=&page_size=15` | |
-| `hujjatlar` | `GET /invoices/?client=` | |
-| `tarix` | `GET /orders/?client=&page_size=50` | Buyurtma timeline |
 
-Tablar `abilities` bo‘yicha yashirin (`orders_view`, `sales_view`, `cash_view`, `einvoice_view`).
+Tablar `abilities` bo‘yicha yashirin (`einvoice_view`, `sales_view`, `cash_view`).
 
 
 ---
@@ -562,9 +556,9 @@ Celery beat: `refresh_infinbank_usd_rate` har **1 soat** (`root/celery.py`). `au
 | GET | `/` | — | Auth | ✅ `companyProfile` |
 | PATCH | `/` | `name`, `stir`, `director_jshshr`, `director_fish`, `mfo`, `bank_name`, `oked`, `bank_account`, `address`, `phone`, `email` | Management | ✅ `updateCompanyProfile` |
 
-Singleton (`pk=1`). Elektron faktura previewda «Bajaruvchi» sifatida ishlatiladi.
+Singleton (`pk=1`). Buyurtmalar previewda «Bajaruvchi» sifatida ishlatiladi.
 
-### Elektron faktura — `/api/v1/invoices/`
+### Buyurtmalar (invoices) — `/api/v1/invoices/`
 
 | Method | Path | Query / body | Ruxsat | api.js |
 |---|---|---|---|---|
@@ -645,7 +639,7 @@ Javob `mark_all_read`: `{ "status": "ok", "marked_read": 5 }`.
 
 ---
 
-## 17a. Elektron faktura (batafsil)
+## 17a. Buyurtmalar — `/invoices/` (batafsil)
 
 Base:
 
@@ -684,9 +678,9 @@ POST /api/v1/invoices/
 
 Backend mahsulotdan `product_name`, `barcode`, `identification_code`, `unit`, narx va QQS ni to‘ldiradi; `delivery_amount`, `vat_amount`, `total_amount` hisoblanadi.
 
-**Narx ko‘rinishi:** `prices_view` yo‘q foydalanuvchilar uchun qator narxlari (`unit_price`, `delivery_amount`, `vat_amount`, `total_amount`) va invoice jami maydonlari (`total_delivery`, `total_vat`, `grand_total`) javobdan olib tashlanadi. Frontend `EInvoicePage` da `can(session, 'prices_view')` bilan jami blokni yashiradi.
+**Narx ko‘rinishi:** `prices_view` yo‘q foydalanuvchilar uchun qator narxlari (`unit_price`, `delivery_amount`, `vat_amount`, `total_amount`) va invoice jami maydonlari (`total_delivery`, `total_vat`, `grand_total`) javobdan olib tashlanadi. Frontend `BuyurtmalarPage` da `can(session, 'prices_view')` bilan jami blokni yashiradi.
 
-Frontend: `EInvoicePage` — ro‘yxat, tahrir, `DocumentPreviewModal` (mazmun + jadval + rekvizitlar). Mahsulot va mijozlar mustaqil yuklanadi; `api.clients()` faqat `clients_view` bo‘lsa.
+Frontend: `BuyurtmalarPage` — ro‘yxat, tahrir, `DocumentPreviewModal` (mazmun + jadval + rekvizitlar). Mahsulot va mijozlar mustaqil yuklanadi; `api.clients()` faqat `clients_view` bo‘lsa.
 
 Korxona profili (`GET/PATCH /company-profile/`) previewda «Bajaruvchi» blokida ishlatiladi.
 
@@ -819,8 +813,8 @@ Frontend menyuni `abilities` bo‘yicha ko‘rsatadi. Ruxsat yo‘q menu UI’da
 | Ability | Ma’nosi | Kimda |
 |---|---|---|
 | `dashboard` | bosh sahifa statistikasi | Accountant, Management |
-| `orders_view` | buyurtmalarni ko‘rish | Operator, Management |
-| `orders_manage` | buyurtma yaratish/tahrirlash/amallar | Operator, Management |
+| `orders_view` | eski buyurtmalar API (`/orders/`) — UI da ishlatilmaydi | — |
+| `orders_manage` | eski buyurtmalar CRUD — UI da ishlatilmaydi | — |
 | `order_status_manage` | import status (`confirmed`/`received`/…) — inline va bulk | Management |
 | `warehouse_view` | mahsulotlarni ko‘rish | Operator, Accountant, Management |
 | `warehouse_create` | mahsulot qo‘shish (narxsiz) | Operator, Management |
@@ -842,8 +836,8 @@ Frontend menyuni `abilities` bo‘yicha ko‘rsatadi. Ruxsat yo‘q menu UI’da
 | `contracts_view` | shartnomalar reestri | Operator, Accountant, Management |
 | `categories_view` | kategoriyalar | Operator, Management |
 | `stocks_view` | qoldiqlar | Operator, Management |
-| `einvoice_view` | elektron faktura ko‘rish | Operator, Accountant, Management |
-| `einvoice_manage` | elektron faktura yaratish/tahrirlash | Operator, Management |
+| `einvoice_view` | Buyurtmalar sahifasini ko‘rish | Operator, Accountant, Management |
+| `einvoice_manage` | Buyurtma (invoice) yaratish/tahrirlash | Operator, Management |
 | `users_view` | userlarni ko‘rish | Management |
 | `users_manage` | user boshqarish; FX sozlamalar, kurs manbasi, qo‘lda kurs | Management |
 
@@ -851,7 +845,7 @@ Frontend menyuni `abilities` bo‘yicha ko‘rsatadi. Ruxsat yo‘q menu UI’da
 
 - `procurement_manage` — import **yaratish/tahrirlash**; status o‘zgartirish emas.
 - `order_status_manage` — import gridda inline status va bulk status (`confirmed` → `received` …).
-- `clients_view` — `OrderEditor`, `SaleEditor`, `EInvoicePage` da `api.clients()` chaqiriladi.
+- `clients_view` — `SaleEditor`, `BuyurtmalarPage` da `api.clients()` chaqiriladi.
 - `users_manage` — `FxRatePanel` tab almashtirish, qo‘lda saqlash, Infinbank ↻ yangilash.
 - `prices_view` — invoice qator narxlari va `total_delivery` / `total_vat` / `grand_total`.
 
@@ -863,23 +857,23 @@ Operator uchun narx/foyda maydonlari ayrim javoblarda qaytmaydi. Frontend bunday
 
 | UI element | Ability | Fayl / komponent |
 |---|---|---|
-| Sidebar / bottom nav sahifa | Har bir nav item `ability` (masalan `orders_view`, `procurement_view`) | `App.jsx` — `SIDEBAR_NAV`, `NAV_GROUPS` |
+| Sidebar / bottom nav sahifa | Har bir nav item `ability` (masalan `einvoice_view`, `procurement_view`) | `App.jsx` — `SIDEBAR_NAV`, `NAV_GROUPS` |
 | Grid «Yangi» tugmasi | `manageAbilities[title]` yoki `warehouse_create` (Ombor) | `ResourcePage` — `createAbilities`, `manageAbilities` |
 | Grid qator tahriri / o‘chirish | `manageAbilities[title]` | `ResourcePage` — `canEditRows` |
 | Import inline status + bulk status | `order_status_manage` (**emas** `procurement_manage`) | `ResourcePage`, `InlineStatusSelect`, `StatusChangeModal` |
 | Import yaratish/tahrir formasi | `procurement_manage` | `ResourcePage` — `canManage` |
 | Mijoz kartasi URL | `clients_view` | `routes.jsx`, `App.jsx` |
 | Global qidiruv — mijozlar | `clients_view` | `GlobalSearch.jsx` |
-| Editor mijoz combobox | `clients_view` | `OrderEditor`, `SaleEditor`, `EInvoicePage` |
+| Global qidiruv — buyurtmalar | `einvoice_view` | `GlobalSearch.jsx` |
+| Editor mijoz combobox | `clients_view` | `SaleEditor`, `BuyurtmalarPage` |
 | Editor mahsulot combobox | (ability shart emas) | `api.products()` doim chaqiriladi |
-| Invoice jami / qator narxlari | `prices_view` | `EInvoicePage`, backend serializer |
+| Invoice jami / qator narxlari | `prices_view` | `BuyurtmalarPage`, backend serializer |
 | FX tab / qo‘lda saqlash / ↻ | `users_manage` | `FxRatePanel` |
 | Foydalanuvchilar sahifasi | `users_view` (ko‘rish), `users_manage` (CRUD) | `HIDDEN_PAGES` |
 
 `manageAbilities` (`ResourcePage`):
 
 ```text
-Buyurtmalar → orders_manage
 Import      → procurement_manage   (status emas!)
 Ombor/…     → warehouse_manage
 Mijozlar    → clients_manage
@@ -1001,9 +995,9 @@ Frontend: `api.exchangeRateSettings()`, `api.updateExchangeRateSettings(payload)
 Celery: `apps.cash.tasks.refresh_infinbank_usd_rate` — har soat Infinbank (`auto_fetch_enabled=true` bo‘lsa).
 
 
-## 8. Buyurtmalar
+## 8. Orders API (`/orders/`) — backend, Import bilan bog‘liq
 
-Base:
+> **Frontend eslatma:** «Buyurtmalar» sahifasi endi `/invoices/` API dan foydalanadi (`BuyurtmalarPage`). Quyidagi `/orders/` endpointlari backendda qoladi — Import, shartnomalar va ichki biznes mantiq uchun.
 
 ```http
 /api/v1/orders/
@@ -2030,7 +2024,7 @@ notifications: 30s
 - USD kurs: `preferred_rate_source` va `latest` javobidagi `infinbank`/`manual` obyektlari bilan ishlansin.
 - `FxRatePanel`: topbar — `header` (read-only Infinbank); editorlar — `compact` (tablar + ixtiyoriy ↻ / qo‘lda input). FX boshqaruv — `users_manage`.
 - Import grid status (inline + bulk) — `order_status_manage`, `procurement_manage` emas.
-- `OrderEditor`, `SaleEditor`, `EInvoicePage`: `api.products()` doim; `api.clients()` faqat `clients_view`.
+- `SaleEditor`, `BuyurtmalarPage`: `api.products()` doim; `api.clients()` faqat `clients_view`.
 - `DataTable` Amallar ustuni: `.row-actions` flex wrapper; grid da `flex-wrap: nowrap`, tugmalar 36px balandlik.
 - Invoice javobida `prices_view` yo‘q bo‘lsa `total_delivery`, `total_vat`, `grand_total` ham yo‘q.
 
@@ -2056,7 +2050,7 @@ Frontend `abilities` (`warehouse_create`, `order_status_manage`, `prices_view`, 
 
 ## 22. Hali backendda yo‘q (kelajak modullar)
 
-Elektron faktura moduli (`/api/v1/invoices/`) mavjud — mazmun, qatorlar, preview, teskari hisob. Quyidagilar hali yo‘q:
+Buyurtmalar moduli (`/api/v1/invoices/`) — mazmun, qatorlar, preview, teskari hisob. Quyidagilar hali yo‘q:
 
 - hamkor STIR/JSHSHIR lookup (tashqi Soliq API);
 - MXIK/IKPU katalog lookup (frontend faqat tasnif.soliq.uz havolasi);

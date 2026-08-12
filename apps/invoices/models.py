@@ -125,8 +125,14 @@ class InvoiceLineItem(TimeStampedModel):
             delivery = Decimal(delivery_amount or 0)
             vat = Decimal(vat_amount or 0)
             total = Decimal(total_amount or 0)
-            if not total and delivery:
-                total = delivery + vat
+            if delivery > 0 and vat_rate > 0:
+                vat = (delivery * vat_rate / Decimal('100')).quantize(Decimal('0.01'))
+                total = (delivery + vat).quantize(Decimal('0.01'))
+            elif total > 0 and vat_rate > 0 and not delivery:
+                delivery = (total / (Decimal('1') + vat_rate / Decimal('100'))).quantize(Decimal('0.01'))
+                vat = (total - delivery).quantize(Decimal('0.01'))
+            elif not total and delivery:
+                total = (delivery + vat).quantize(Decimal('0.01'))
             return delivery, vat, total
 
         delivery = (qty * price).quantize(Decimal('0.01'))

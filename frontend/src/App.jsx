@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import {
   Warehouse, Bell, Buildings, CaretDown, ChartLineUp,
   ClipboardText, CurrencyCircleDollar, DownloadSimple, Eye, FileText, Funnel, House, MagnifyingGlass,
-  Package, PencilSimple, Plus, SignOut, SpinnerGap, Trash, TrendDown, TrendUp, Truck, UserGear, Users, WarningCircle, X, XCircle, DotsThree, CaretLeft, CaretRight, CheckCircle, ClockCounterClockwise,
+  Package, PencilSimple, Plus, SignOut, SpinnerGap, Trash, TrendDown, TrendUp, Truck, UserGear, Users, WarningCircle, X, XCircle, DotsThree, CaretLeft, CaretRight, CheckCircle,
 } from '@phosphor-icons/react'
 import { api, clearStoredSession, refreshAccessToken, saveSession, setAuthFailureHandler, tokenExpiresAt } from './api'
 import DataTable, { BulkActionsBar, StatusBadge, TablePagination } from './components/DataTable'
@@ -32,7 +32,7 @@ const NAV_GROUPS = {
 
 const SIDEBAR_NAV = [
   ['Bosh sahifa', House, 'dashboard'],
-  ['Buyurtmalar', FileText, 'orders_view'],
+  ['Buyurtmalar', FileText, 'einvoice_view'],
   ['Import', Truck, 'procurement_view'],
   ['Shartnomalar', ClipboardText, 'contracts_view'],
   ['Ombor', Package, '__group_ombor__'],
@@ -40,7 +40,6 @@ const SIDEBAR_NAV = [
   ['Sotuvlar', TrendUp, 'sales_view'],
   ['Moliya', CurrencyCircleDollar, '__group_moliya__'],
   ['Hisobotlar', ChartLineUp, 'reports_view'],
-  ['Elektron faktura', FileText, 'einvoice_view'],
 ]
 
 const HIDDEN_PAGES = {
@@ -294,89 +293,6 @@ function FxRatePanel({ session, notify, compact = false, header = false, onSourc
         </div>
       )}
       <p className="fx-active-note">Hisobda: <b>{displayRate ? `${money(displayRate)} so‘m` : '—'}</b></p>
-    </div>
-  )
-}
-
-function OrderHistoryModal({ orderId, close, notify }) {
-  const [detail, setDetail] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      setLoading(true)
-      setError('')
-      try {
-        const data = await api.retrieve('/orders/', orderId)
-        if (!cancelled) setDetail(data)
-      } catch (err) {
-        if (!cancelled) setError(err.message)
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
-    return () => { cancelled = true }
-  }, [orderId])
-
-  const subtitle = useMemo(() => {
-    if (!detail) return ''
-    const firstItem = detail.items?.[0]
-    if (firstItem?.product_name) return firstItem.product_name
-    return detail.client_name || detail.contract_number || `Buyurtma #${orderId}`
-  }, [detail, orderId])
-
-  const history = detail?.history || []
-
-  return (
-    <div className="modal-backdrop" role="presentation">
-      <div className="editor order-history-modal">
-        <div className="editor-head">
-          <div>
-            <p className="eyebrow">AUDIT</p>
-            <h3>Buyurtma tarixi</h3>
-            {subtitle && <p className="muted">{subtitle}</p>}
-          </div>
-          <button type="button" className="icon-button" onClick={close} aria-label="Yopish"><X size={20} /></button>
-        </div>
-        {loading ? (
-          <div className="order-history-loading"><SpinnerGap size={28} className="spin" /></div>
-        ) : error ? (
-          <p className="contract-detail-error">{error}</p>
-        ) : !history.length ? (
-          <Empty label="Tarix yozuvi topilmadi" />
-        ) : (
-          <ol className="order-timeline">
-            {history.map((entry) => (
-              <li key={entry.id} className="order-timeline-item">
-                <span className="order-timeline-dot" aria-hidden="true" />
-                <div className="order-timeline-body">
-                  <div className="order-timeline-head">
-                    <b>{entry.action_display || entry.action}</b>
-                    <time dateTime={entry.created_at}>{formatDateTimeUz(entry.created_at)}</time>
-                  </div>
-                  {entry.contract_number && (
-                    <p className="order-timeline-meta"><span>Shartnoma:</span> {entry.contract_number}</p>
-                  )}
-                  {entry.asos && (
-                    <p className="order-timeline-meta"><span>Asos:</span> {entry.asos}</p>
-                  )}
-                  {entry.faktura && (
-                    <p className="order-timeline-meta"><span>Faktura:</span> {entry.faktura}</p>
-                  )}
-                  <span className="order-timeline-user" title={entry.changed_by_name || ''}>
-                    {userInitials(entry.changed_by_name)}
-                  </span>
-                </div>
-              </li>
-            ))}
-          </ol>
-        )}
-        <div className="editor-actions">
-          <button type="button" className="secondary-button" onClick={close}>Yopish</button>
-        </div>
-      </div>
     </div>
   )
 }
@@ -1064,7 +980,7 @@ function pageCrumbLabel(active) {
 function isAccessiblePage(session, page) {
   if (page === 'Bosh sahifa') return can(session, 'dashboard')
   if (page === 'Hisobotlar') return can(session, 'reports_view')
-  if (page === 'Elektron faktura') return can(session, 'einvoice_view')
+  if (page === 'Buyurtmalar') return can(session, 'einvoice_view')
   if (HIDDEN_PAGES[page]) return can(session, HIDDEN_PAGES[page])
   const group = getGroupForPage(page)
   if (group) {
@@ -1168,7 +1084,7 @@ function CompanyProfileModal({ close, notify, session }) {
         {loading ? <SkeletonRows /> : (
           <>
             <p className="muted company-profile-note">
-              Elektron faktura va hujjatlarda «Sizning ma’lumotlaringiz» sifatida ishlatiladi.
+              Buyurtmalar va hujjatlarda «Sizning ma’lumotlaringiz» sifatida ishlatiladi.
               {!canEdit && ' Faqat ko‘rish rejimi.'}
             </p>
             <div className="form-grid">
@@ -1246,8 +1162,6 @@ function App() {
   const [dashboard, setDashboard] = useState(null)
   const [loading, setLoading] = useState(false)
   const [notificationPermission, setNotificationPermission] = useState(() => (typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'default'))
-  const [orderModalOpen, setOrderModalOpen] = useState(false)
-  const [orderPrefillClient, setOrderPrefillClient] = useState(null)
   const [clientEditFromDetail, setClientEditFromDetail] = useState(null)
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false)
   const [resourceReloadKey, setResourceReloadKey] = useState(0)
@@ -1384,11 +1298,9 @@ function App() {
     setSession(null)
   }
 
-  const openOrderEditor = (clientId = null) => {
-    if (!can(session, 'orders_manage')) return notify('Bu amalni bajarish uchun ruxsatingiz yo‘q.')
-    if (clientId) setOrderPrefillClient(clientId)
-    routerNavigate(pathForPage('Buyurtmalar'))
-    setOrderModalOpen(true)
+  const openBuyurtma = (clientId = null) => {
+    if (!can(session, 'einvoice_manage')) return notify('Bu amalni bajarish uchun ruxsatingiz yo‘q.')
+    routerNavigate(pathForPage('Buyurtmalar'), { state: { newBuyurtma: true, clientId } })
   }
 
   if (!session) return <Login onSuccess={setSession} />
@@ -1438,7 +1350,7 @@ function App() {
             notify={notify}
             onNavigate={navigateToPath}
             onEditClient={(client) => setClientEditFromDetail(client)}
-            onNewOrder={(client) => openOrderEditor(client.id)}
+            onNewOrder={(client) => openBuyurtma(client.id)}
             onNewSale={() => { routerNavigate(pathForPage('Sotuvlar')); notify('Yangi sotuv formasi ochiladi.', 'success') }}
           />
         )}
@@ -1448,16 +1360,22 @@ function App() {
             loading={loading && !dashboard}
             period={dashboardFilters}
             onPeriodChange={changeDashboardFilters}
-            onCreateOrder={openOrderEditor}
+            onCreateBuyurtma={openBuyurtma}
             onNavigate={navigate}
             session={session}
           />
         )}
         {routeInfo.kind !== 'client-detail' && active === 'Hisobotlar' && can(session, 'reports_view') && <ReportsPage notify={notify} />}
-        {routeInfo.kind !== 'client-detail' && active === 'Elektron faktura' && can(session, 'einvoice_view') && (
-          <EInvoicePage notify={notify} session={session} />
+        {(routeInfo.kind === 'page' || routeInfo.kind === 'invoice-detail') && active === 'Buyurtmalar' && can(session, 'einvoice_view') && (
+          <BuyurtmalarPage
+            notify={notify}
+            session={session}
+            initialInvoiceId={routeInfo.kind === 'invoice-detail' ? routeInfo.invoiceId : null}
+            prefillClientId={location.state?.newBuyurtma ? (location.state?.clientId ?? null) : null}
+            startNew={Boolean(location.state?.newBuyurtma)}
+          />
         )}
-        {routeInfo.kind !== 'client-detail' && active !== 'Bosh sahifa' && active !== 'Hisobotlar' && active !== 'Elektron faktura' && isAccessiblePage(session, active) && resources[active] && (
+        {routeInfo.kind !== 'client-detail' && active !== 'Bosh sahifa' && active !== 'Hisobotlar' && active !== 'Buyurtmalar' && isAccessiblePage(session, active) && resources[active] && (
           <>
             {activeGroup && (
               <SectionTabs groupKey={activeGroup} active={active} onSelect={(page) => routerNavigate(pathForPage(page))} session={session} />
@@ -1470,7 +1388,6 @@ function App() {
               onDataChange={() => loadDashboard(true)}
               onNavigate={navigate}
               navigateToPath={navigateToPath}
-              initialOrderHistoryId={routeInfo.kind === 'order-detail' ? routeInfo.orderId : null}
             />
           </>
         )}
@@ -1484,20 +1401,6 @@ function App() {
             done={() => { setClientEditFromDetail(null); setResourceReloadKey((v) => v + 1) }}
             notify={notify}
             session={session}
-          />
-        )}
-        {orderModalOpen && can(session, 'orders_manage') && (
-          <OrderEditor
-            close={() => { setOrderModalOpen(false); setOrderPrefillClient(null) }}
-            done={() => {
-              setOrderModalOpen(false)
-              setOrderPrefillClient(null)
-              setResourceReloadKey((value) => value + 1)
-              loadDashboard(true)
-            }}
-            notify={notify}
-            session={session}
-            prefillClientId={orderPrefillClient}
           />
         )}
       </section>
@@ -2038,7 +1941,7 @@ function DashboardFiltersMenu({ filters, onChange }) {
   )
 }
 
-function Dashboard({ data, loading, period, onPeriodChange, onCreateOrder, onNavigate, session }) {
+function Dashboard({ data, loading, period, onPeriodChange, onCreateBuyurtma, onNavigate, session }) {
   const summary = data?.summary || {}
   const warehouse = data?.warehouse || {}
   const products = data?.topProducts || []
@@ -2061,7 +1964,7 @@ function Dashboard({ data, loading, period, onPeriodChange, onCreateOrder, onNav
       <div className="page-heading page-heading-compact">
         <div className="heading-actions">
           <DashboardFiltersMenu filters={period} onChange={onPeriodChange} />
-          {can(session, 'orders_manage') && <button className="primary-button" onClick={onCreateOrder}><Plus size={20} />Yangi buyurtma</button>}
+          {can(session, 'einvoice_manage') && <button className="primary-button" onClick={onCreateBuyurtma}><Plus size={20} />Yangi buyurtma</button>}
         </div>
       </div>
 
@@ -2362,7 +2265,6 @@ function Empty({ label }) {
 }
 
 const resources = {
-  'Buyurtmalar': { load: api.orders, path: '/orders/' },
   'Import': { load: api.zakaz, path: '/orders/zakaz/' },
   'Shartnomalar': { load: api.contracts, path: '/orders/contracts/', readonly: true },
   'Ombor': { load: api.products, path: '/warehouse/products/' },
@@ -2403,10 +2305,6 @@ function rowValue(title, row, session) {
     if (!showPrices || !row.total) return `${row.quantity || 0} dona`
     return `${money(row.total)} ${row.currency || ''}`
   }
-  if (title === 'Buyurtmalar') {
-    if (!showPrices) return `${row.total_quantity || 0} dona`
-    return row.total ? `${money(row.total)} so‘m` : `${row.total_quantity || 0} dona`
-  }
   if (title === 'Qoldiqlar') return quantityWithUnit(row.quantity || 0, row)
   if (title === 'Ombor') return quantityWithUnit(row.available_quantity ?? row.quantity_in_stock ?? 0, row)
   if (title === 'Shartnomalar') return row.contract_date || '—'
@@ -2423,7 +2321,7 @@ function rowValue(title, row, session) {
   return row.total_amount ? `${money(row.total_amount)} so‘m` : (row.available_quantity ?? row.total ?? '—')
 }
 
-const GRID_PAGES = new Set(['Mijozlar', 'Buyurtmalar', 'Sotuvlar', 'Import', 'Ombor', 'Kassa', 'Xarajatlar'])
+const GRID_PAGES = new Set(['Mijozlar', 'Sotuvlar', 'Import', 'Ombor', 'Kassa', 'Xarajatlar'])
 
 const ORDER_STATUS_BADGES = {
   pending: { label: 'Kutilmoqda', tone: 'warning' },
@@ -2440,7 +2338,6 @@ const ORDER_STATUS_BADGES = {
 
 const GRID_SORT_FIELDS = {
   Mijozlar: { name: 'company_name', created_at: 'created_at', status: 'is_active' },
-  Buyurtmalar: { client: 'created_at', created_at: 'created_at', status: 'status' },
   Sotuvlar: { product: 'sold_date', created_at: 'sold_date', total: 'sold_date' },
   Import: { product: 'created_at', created_at: 'created_at', status: 'status' },
   Ombor: { name: 'name', created_at: 'created_at', quantity: 'name' },
@@ -2461,18 +2358,6 @@ function getGridColumns(title, session, { renderStatus } = {}) {
           <StatusBadge status={row.is_active ? 'active' : 'inactive'} label={row.is_active ? 'Faol' : 'Nofaol'} tone={row.is_active ? 'success' : 'neutral'} />
         )
       ) },
-    ]
-  }
-  if (title === 'Buyurtmalar') {
-    return [
-      { key: 'client', label: 'Mijoz', sortable: true, exportValue: (row) => rowTitle(title, row), render: (row) => rowTitle(title, row) },
-      { key: 'status', label: 'Status', sortable: true, render: (row) => {
-        if (renderStatus) return renderStatus(row)
-        const meta = ORDER_STATUS_BADGES[row.status] || { label: row.status_display || row.status, tone: 'neutral' }
-        return <StatusBadge status={row.status} label={meta.label} tone={meta.tone} />
-      } },
-      { key: 'total', label: 'Summa', exportValue: (row) => rowValue(title, row, session), render: (row) => rowValue(title, row, session) },
-      { key: 'created_at', label: 'Sana', sortable: true, render: (row) => formatDateUz(row.created_at) },
     ]
   }
   if (title === 'Sotuvlar') {
@@ -2661,7 +2546,7 @@ function ProductContractsModal({ product, rows, close, onViewAll, onViewDetail }
   )
 }
 
-function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onNavigate, navigateToPath, initialOrderHistoryId = null }) {
+function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onNavigate, navigateToPath }) {
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -2678,15 +2563,9 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
   const [editing, setEditing] = useState(null)
   const [opening, setOpening] = useState(false)
   const [paying, setPaying] = useState(null)
-  const [orderAction, setOrderAction] = useState(null)
   const [stockProduct, setStockProduct] = useState(null)
   const [contractProduct, setContractProduct] = useState(null)
   const [contractDetailId, setContractDetailId] = useState(null)
-  const [orderHistoryId, setOrderHistoryId] = useState(initialOrderHistoryId)
-
-  useEffect(() => {
-    if (initialOrderHistoryId) setOrderHistoryId(initialOrderHistoryId)
-  }, [initialOrderHistoryId])
 
   const apiSortField = GRID_SORT_FIELDS[title]?.[sortKey] || sortKey
   const apiOrdering = `${sortDir === 'desc' ? '-' : ''}${apiSortField}`
@@ -2726,7 +2605,6 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
   }
 
   const manageAbilities = {
-    'Buyurtmalar': 'orders_manage',
     'Import': 'procurement_manage',
     'Ombor': 'warehouse_manage',
     'Kategoriyalar': 'warehouse_manage',
@@ -2742,7 +2620,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
   }
   const canManage = can(session, manageAbilities[title])
   const canCreate = (can(session, createAbilities[title] || manageAbilities[title]))
-    && ['Mijozlar', 'Ombor', 'Buyurtmalar', 'Import', 'Kategoriyalar', 'Qoldiqlar', 'Sotuvlar', 'Xarajatlar', 'Foydalanuvchilar'].includes(title)
+    && ['Mijozlar', 'Ombor', 'Import', 'Kategoriyalar', 'Qoldiqlar', 'Sotuvlar', 'Xarajatlar', 'Foydalanuvchilar'].includes(title)
   const canEditRows = canManage && !resources[title]?.readonly
 
   const handleMarkRead = async (id) => {
@@ -2793,7 +2671,6 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
 
   const handleRowClick = (row) => {
     if (title === 'Mijozlar') navigateToPath?.(clientDetailPath(row.id))
-    else if (title === 'Buyurtmalar') navigateToPath?.(`/buyurtmalar/${row.id}`)
     else if (title === 'Shartnomalar') setContractDetailId(row.id)
   }
 
@@ -2804,28 +2681,6 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
 
   const gridColumns = useMemo(() => getGridColumns(title, session, {
     renderStatus: (row) => {
-      if (title === 'Buyurtmalar' && can(session, 'orders_manage')) {
-        const locked = ['fulfilled', 'cancelled'].includes(row.status)
-        const options = [
-          { value: row.status, label: ORDER_STATUS_BADGES[row.status]?.label || row.status_display || row.status },
-          ...(!locked ? [
-            { value: '__fulfilled__', label: '→ Yetkazildi' },
-            { value: '__cancelled__', label: '→ Bekor qilindi' },
-          ] : []),
-        ]
-        return (
-          <InlineStatusSelect
-            value={row.status}
-            options={options}
-            disabled={locked}
-            onChange={(next) => {
-              if (next === row.status) return
-              if (next === '__fulfilled__') setStatusChange({ mode: 'order', rows: [row], targetStatus: 'fulfilled' })
-              else if (next === '__cancelled__') setStatusChange({ mode: 'order', rows: [row], targetStatus: 'cancelled' })
-            }}
-          />
-        )
-      }
       if (title === 'Import' && can(session, 'order_status_manage')) {
         const locked = ['received', 'cancelled'].includes(row.status)
         const transitions = {
@@ -2873,16 +2728,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
   const submitStatusChange = async (payload) => {
     const { mode, rows: targetRows } = statusChange
     const targetStatus = payload.targetStatus || statusChange.targetStatus
-    if (mode === 'order') {
-      for (const row of targetRows) {
-        if (targetStatus === 'fulfilled') {
-          await api.fulfillOrder(row.id, payload)
-        } else {
-          await api.cancelOrder(row.id, payload)
-        }
-      }
-      notify('Buyurtma statusi yangilandi.', 'success')
-    } else if (mode === 'import') {
+    if (mode === 'import') {
       for (const row of targetRows) {
         const body = {
           status: targetStatus,
@@ -2904,18 +2750,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
 
   const renderRowActions = (row) => (
     <>
-      {title === 'Buyurtmalar' && (
-        <button className="row-action" onClick={() => setOrderHistoryId(row.id)} aria-label="Buyurtma tarixi" title="Buyurtma tarixi">
-          <ClockCounterClockwise size={18} />
-        </button>
-      )}
       {canEditRows && <button className="row-action" disabled={opening} onClick={() => handleEdit(row)} aria-label="Tahrirlash"><PencilSimple size={18} /></button>}
-      {can(session, 'orders_manage') && title === 'Buyurtmalar' && !['fulfilled', 'cancelled'].includes(row.status) && (
-        <>
-          <button className="row-action" onClick={() => setOrderAction({ row, action: 'fulfill' })}>Yetkazish</button>
-          <button className="row-action" onClick={() => setOrderAction({ row, action: 'cancel' })}>Bekor</button>
-        </>
-      )}
       {can(session, 'warehouse_manage') && title === 'Ombor' && <button className="row-action" onClick={() => setStockProduct(row)} aria-label="Kirim">Kirim</button>}
       {can(session, 'cash_manage') && title === 'Kassa' && row.remaining !== '0' && (
         <button className="row-action" onClick={() => setPaying(row)} aria-label="To‘lov"><CurrencyCircleDollar size={18} /></button>
@@ -2975,7 +2810,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
               sortDir={sortDir}
               onSort={handleSort}
               loading={loading}
-              onRowClick={['Mijozlar', 'Buyurtmalar', 'Shartnomalar'].includes(title) ? handleRowClick : undefined}
+              onRowClick={['Mijozlar', 'Shartnomalar'].includes(title) ? handleRowClick : undefined}
               renderActions={renderRowActions}
               emptyLabel={title === 'Shartnomalar' ? 'Hali reestr yozuvi yo‘q.' : emptyCfg.label}
               emptyCta={showEmptyCta && emptyCfg.cta ? {
@@ -3029,19 +2864,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
                     </div>
                     <b>{rowValue(title, row, session)}</b>
                     <div className="row-actions">
-                      {title === 'Buyurtmalar' && (
-                        <button className="row-action" onClick={() => setOrderHistoryId(row.id)} aria-label="Buyurtma tarixi" title="Buyurtma tarixi">
-                          <ClockCounterClockwise size={18} />
-                        </button>
-                      )}
             {canEditRows && <button className="row-action" disabled={opening} onClick={() => handleEdit(row)} aria-label="Tahrirlash"><PencilSimple size={18} /></button>}
-                      {can(session, 'orders_manage') && title === 'Buyurtmalar' && !['fulfilled', 'cancelled'].includes(row.status) && (
-                        <>
-                          <button className="row-action" onClick={() => setOrderAction({ row, action: 'fulfill' })}>Yetkazish</button>
-                          <button className="row-action" onClick={() => setOrderAction({ row, action: 'cancel' })}>Bekor</button>
-                          {Number(row.backorder_qty || 0) > 0 && <button className="row-action" onClick={() => setOrderAction({ row, action: 'zakaz' })}>Import</button>}
-                        </>
-                      )}
                       {can(session, 'warehouse_manage') && title === 'Ombor' && <button className="row-action" onClick={() => setStockProduct(row)} aria-label="Kirim qilish">Kirim</button>}
                       {can(session, 'cash_manage') && title === 'Kassa' && row.remaining !== '0' && (
                         <button className="row-action" onClick={() => setPaying(row)} aria-label="To‘lov qabul qilish"><CurrencyCircleDollar size={18} /></button>
@@ -3090,9 +2913,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
           </div>
         )}
       </section>
-      {editing && (title === 'Buyurtmalar'
-        ? <OrderEditor item={editing.id ? editing : null} close={() => setEditing(null)} done={() => { setEditing(null); refreshAfterChange() }} notify={notify} session={session} />
-        : title === 'Import'
+      {editing && (title === 'Import'
           ? <ZakazEditor item={editing.id ? editing : null} close={() => setEditing(null)} done={() => { setEditing(null); refreshAfterChange() }} notify={notify} session={session} />
         : title === 'Sotuvlar'
           ? <SaleEditor item={editing.id ? editing : null} close={() => setEditing(null)} done={() => { setEditing(null); refreshAfterChange() }} notify={notify} session={session} />
@@ -3103,7 +2924,6 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
             : <Editor title={title} item={editing} path={resources[title].path} close={() => setEditing(null)} done={() => { setEditing(null); refreshAfterChange() }} notify={notify} session={session} />
       )}
       {paying && <PaymentEditor item={paying} close={() => setPaying(null)} done={() => { setPaying(null); refreshAfterChange() }} notify={notify} />}
-      {orderAction && <OrderActionEditor item={orderAction.row} action={orderAction.action} close={() => setOrderAction(null)} done={() => { setOrderAction(null); refreshAfterChange() }} notify={notify} />}
       {stockProduct && <StockInEditor item={stockProduct} close={() => setStockProduct(null)} done={() => { setStockProduct(null); refreshAfterChange() }} notify={notify} />}
       {contractProduct && (
         <ProductContractsModal
@@ -3116,13 +2936,6 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
           onViewDetail={can(session, 'contracts_view')
             ? (entryId) => { setContractProduct(null); setContractDetailId(entryId) }
             : null}
-        />
-      )}
-      {orderHistoryId && (
-        <OrderHistoryModal
-          orderId={orderHistoryId}
-          close={() => setOrderHistoryId(null)}
-          notify={notify}
         />
       )}
       {contractDetailId && (
@@ -3639,216 +3452,6 @@ function ExpenseEditor({ close, done, notify, item = null, session }) {
   )
 }
 
-function OrderEditor({ close, done, notify, item = null, session, prefillClientId = null }) {
-  const showPrices = can(session, 'prices_manage')
-  const [clients, setClients] = useState([])
-  const [products, setProducts] = useState([])
-  const [saving, setSaving] = useState(false)
-  const [file, setFile] = useState(null)
-  const [form, setForm] = useState({ client: '', contract_number: '', contract_date: todayValue(), due_date: currentYearEndValue(), prepaid_amount: '0', product: '', itemId: null, quantity: '1', unit_price: '', comment: '', asos: '' })
-  const [items, setItems] = useState([{ product: '', quantity: '1', unit_price: '' }])
-  const [contractNumberEdited, setContractNumberEdited] = useState(false)
-
-  const updateContractNumber = (value) => {
-    setForm({ ...form, contract_number: value.replace(/[^\d/]/g, '') })
-    setContractNumberEdited(true)
-  }
-
-  useEffect(() => {
-    api.products({ page_size: 500 })
-      .then((productData) => setProducts(list(productData)))
-      .catch((err) => notify(err.message))
-    if (can(session, 'clients_view')) {
-      api.clients({ page_size: 500 })
-        .then((clientData) => setClients(list(clientData)))
-        .catch((err) => notify(err.message))
-    }
-  }, [notify, session])
-
-  useEffect(() => {
-    if (!item && prefillClientId) {
-      setForm((current) => ({ ...current, client: prefillClientId }))
-    }
-  }, [item, prefillClientId])
-
-  useEffect(() => {
-    if (!item) {
-      setForm({ client: prefillClientId || '', contract_number: '', contract_date: todayValue(), due_date: currentYearEndValue(), prepaid_amount: '0', product: '', itemId: null, quantity: '1', unit_price: '', comment: '', asos: '' })
-      setItems([{ product: '', quantity: '1', unit_price: '' }])
-      setContractNumberEdited(false)
-      return
-    }
-    setForm({
-      client: item.client || '',
-      contract_number: item.contract_number || '',
-      contract_date: item.contract_date || todayValue(),
-      due_date: item.due_date || currentYearEndValue(),
-      prepaid_amount: item.prepaid_amount ?? '0',
-      product: item.items?.[0]?.product || '',
-      itemId: item.items?.[0]?.id || null,
-      quantity: item.items?.[0]?.quantity || '1',
-      unit_price: item.items?.[0]?.unit_price || '',
-      comment: item.comment || '',
-      asos: '',
-    })
-    setContractNumberEdited(Boolean(item.contract_number))
-  }, [item])
-
-  useEffect(() => {
-    if (item?.id || contractNumberEdited || !form.contract_date) return
-    let cancelled = false
-    api.nextContractNumber({ contract_date: form.contract_date })
-      .then((data) => {
-        if (!cancelled) setForm((current) => ({ ...current, contract_number: data.contract_number || '' }))
-      })
-      .catch((err) => notify(err.message))
-    return () => { cancelled = true }
-  }, [item?.id, contractNumberEdited, form.contract_date, notify])
-
-  const submit = async (event) => {
-    event.preventDefault()
-    setSaving(true)
-    try {
-      if (item?.id) {
-        const payload = {
-          client: form.client || null,
-          contract_number: form.contract_number || '',
-          contract_date: form.contract_date || null,
-          due_date: currentYearEndValue(),
-          prepaid_amount: showPrices ? Number(form.prepaid_amount || 0) : 0,
-          comment: form.comment || '',
-          asos: form.asos,
-        }
-        if (form.itemId) {
-          payload.items = [{ id: form.itemId, quantity: Number(form.quantity) }]
-          if (showPrices && form.unit_price !== '') payload.items[0].unit_price = form.unit_price
-        }
-        await api.update('/orders/', item.id, payload)
-        notify('Buyurtma yangilandi.', 'success')
-      } else {
-        const payload = new FormData()
-        if (form.client) payload.append('client', form.client)
-        if (form.contract_number) payload.append('contract_number', form.contract_number)
-        if (form.contract_date) payload.append('contract_date', form.contract_date)
-        payload.append('due_date', currentYearEndValue())
-        if (showPrices) payload.append('prepaid_amount', form.prepaid_amount || '0')
-        payload.append('comment', form.comment || '')
-        payload.append('items', JSON.stringify(items.filter((row) => row.product).map((row) => ({
-          product: Number(row.product),
-          quantity: Number(row.quantity),
-          ...(showPrices && row.unit_price ? { unit_price: row.unit_price } : {}),
-        }))))
-        if (file) payload.append('contract_file', file)
-        const created = await api.createForm('/orders/', payload)
-        const number = created?.contract_number || form.contract_number || 'avtomatik'
-        notify(`Buyurtma yaratildi. Shartnoma №${number}`, 'success')
-      }
-      done()
-    } catch (err) {
-      notify(err.message)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <div className="modal-backdrop" role="presentation">
-      <form className="editor" onSubmit={submit}>
-        <div className="editor-head">
-          <div><p className="eyebrow">{item?.id ? 'TAHRIRLASH' : 'YANGI BUYURTMA'}</p><h3>Shartnoma bo‘yicha buyurtma</h3></div>
-          <button type="button" className="icon-button" onClick={close}><X size={20} /></button>
-        </div>
-        <div className="form-grid">
-          <SearchableCombobox
-            id="order-client"
-            label="Mijoz"
-            value={form.client}
-            onChange={(value) => setForm({ ...form, client: value })}
-            options={clients}
-            getLabel={(client) => client.company_name || client.full_name || '—'}
-            placeholder="Mijoz qidirish..."
-          />
-          <label>Shartnoma raqami<input value={form.contract_number} onChange={(event) => updateContractNumber(event.target.value)} placeholder="Masalan: 12/1108" inputMode="numeric" pattern="[0-9/]*" /></label>
-          <label>Shartnoma tuzilgan sana<input type="date" value={form.contract_date} onChange={(event) => setForm({ ...form, contract_date: event.target.value })} /></label>
-          <label>Yetkazish muddati<input type="date" readOnly value={form.due_date || currentYearEndValue()} title="Joriy yil 31-dekabr — o‘zgartirib bo‘lmaydi" /></label>
-          {item?.id ? (
-            <>
-              <label>Mahsulot<select required value={form.product} onChange={(event) => setForm({ ...form, product: event.target.value })}><option value="">Mahsulotni tanlang</option>{products.map((product) => <option value={product.id} key={product.id}>{product.name} — {product.serial_number} ({product.unit_display || unitLabel(product.unit)})</option>)}</select></label>
-              <label>Miqdor<input required min="1" type="number" value={form.quantity} onChange={(event) => setForm({ ...form, quantity: event.target.value })} /></label>
-              {showPrices && <label>Birlik narxi<input type="number" min="0" step="0.01" value={form.unit_price} onChange={(event) => setForm({ ...form, unit_price: event.target.value })} /></label>}
-            </>
-          ) : (
-            <div className="full-width line-items">
-              <div className="line-head"><b>Mahsulotlar</b></div>
-              {items.map((row, index) => (
-                <div className="line-item" key={index}>
-                  <select required value={row.product} onChange={(event) => setItems(items.map((itemRow, i) => i === index ? { ...itemRow, product: event.target.value } : itemRow))}><option value="">Mahsulot</option>{products.map((product) => <option value={product.id} key={product.id}>{product.name} — {product.serial_number} ({product.unit_display || unitLabel(product.unit)})</option>)}</select>
-                  <input required min="1" type="number" value={row.quantity} onChange={(event) => setItems(items.map((itemRow, i) => i === index ? { ...itemRow, quantity: event.target.value } : itemRow))} />
-                  {showPrices && <input type="number" min="0" step="0.01" placeholder="Birlik narxi" value={row.unit_price} onChange={(event) => setItems(items.map((itemRow, i) => i === index ? { ...itemRow, unit_price: event.target.value } : itemRow))} />}
-                  <button type="button" className="row-action" disabled={items.length === 1} onClick={() => setItems(items.filter((_, i) => i !== index))}>O‘chirish</button>
-                </div>
-              ))}
-              <button type="button" className="secondary-button add-line-button" onClick={() => setItems([...items, { product: '', quantity: '1', unit_price: '' }])}><Plus size={16} />Mahsulot qo‘shish</button>
-            </div>
-          )}
-          {showPrices && <label>Oldindan to‘lov<input type="number" min="0" step="0.01" value={form.prepaid_amount} onChange={(event) => setForm({ ...form, prepaid_amount: event.target.value })} /></label>}
-          {item?.id && <label className="full-width">Tahrirlash sababi<input required value={form.asos} onChange={(event) => setForm({ ...form, asos: event.target.value })} placeholder="Nima uchun o‘zgartirilayotganini yozing" /></label>}
-          <label className="full-width file-field">Shartnoma fayli
-            <span className="file-picker">
-              <span><FileText size={18} />{file?.name || 'Word yoki PDF fayl tanlang'}</span>
-              <b>Tanlash</b>
-              <input type="file" accept=".doc,.docx,.pdf" onChange={(event) => setFile(event.target.files?.[0] || null)} />
-            </span>
-          </label>
-          <label className="full-width">Izoh<textarea value={form.comment} onChange={(event) => setForm({ ...form, comment: event.target.value })} rows="3" /></label>
-        </div>
-        <div className="editor-actions">
-          <button type="button" className="secondary-button" onClick={close}>Bekor qilish</button>
-          <button className="primary-button" disabled={saving}>{saving ? <SpinnerGap size={18} className="spin" /> : item?.id ? 'Yangilash' : 'Buyurtmani yaratish'}</button>
-        </div>
-      </form>
-    </div>
-  )
-}
-
-function OrderActionEditor({ item, action, close, done, notify }) {
-  const [saving, setSaving] = useState(false)
-  const [form, setForm] = useState({ contract_number: item.contract_number || '', asos: '', faktura: '', supplier: '', expected_date: '' })
-  const labels = { fulfill: 'Yetkazib berish', cancel: 'Buyurtmani bekor qilish', zakaz: 'Import yaratish' }
-
-  const submit = async (event) => {
-    event.preventDefault()
-    setSaving(true)
-    try {
-      const payload = Object.fromEntries(Object.entries(form).filter(([, value]) => value !== ''))
-      if (action === 'fulfill') await api.fulfillOrder(item.id, payload)
-      else if (action === 'cancel') await api.cancelOrder(item.id, payload)
-      else await api.createOrderZakaz(item.id, payload)
-      notify(`${labels[action]} bajarildi.`, 'success')
-      done()
-    } catch (err) {
-      notify(err.message)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <div className="modal-backdrop" role="presentation">
-      <form className="editor" onSubmit={submit}>
-        <div className="editor-head"><div><p className="eyebrow">BUYURTMA AMALI</p><h3>{labels[action]}</h3></div><button type="button" className="icon-button" onClick={close} aria-label="Yopish"><X size={20} /></button></div>
-        <p className="muted">Shartnoma №{item.contract_number || '—'} uchun amal.</p>
-        <div className="form-grid">
-          <label>Shartnoma raqami<input required value={form.contract_number} onChange={(event) => setForm({ ...form, contract_number: event.target.value })} /></label>
-          <label>Faktura (ixtiyoriy)<input value={form.faktura} onChange={(event) => setForm({ ...form, faktura: event.target.value })} /></label>
-          <label className="full-width">Asos / izoh<textarea required rows="3" value={form.asos} onChange={(event) => setForm({ ...form, asos: event.target.value })} placeholder="Amal sababi" /></label>
-          {action === 'zakaz' && <><label>Yetkazuvchi<input value={form.supplier} onChange={(event) => setForm({ ...form, supplier: event.target.value })} /></label><label>Kutilgan sana<input type="date" value={form.expected_date} onChange={(event) => setForm({ ...form, expected_date: event.target.value })} /></label></>}
-        </div>
-        <div className="editor-actions"><button type="button" className="secondary-button" onClick={close}>Bekor qilish</button><button className="primary-button" disabled={saving}>{saving ? <SpinnerGap size={18} className="spin" /> : labels[action]}</button></div>
-      </form>
-    </div>
-  )
-}
 
 const emptyManualImportLine = () => ({
   name: '',
@@ -4209,16 +3812,44 @@ function PaymentEditor({ item, close, done, notify }) {
   )
 }
 
-function calcInvoiceLine(line, reverse) {
+function calcInvoiceLine(line, reverse, editedField = null) {
   const qty = Number(line.quantity || 0)
   const price = Number(line.unit_price || 0)
   const vatRate = line.vat_percent === 'none' || !line.vat_percent ? 0 : Number(line.vat_percent)
+
   if (reverse) {
-    const delivery = Number(line.delivery_amount || 0)
+    let delivery = Number(line.delivery_amount || 0)
+    const totalInput = Number(line.total_amount || 0)
+
+    if (editedField === 'vat_amount') {
+      const vat = Number(line.vat_amount || 0)
+      const total = delivery > 0
+        ? Math.round((delivery + vat) * 100) / 100
+        : (totalInput || Math.round((delivery + vat) * 100) / 100)
+      return { ...line, delivery_amount: delivery, vat_amount: vat, total_amount: total }
+    }
+
+    if (editedField === 'total_amount' && totalInput > 0 && vatRate > 0) {
+      const netDelivery = Math.round((totalInput / (1 + vatRate / 100)) * 100) / 100
+      const vat = Math.round((totalInput - netDelivery) * 100) / 100
+      return { ...line, delivery_amount: netDelivery, vat_amount: vat, total_amount: totalInput }
+    }
+
+    if (!delivery && qty > 0 && price > 0) {
+      delivery = Math.round(qty * price * 100) / 100
+    }
+
+    if (delivery > 0 && vatRate > 0) {
+      const vat = Math.round(delivery * vatRate) / 100
+      const total = Math.round((delivery + vat) * 100) / 100
+      return { ...line, delivery_amount: delivery, vat_amount: vat, total_amount: total }
+    }
+
     const vat = Number(line.vat_amount || 0)
-    const total = Number(line.total_amount || 0) || delivery + vat
+    const total = totalInput || (delivery ? Math.round((delivery + vat) * 100) / 100 : 0)
     return { ...line, delivery_amount: delivery, vat_amount: vat, total_amount: total }
   }
+
   const delivery = Math.round(qty * price * 100) / 100
   const vat = Math.round(delivery * vatRate) / 100
   const total = Math.round((delivery + vat) * 100) / 100
@@ -4452,7 +4083,8 @@ function DocumentPreviewModal({ invoice, company, client, totals, showPrices, on
   )
 }
 
-function EInvoicePage({ notify, session }) {
+function BuyurtmalarPage({ notify, session, initialInvoiceId = null, prefillClientId = null, startNew = false }) {
+  const navigate = useNavigate()
   const showPrices = can(session, 'prices_view')
   const canManage = can(session, 'einvoice_manage')
   const [rows, setRows] = useState([])
@@ -4466,6 +4098,7 @@ function EInvoicePage({ notify, session }) {
   const [contractNumberEdited, setContractNumberEdited] = useState(false)
   const [errors, setErrors] = useState({})
   const [validatedOnce, setValidatedOnce] = useState(false)
+  const routeBootstrapped = useRef(false)
 
   const clearFieldError = (key) => {
     setErrors((current) => {
@@ -4519,6 +4152,16 @@ function EInvoicePage({ notify, session }) {
 
   useEffect(() => { load() }, [load])
 
+  const closeEditor = () => {
+    setContractNumberEdited(false)
+    setErrors({})
+    setValidatedOnce(false)
+    setPreviewOpen(false)
+    setEditing(null)
+    if (initialInvoiceId) navigate(pathForPage('Buyurtmalar'))
+  }
+
+
   useEffect(() => {
     if (!editing || editing.id || contractNumberEdited || !editing.contract_date) return
     let cancelled = false
@@ -4534,7 +4177,7 @@ function EInvoicePage({ notify, session }) {
     return () => { cancelled = true }
   }, [editing?.id, contractNumberEdited, editing?.contract_date, notify])
 
-  const openNew = () => {
+  const openNew = (clientId = '') => {
     setContractNumberEdited(false)
     setErrors({})
     setValidatedOnce(false)
@@ -4546,7 +4189,7 @@ function EInvoicePage({ notify, session }) {
       place_signed: '',
       contract_date: todayValue(),
       valid_until: currentYearEndValue(),
-      client: '',
+      client: clientId ? String(clientId) : '',
       reverse_calculation: false,
       comment: '',
       content_title: '1.',
@@ -4577,6 +4220,18 @@ function EInvoicePage({ notify, session }) {
     }
   }
 
+  useEffect(() => {
+    if (routeBootstrapped.current) return
+    routeBootstrapped.current = true
+    if (initialInvoiceId) {
+      openEdit({ id: initialInvoiceId })
+    } else if (startNew && canManage) {
+      openNew(prefillClientId)
+      navigate(pathForPage('Buyurtmalar'), { replace: true, state: {} })
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialInvoiceId, startNew, prefillClientId, canManage])
+
   const updateLine = (index, patch) => {
     clearLineErrors()
     setEditing((current) => {
@@ -4598,6 +4253,7 @@ function EInvoicePage({ notify, session }) {
           }
         }
         if (!current.reverse_calculation) next = calcInvoiceLine(next, false)
+        else next = calcInvoiceLine(next, true, Object.keys(patch)[0])
         return next
       })
       return { ...current, lines }
@@ -4647,7 +4303,11 @@ function EInvoicePage({ notify, session }) {
 
   const handlePreview = () => {
     const nextErrors = runValidation()
-    if (Object.keys(nextErrors).length) return
+    if (Object.keys(nextErrors).length) {
+      notify('Hujjatni ko‘rsatishdan oldin qizil maydonlarni to‘ldiring.', 'warning')
+      document.querySelector('.e-invoice-form .field-error, .e-invoice-form .input-invalid, .e-invoice-form .field-invalid')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      return
+    }
     setPreviewOpen(true)
   }
 
@@ -4696,8 +4356,8 @@ function EInvoicePage({ notify, session }) {
       }
       if (editing.id) await api.updateInvoice(editing.id, payload)
       else await api.createInvoice(payload)
-      notify('Elektron faktura saqlandi.', 'success')
-      setEditing(null)
+      notify('Buyurtma saqlandi.', 'success')
+      closeEditor()
       load()
     } catch (err) {
       notify(err.message)
@@ -4713,20 +4373,20 @@ function EInvoicePage({ notify, session }) {
       <div className="page-heading">
         <div>
           <p className="eyebrow">MODUL</p>
-          <h1>Elektron faktura</h1>
+          <h1>Buyurtmalar</h1>
         </div>
         {canManage && !editing && (
-          <button className="primary-button" onClick={openNew}><Plus size={20} />Yangi hujjat</button>
+          <button className="primary-button" onClick={() => openNew()}><Plus size={20} />Yangi buyurtma</button>
         )}
       </div>
 
       {!editing ? (
         <section className="data-panel">
           <div className="panel-head"><div><p className="eyebrow">RO‘YXAT</p><h3>{rows.length} ta hujjat</h3></div></div>
-          {loading ? <SkeletonRows /> : !rows.length ? <Empty label="Hali elektron faktura yo‘q." /> : (
+          {loading ? <SkeletonRows /> : !rows.length ? <Empty label="Hali buyurtma yo‘q." /> : (
             <ul className="product-list">
               {rows.map((row) => (
-                <li key={row.id} className={canManage ? 'product-row product-row-clickable' : 'product-row'} onClick={canManage ? () => openEdit(row) : undefined} role={canManage ? 'button' : undefined} tabIndex={canManage ? 0 : undefined}>
+                <li key={row.id} className="product-row product-row-clickable" onClick={() => navigate(`/buyurtmalar/${row.id}`)} role="button" tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); navigate(`/buyurtmalar/${row.id}`) } }}>
                   <div><b>{row.contract_number || row.name || `#${row.id}`}</b><small>{row.document_type_display} • {row.client_name || '—'} • {row.contract_date || '—'}</small></div>
                   <div>{showPrices ? `${money(row.grand_total)} UZS` : `${row.lines?.length || 0} qator`}</div>
                 </li>
@@ -4737,7 +4397,7 @@ function EInvoicePage({ notify, session }) {
       ) : (
         <form className="e-invoice-form" onSubmit={submit}>
           <div className="e-invoice-toolbar">
-            <button type="button" className="secondary-button" onClick={() => { setContractNumberEdited(false); setErrors({}); setValidatedOnce(false); setPreviewOpen(false); setEditing(null) }}>Orqaga</button>
+            <button type="button" className="secondary-button" onClick={closeEditor}>Orqaga</button>
           </div>
 
           <section className="e-invoice-section">
@@ -5034,7 +4694,7 @@ function EInvoicePage({ notify, session }) {
               <button type="button" className="secondary-button" onClick={handlePreview}>
                 <Eye size={18} />Hujjatni ko‘rsatish
               </button>
-              <button type="button" className="secondary-button" onClick={() => { setContractNumberEdited(false); setErrors({}); setValidatedOnce(false); setPreviewOpen(false); setEditing(null) }}>Bekor qilish</button>
+              <button type="button" className="secondary-button" onClick={closeEditor}>Bekor qilish</button>
               {canManage && (
                 <button className="primary-button" disabled={saving}>
                   {saving ? <SpinnerGap size={18} className="spin" /> : 'Saqlash'}

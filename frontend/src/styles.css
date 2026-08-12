@@ -3433,10 +3433,13 @@ label.field-invalid textarea:focus,
 }
 
 .document-preview-backdrop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  z-index: 120;
   background: rgba(8, 10, 18, 0.72);
   backdrop-filter: blur(8px);
   padding: 20px;
-  align-items: flex-start;
   overflow-y: auto;
 }
 
