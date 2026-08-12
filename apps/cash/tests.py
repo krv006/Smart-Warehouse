@@ -5,9 +5,50 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 
 from apps.cash.models import Payment
+from apps.cash.services import parse_bankxizmatlari_usd_rates
 from apps.sales.models import Sale
 from apps.users.models import User
 from apps.warehouse.models import Product
+
+
+BANKXIZMATLARI_SAMPLE = """
+<div class="item js-element-item" data-usd-buy-bank="11870.00" data-usd-sale-bank="11990.00" data-bank="002">
+  <div class="item__header--name">O'zmilliybank</div>
+  <span class="item__update--text">Yangilanish vaqti: 11:02, 12.08.2026</span>
+</div>
+<div class="item js-element-item" data-usd-buy-bank="11875.00" data-usd-sale-bank="11945.00" data-bank="049">
+  <div class="item__header--name">Kapitalbank</div>
+  <span class="item__update--text">Yangilanish vaqti: 09:02, 12.08.2026</span>
+</div>
+<div class="item js-element-item" data-usd-buy-bank="11870.00" data-usd-sale-bank="11980.00" data-bank="012">
+  <div class="item__header--name">Hamkorbank</div>
+  <span class="item__update--text">Yangilanish vaqti: 16:21, 11.08.2026</span>
+</div>
+<div class="item js-element-item" data-usd-buy-bank="11870.00" data-usd-sale-bank="12000.00" data-bank="006">
+  <div class="item__header--name">Xalq banki</div>
+  <span class="item__update--text">Yangilanish vaqti: 11:30, 12.08.2026</span>
+</div>
+<div class="item js-element-item" data-usd-buy-bank="11850.00" data-usd-sale-bank="11940.00" data-bank="004">
+  <div class="item__header--name">Agrobank</div>
+  <span class="item__update--text">Yangilanish vaqti: 08:52, 12.08.2026</span>
+</div>
+<div class="item js-element-item" data-usd-buy-bank="11920.00" data-usd-sale-bank="12000.00" data-bank="053">
+  <div class="item__header--name">InFinBank</div>
+  <span class="item__update--text">Yangilanish vaqti: 12:01, 12.08.2026</span>
+</div>
+"""
+
+
+class BankxizmatlariParserTests(TestCase):
+    def test_parse_popular_bank_usd_rates(self):
+        rates = parse_bankxizmatlari_usd_rates(BANKXIZMATLARI_SAMPLE)
+        self.assertEqual(len(rates), 6)
+        self.assertEqual(rates[0]['code'], '053')
+        self.assertEqual(rates[0]['name'], 'InFinBank')
+        self.assertEqual(rates[0]['buy_rate'], Decimal('11920.00'))
+        self.assertEqual(rates[0]['sell_rate'], Decimal('12000.00'))
+        self.assertEqual(rates[1]['code'], '002')
+        self.assertEqual(rates[1]['buy_rate'], Decimal('11870.00'))
 
 
 def _make_sale_payment():

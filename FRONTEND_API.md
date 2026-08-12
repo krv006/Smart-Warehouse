@@ -190,7 +190,7 @@ Timeout: **8 soniya**. Xato klassi: `ApiError(message, status)`.
 | `pay(id, payload)` | POST | `/cash/payments/{id}/pay/` | `{ amount, comment }` |
 | `exchangeRateLatest(refresh)` | GET | `/cash/exchange-rates/latest/` | `refresh=true\|false` |
 | `exchangeRateSettings()` | GET | `/cash/exchange-rates/settings/` | — |
-| `updateExchangeRateSettings(payload)` | PATCH | `/cash/exchange-rates/settings/` | `{ auto_fetch_enabled?, preferred_rate_source? }` (`infinbank` \| `manual`) |
+| `updateExchangeRateSettings(payload)` | PATCH | `/cash/exchange-rates/settings/` | `{ auto_fetch_enabled?, preferred_rate_source?, preferred_bank_code?, preferred_bank_side? }` (`infinbank` \| `manual` \| `bank`; `preferred_bank_side`: `buy` \| `sell`) |
 | `companyProfile()` | GET | `/company-profile/` | — |
 | `updateCompanyProfile(payload)` | PATCH | `/company-profile/` | korxona rekvizitlari — Management |
 | `invoices(params)` | GET | `/invoices/` | `page_size=30`, `document_type`, `client`, `search` |
@@ -389,10 +389,12 @@ Shifrlangan maydonlar serverda ochiladi. Kamida **2** belgi; debounce **280 ms**
 
 | Prop | Joylashuv | Ko‘rinish | Ruxsat |
 |---|---|---|---|
-| `header` | Topbar (bosh sahifa) | Faqat Infinbank kursi (read-only) + ixtiyoriy ↻ | ↻ — `users_manage` |
-| `compact` | Import / Xarajat editorlari | **Default: Infinbank.** Tablar: Infinbank (kurs tab yorlig‘ida) \| Qo‘lda. Infinbank — faqat ixtiyoriy ↻; Qo‘lda — bitta input (`Kurs kiriting`), blur/Enter da saqlash; alohida Saqlash tugmasi va «Hisobda: …» yo‘q | Tab almashtirish, qo‘lda saqlash, ↻ — `users_manage` |
+| `header` | Topbar (bosh sahifa) | **Bank dropdown** (Infinbank MB + 6 ta bank + saqlangan qo‘lda) + faol kurs + ixtiyoriy ↻ | Dropdown va ↻ — `users_manage` |
+| `compact` | Import / Xarajat editorlari | **Bank dropdown** + **Sotish/Sotib olish** (market bank tanlanganda) + **Qo‘lda** tugmasi. Qo‘lda rejimda input (`Kurs kiriting`), blur/Enter da saqlash | Dropdown, qo‘lda saqlash, ↻ — `users_manage` |
 
-`users_manage` bo‘lmagan foydalanuvchi tablarni ko‘radi, lekin `disabled` — faqat faol kurs (Infinbank yoki saqlangan qo‘lda) ko‘rsatiladi.
+Dropdown ro‘yxati `market_rates.banks` + Infinbank MB (`infinbank.mb_rate`) + ixtiyoriy `manual`. Tanlangan kurs `mb_rate` / «Hisobda: …» da ko‘rsatiladi.
+
+`users_manage` bo‘lmagan foydalanuvchi dropdown `disabled` — faqat faol kurs ko‘rsatiladi.
 
 Backend: `PATCH /cash/exchange-rates/settings/` va `POST /cash/exchange-rates/` (qo‘lda kurs) — **Management** (`IsManagement()`).
 
@@ -570,7 +572,7 @@ FIFO ombordan ayiradi. Operator uchun narx/foyda yashirilishi mumkin.
 | PATCH | `/{id}/` | kurs maydonlari | Auth | ❌ |
 | GET | `/latest/` | `refresh=true\|false` | Auth | ✅ `exchangeRateLatest` |
 | GET | `/settings/` | — | Auth | ✅ `exchangeRateSettings` |
-| PATCH | `/settings/` | `{ auto_fetch_enabled?, preferred_rate_source? }` | Management | ✅ `updateExchangeRateSettings` |
+| PATCH | `/settings/` | `{ auto_fetch_enabled?, preferred_rate_source?, preferred_bank_code?, preferred_bank_side? }` | Management | ✅ `updateExchangeRateSettings` |
 
 Celery beat: `refresh_infinbank_usd_rate` har **1 soat** (`root/celery.py`). `auto_fetch_enabled=false` bo‘lsa task o‘tkazib yuboriladi.
 
@@ -926,9 +928,17 @@ GET /api/v1/cash/exchange-rates/latest/?refresh=false
 GET /api/v1/cash/exchange-rates/latest/?refresh=true
 ```
 
-`refresh=true` — Infinbankdan majburiy sync (`sync_today_usd_rate`). Tashqi manba ishlamasa bazadagi oxirgi kurs fallback; yo‘q bo‘lsa `503`.
+`refresh=true` — Infinbankdan majburiy sync (`sync_today_usd_rate`) va [bankxizmatlari.uz](https://bankxizmatlari.uz/uz/rates/) dan bank kurslarini yangilash. Tashqi manba ishlamasa bazadagi oxirgi kurs fallback; yo‘q bo‘lsa `503`.
 
-Javob (faol kurs maydonlari + ikkala manba):
+Qoʻshimcha manba — **bankxizmatlari.uz** (`data-usd-buy-bank` / `data-usd-sale-bank`, filial kursi `BANK`):
+
+```text
+https://bankxizmatlari.uz/uz/rates/
+```
+
+Ko‘rsatiladigan 6 ta bank (InFinBank + 5 ta mashhur bank): InFinBank, O‘zmilliybank, Kapitalbank, Hamkorbank, Xalq banki, Agrobank.
+
+Javob (faol kurs maydonlari + ikkala manba + bank kurslari):
 
 ```json
 {
@@ -946,33 +956,78 @@ Javob (faol kurs maydonlari + ikkala manba):
     "manual_override": true,
     "rate_date": "2026-08-11"
   },
-  "active_source": "infinbank",
-  "preferred_rate_source": "infinbank",
+  "active_source": "bank",
+  "preferred_rate_source": "bank",
+  "preferred_bank_code": "049",
+  "preferred_bank_side": "sell",
+  "active_bank_code": "049",
+  "active_bank_name": "Kapitalbank",
+  "active_bank_side": "sell",
   "currency": "USD",
-  "mb_rate": "11934.61",
-  "rate_date": "2026-08-11",
-  "source": "infinbank"
+  "mb_rate": "11945.00",
+  "rate_date": "2026-08-12",
+  "source": "bank",
+  "market_rates": {
+    "source": "bankxizmatlari",
+    "source_url": "https://bankxizmatlari.uz/uz/rates/",
+    "fetched_at": "2026-08-12T12:30:00+05:00",
+    "banks": [
+      {
+        "code": "053",
+        "name": "InFinBank",
+        "buy_rate": "11920.00",
+        "sell_rate": "12000.00",
+        "updated_at": "Yangilanish vaqti: 12:01, 12.08.2026",
+        "source": "bankxizmatlari"
+      },
+      {
+        "code": "002",
+        "name": "O'zmilliybank",
+        "buy_rate": "11870.00",
+        "sell_rate": "11990.00",
+        "updated_at": "Yangilanish vaqti: 11:02, 12.08.2026",
+        "source": "bankxizmatlari"
+      }
+    ]
+  }
 }
 ```
 
-`active_source` / yuqori darajadagi `mb_rate` — hisob-kitobda ishlatiladigan faol yozuv (`get_active_rate_record`). `preferred_rate_source`: `infinbank` | `manual`.
+**Faol kurs (`mb_rate`, `active_source`):** hisob-kitobda ishlatiladi — dashboard, import USD→UZS va hokazo.
+
+| `preferred_rate_source` | Hisob-kitob manbasi |
+|---|---|
+| `infinbank` | `infinbank.mb_rate` (Infinbank.com MB kurs) |
+| `manual` | Bugungi qo‘lda kurs (`manual.mb_rate`) |
+| `bank` | `market_rates.banks[]` dan `preferred_bank_code` + `preferred_bank_side` (`buy` = sotib olish, `sell` = sotish) |
+
+`market_rates` — bankxizmatlari.uz dan olingan ro‘yxat (dropdown to‘ldirish uchun). Kurslar 1 soat keshlanadi; `refresh=true` majburiy yangilaydi.
+
+Bank kodlari (doimiy ro‘yxat): `053` InFinBank, `002` O‘zmilliybank, `049` Kapitalbank, `012` Hamkorbank, `006` Xalq banki, `004` Agrobank.
 
 ### Frontend: `FxRatePanel` (`App.jsx`)
 
-Ikki rejim — **`header`** va **`compact`**:
+Komponent: `BankRateDropdown` — `<select>` orqali bank tanlash.
 
 | Rejim | Prop | UI |
 |---|---|---|
-| Topbar (bosh sahifa) | `header` | Faqat Infinbank kursi (read-only). Tab yo‘q, Qo‘lda input yo‘q, Saqlash yo‘q. `users_manage` bo‘lsa ↻ (Infinbank yangilash). |
-| Import / Xarajat editor | `compact` | **Default: Infinbank.** Tablar: Infinbank (kurs tab yorlig‘ida) \| Qo‘lda. Infinbank — ixtiyoriy ↻ (`users_manage`). Qo‘lda — bitta input (`Kurs kiriting`), blur yoki Enter da avto-saqlash; alohida Saqlash va «Hisobda: …» yo‘q. |
+| Topbar | `header` | Dropdown (bank nomi + kurs) + faol summa + ↻ |
+| Import / Xarajat | `compact` | Dropdown + Sotish/Sotib olish select + Qo‘lda tugmasi/input |
+| Dashboard | (default) | Dropdown + ↻ + «Qo‘lda kurs» + «Hisobda: …» |
+
+Dropdown variantlari (misol):
+
+- `Infinbank MB — 11 889,95`
+- `Kapitalbank — 11 945,00` (tanlangan `preferred_bank_side` bo‘yicha)
+- `Qo‘lda — 11 950,00` (saqlangan bo‘lsa)
 
 **Ability gating (`users_manage`):**
 
-- Tab almashtirish (`preferred_rate_source`) — faqat `users_manage`
-- Qo‘lda kurs saqlash (`POST /cash/exchange-rates/`) — faqat `users_manage`; compact rejimda blur yoki Enter
-- Infinbank ↻ (`?refresh=true`) — faqat `users_manage`
+- Bank dropdown va Sotish/Sotib olish — faqat `users_manage`
+- Qo‘lda kurs saqlash (`POST /cash/exchange-rates/`) — faqat `users_manage`
+- ↻ (`?refresh=true`) — Infinbank MB + `market_rates` yangilaydi
 
-`users_manage` bo‘lmagan foydalanuvchi faqat joriy kursni ko‘radi; tablar `disabled`.
+`users_manage` bo‘lmagan foydalanuvchi faqat joriy kursni ko‘radi.
 
 Backend ruxsat: `PATCH /cash/exchange-rates/settings/` va `POST /cash/exchange-rates/` — **Management** (`IsManagement()`).
 
@@ -1014,7 +1069,17 @@ PATCH body (qisman):
 }
 ```
 
-Javob: `{ "auto_fetch_enabled", "preferred_rate_source", "updated_at" }`.
+Bank kursini tanlash:
+
+```json
+{
+  "preferred_rate_source": "bank",
+  "preferred_bank_code": "049",
+  "preferred_bank_side": "sell"
+}
+```
+
+Javob: `{ "auto_fetch_enabled", "preferred_rate_source", "preferred_bank_code", "preferred_bank_side", "updated_at" }`.
 
 Frontend: `api.exchangeRateSettings()`, `api.updateExchangeRateSettings(payload)`.
 
@@ -2068,8 +2133,8 @@ notifications: 30s
 - Grid sahifalarda `ListFiltersPanel` filtrlari `buildListQueryParams` orqali API ga uzatilsin.
 - Global qidiruv Ctrl+K; kamida 2 belgi.
 - Mijoz kartasi URL tablari `CLIENT_TABS` bilan mos bo‘lsin.
-- USD kurs: `preferred_rate_source` va `latest` javobidagi `infinbank`/`manual` obyektlari bilan ishlansin.
-- `FxRatePanel`: topbar — `header` (read-only Infinbank); editorlar — `compact` (tablar + ixtiyoriy ↻ / qo‘lda input). FX boshqaruv — `users_manage`.
+- USD kurs: `preferred_rate_source` (`infinbank` \| `manual` \| `bank`), `preferred_bank_code`, `preferred_bank_side`; `latest` javobidagi `mb_rate`, `market_rates`, `infinbank`/`manual`.
+- `FxRatePanel`: topbar — `header` (bank dropdown + kurs); editorlar — `compact` (dropdown + Qo‘lda). FX boshqaruv — `users_manage`.
 - Import grid status (inline + bulk) — `order_status_manage`, `procurement_manage` emas.
 - `SaleEditor`, `BuyurtmalarPage`: `api.products()` doim; mijoz qidiruv — `searchClients()` + `fetchClient()` faqat `clients_view`.
 - `DataTable` Amallar ustuni: `.row-actions` flex wrapper; grid da `flex-wrap: nowrap`, tugmalar 36px balandlik.

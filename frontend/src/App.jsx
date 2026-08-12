@@ -49,6 +49,12 @@ const HIDDEN_PAGES = {
 }
 
 const money = (value) => new Intl.NumberFormat('uz-UZ', { maximumFractionDigits: 0 }).format(Number(value || 0))
+/** Valyuta kursi — Infinbank MB kursi kabi, yaxlitlamasdan (masalan 11 889,95). */
+const moneyRate = (value) => {
+  const num = Number(value)
+  if (!Number.isFinite(num)) return '—'
+  return new Intl.NumberFormat('uz-UZ', { minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(num)
+}
 const list = (data) => Array.isArray(data) ? data : data?.results || []
 
 function flattenCategories(nodes, depth = 0, result = []) {
@@ -120,6 +126,74 @@ const documentTypeLabels = {
 }
 const documentTypeLabel = (value) => documentTypeLabels[value] || value || 'Hujjat'
 
+function bankRateValue(bank, side) {
+  if (!bank) return null
+  return side === 'sell' ? bank.sell_rate : bank.buy_rate
+}
+
+function BankRateDropdown({
+  marketBanks,
+  infinRate,
+  manualRate,
+  value,
+  side,
+  compact = false,
+  header = false,
+  canManage = false,
+  disabled = false,
+  onSelectInfinbank,
+  onSelectBank,
+  onSelectManual,
+  onSelectSide,
+}) {
+  const showSide = value.startsWith('bank:')
+  return (
+    <div className={`fx-bank-select-wrap${compact ? ' fx-bank-select-wrap--compact' : ''}${header ? ' fx-bank-select-wrap--header' : ''}`}>
+      <select
+        className="fx-bank-select"
+        value={value}
+        disabled={disabled || !canManage}
+        aria-label="Bank tanlash"
+        onChange={(event) => {
+          const next = event.target.value
+          if (next === 'infinbank') onSelectInfinbank?.()
+          else if (next === 'manual') onSelectManual?.()
+          else if (next.startsWith('bank:')) onSelectBank?.(next.slice(5))
+        }}
+      >
+        <option value="infinbank">
+          Infinbank MB{infinRate ? ` — ${moneyRate(infinRate)}` : ''}
+        </option>
+        {marketBanks.map((bank) => {
+          const rate = bankRateValue(bank, side)
+          return (
+            <option key={bank.code} value={`bank:${bank.code}`}>
+              {bank.name}{rate ? ` — ${moneyRate(rate)}` : ''}
+            </option>
+          )
+        })}
+        {manualRate != null && (
+          <option value="manual">
+            Qo‘lda — {moneyRate(manualRate)}
+          </option>
+        )}
+      </select>
+      {showSide && (
+        <select
+          className="fx-bank-side-select"
+          value={side}
+          disabled={disabled || !canManage}
+          aria-label="Kurs turi"
+          onChange={(event) => onSelectSide?.(event.target.value)}
+        >
+          <option value="sell">Sotish</option>
+          <option value="buy">Sotib olish</option>
+        </select>
+      )}
+    </div>
+  )
+}
+
 function FxRatePanel({ session, notify, compact = false, header = false, onSourceChange }) {
   const [snapshot, setSnapshot] = useState(null)
   const [manualDraft, setManualDraft] = useState('')
@@ -145,11 +219,32 @@ function FxRatePanel({ session, notify, compact = false, header = false, onSourc
   const activeSource = uiSource
   const infinRate = snapshot?.infinbank?.mb_rate
   const manualRate = snapshot?.manual?.mb_rate
-  const displayRate = serverSource === 'manual' && manualRate ? manualRate : (infinRate ?? snapshot?.mb_rate)
+  const marketBanks = snapshot?.market_rates?.banks || []
+  const selectedBankCode = snapshot?.preferred_bank_code || snapshot?.active_bank_code || ''
+  const selectedBankSide = snapshot?.preferred_bank_side || snapshot?.active_bank_side || 'sell'
+  const displayRate = snapshot?.mb_rate ?? (
+    serverSource === 'manual' && manualRate ? manualRate : infinRate
+  )
+  const activeBankName = snapshot?.active_bank_name
+    || marketBanks.find((bank) => bank.code === selectedBankCode)?.name
 
   useEffect(() => {
     setUiSource(serverSource)
   }, [serverSource])
+
+  const applySettings = async (payload, successMessage) => {
+    setSourceSaving(true)
+    try {
+      await api.updateExchangeRateSettings(payload)
+      await load()
+      onSourceChange?.()
+      if (successMessage) notify(successMessage, 'success')
+    } catch (err) {
+      notify(err.message)
+    } finally {
+      setSourceSaving(false)
+    }
+  }
 
   const setSource = async (source) => {
     if (!canManage) return
@@ -157,17 +252,69 @@ function FxRatePanel({ session, notify, compact = false, header = false, onSourc
       setUiSource('manual')
       return
     }
-    setSourceSaving(true)
-    try {
-      await api.updateExchangeRateSettings({ preferred_rate_source: source })
-      await load()
-      onSourceChange?.()
-      notify(source === 'manual' ? 'Hisob-kitobda qo‘lda kurs ishlatiladi.' : 'Hisob-kitobda Infinbank kursi ishlatiladi.', 'success')
-    } catch (err) {
-      notify(err.message)
-    } finally {
-      setSourceSaving(false)
+    if (source === 'bank') {
+      const fallbackCode = selectedBankCode || marketBanks[0]?.code
+      if (!fallbackCode) {
+        notify('Bank kurslari hali yuklanmagan.', 'error')
+        return
+      }
+      setUiSource('bank')
+      await applySettings({
+        preferred_rate_source: 'bank',
+        preferred_bank_code: fallbackCode,
+        preferred_bank_side: selectedBankSide,
+      }, 'Hisob-kitobda tanlangan bank kursi ishlatiladi.')
+      return
     }
+    setUiSource(source)
+    await applySettings(
+      { preferred_rate_source: source },
+      source === 'manual'
+        ? 'Hisob-kitobda qo‘lda kurs ishlatiladi.'
+        : 'Hisob-kitobda Infinbank MB kursi ishlatiladi.',
+    )
+  }
+
+  const selectBank = async (code) => {
+    if (!canManage || !code) return
+    setUiSource('bank')
+    await applySettings({
+      preferred_rate_source: 'bank',
+      preferred_bank_code: code,
+      preferred_bank_side: selectedBankSide,
+    })
+  }
+
+  const selectBankSide = async (side) => {
+    if (!canManage) return
+    const code = selectedBankCode || marketBanks[0]?.code
+    if (!code) return
+    setUiSource('bank')
+    await applySettings({
+      preferred_rate_source: 'bank',
+      preferred_bank_code: code,
+      preferred_bank_side: side,
+    })
+  }
+
+  const bankSelectValue = activeSource === 'manual' && manualRate != null
+    ? 'manual'
+    : activeSource === 'bank' && selectedBankCode
+      ? `bank:${selectedBankCode}`
+      : 'infinbank'
+
+  const bankDropdownProps = {
+    marketBanks,
+    infinRate,
+    manualRate,
+    value: bankSelectValue,
+    side: selectedBankSide,
+    canManage,
+    disabled: sourceSaving,
+    onSelectInfinbank: () => setSource('infinbank'),
+    onSelectBank: selectBank,
+    onSelectManual: () => setSource('manual'),
+    onSelectSide: selectBankSide,
   }
 
   const saveManual = async (event) => {
@@ -208,10 +355,10 @@ function FxRatePanel({ session, notify, compact = false, header = false, onSourc
   if (header) {
     return (
       <div className="fx-card fx-card--header">
-        <span className="fx-rate-label">Infinbank</span>
-        <strong className="fx-rate-readonly">{infinRate ? money(infinRate) : '—'}</strong>
+        <BankRateDropdown {...bankDropdownProps} header />
+        <strong className="fx-rate-readonly">{displayRate ? moneyRate(displayRate) : '—'}</strong>
         {canManage && (
-          <button type="button" className="fx-refresh" onClick={() => load(true).catch((err) => notify(err.message))} aria-label="Infinbank kursini yangilash" title="Infinbankdan yangilash">
+          <button type="button" className="fx-refresh" onClick={() => load(true).catch((err) => notify(err.message))} aria-label="Kurslarni yangilash" title="Kurslarni yangilash">
             ↻
           </button>
         )}
@@ -223,17 +370,35 @@ function FxRatePanel({ session, notify, compact = false, header = false, onSourc
     return (
       <div className="fx-card fx-card--dual fx-card--embedded fx-card--compact">
         <span className="fx-card-title">USD kurs (hisob-kitob)</span>
-        <div className="fx-source-tabs" role="tablist" aria-label="USD kurs manbasi">
-          <button type="button" role="tab" aria-selected={activeSource === 'infinbank'} disabled={sourceSaving || !canManage} className={activeSource === 'infinbank' ? 'fx-source-tab is-active' : 'fx-source-tab'} onClick={() => setSource('infinbank')}>
-            Infinbank{infinRate ? ` - ${money(infinRate)}` : ''}
-          </button>
-          <button type="button" role="tab" aria-selected={activeSource === 'manual'} disabled={sourceSaving || !canManage} className={activeSource === 'manual' ? 'fx-source-tab is-active' : 'fx-source-tab'} onClick={() => setSource('manual')}>
-            Qo‘lda
-          </button>
+        <div className="fx-source-row">
+          {activeSource === 'manual' ? (
+            <div className="fx-source-tabs fx-source-tabs--inline" role="tablist" aria-label="USD kurs manbasi">
+              <button type="button" role="tab" aria-selected={false} disabled={sourceSaving || !canManage} className="fx-source-tab" onClick={() => setSource(bankSelectValue.startsWith('bank:') ? 'bank' : 'infinbank')}>
+                Bank
+              </button>
+              <button type="button" role="tab" aria-selected className="fx-source-tab is-active">
+                Qo‘lda
+              </button>
+            </div>
+          ) : (
+            <>
+              <BankRateDropdown {...bankDropdownProps} compact />
+              <button
+                type="button"
+                role="tab"
+                aria-selected={false}
+                disabled={sourceSaving || !canManage}
+                className="fx-source-tab fx-source-tab--manual"
+                onClick={() => setSource('manual')}
+              >
+                Qo‘lda
+              </button>
+            </>
+          )}
         </div>
-        {activeSource === 'infinbank' && canManage && (
+        {activeSource !== 'manual' && canManage && (
           <div className="fx-compact-toolbar">
-            <button type="button" className="fx-refresh" onClick={() => load(true).catch((err) => notify(err.message))} aria-label="Infinbank kursini yangilash" title="Infinbankdan yangilash">
+            <button type="button" className="fx-refresh" onClick={() => load(true).catch((err) => notify(err.message))} aria-label="Kurslarni yangilash" title="Kurslarni yangilash">
               ↻
             </button>
           </div>
@@ -254,46 +419,62 @@ function FxRatePanel({ session, notify, compact = false, header = false, onSourc
               aria-label="Qo‘lda USD kursi"
             />
           ) : (
-            <strong className="fx-rate-readonly fx-rate-readonly--compact">{manualRate ? money(manualRate) : '—'}</strong>
+            <strong className="fx-rate-readonly fx-rate-readonly--compact">{manualRate ? moneyRate(manualRate) : '—'}</strong>
           )
         )}
+        <p className="fx-active-note">Hisobda: <b>{displayRate ? `${moneyRate(displayRate)} so‘m` : '—'}</b></p>
       </div>
     )
   }
 
   return (
     <div className="fx-card fx-card--dual">
-      <span className="fx-card-title">USD MB kurs</span>
-      <div className="fx-source-tabs" role="tablist" aria-label="USD kurs manbasi">
-        <button type="button" role="tab" aria-selected={activeSource === 'infinbank'} disabled={sourceSaving || !canManage} className={activeSource === 'infinbank' ? 'fx-source-tab is-active' : 'fx-source-tab'} onClick={() => setSource('infinbank')}>
-          Infinbank{infinRate ? ` - ${money(infinRate)}` : ''}
-        </button>
-        <button type="button" role="tab" aria-selected={activeSource === 'manual'} disabled={sourceSaving || !canManage} className={activeSource === 'manual' ? 'fx-source-tab is-active' : 'fx-source-tab'} onClick={() => setSource('manual')}>
-          Qo‘lda
-        </button>
-      </div>
-      <div className="fx-rate-row">
-        <span className="fx-rate-label">Infinbank</span>
-        <strong className="fx-rate-readonly">{infinRate ? money(infinRate) : '—'}</strong>
-        {canManage && (
-          <button type="button" className="fx-refresh" onClick={() => load(true).catch((err) => notify(err.message))} aria-label="Infinbank kursini yangilash" title="Infinbankdan yangilash">
-            ↻
+      <span className="fx-card-title">USD kurs (hisob-kitob)</span>
+      {activeSource === 'manual' ? (
+        <div className="fx-source-tabs" role="tablist" aria-label="USD kurs manbasi">
+          <button type="button" role="tab" aria-selected={false} disabled={sourceSaving || !canManage} className="fx-source-tab" onClick={() => setSource(bankSelectValue.startsWith('bank:') ? 'bank' : 'infinbank')}>
+            Bank
           </button>
-        )}
-      </div>
-      {canManage ? (
-        <form className="fx-rate-form" onSubmit={saveManual}>
-          <span className="fx-rate-label">Qo‘lda</span>
-          <input type="number" min="0" step="0.01" value={manualDraft} onChange={(event) => setManualDraft(event.target.value)} aria-label="Qo‘lda USD kursi" />
-          <button type="submit" disabled={saving}>{saving ? '…' : 'Saqlash'}</button>
-        </form>
+          <button type="button" role="tab" aria-selected className="fx-source-tab is-active">
+            Qo‘lda
+          </button>
+        </div>
       ) : (
+        <BankRateDropdown {...bankDropdownProps} />
+      )}
+      {activeSource !== 'manual' && canManage && (
         <div className="fx-rate-row">
-          <span className="fx-rate-label">Qo‘lda</span>
-          <strong className="fx-rate-readonly">{manualRate ? money(manualRate) : '—'}</strong>
+          <button type="button" className="fx-refresh" onClick={() => load(true).catch((err) => notify(err.message))} aria-label="Kurslarni yangilash" title="Kurslarni yangilash">
+            ↻ Yangilash
+          </button>
+          <button
+            type="button"
+            className="fx-manual-switch"
+            disabled={sourceSaving}
+            onClick={() => setSource('manual')}
+          >
+            Qo‘lda kurs
+          </button>
         </div>
       )}
-      <p className="fx-active-note">Hisobda: <b>{displayRate ? `${money(displayRate)} so‘m` : '—'}</b></p>
+      {activeSource === 'manual' && (
+        canManage ? (
+          <form className="fx-rate-form" onSubmit={saveManual}>
+            <span className="fx-rate-label">Qo‘lda</span>
+            <input type="number" min="0" step="0.01" value={manualDraft} onChange={(event) => setManualDraft(event.target.value)} aria-label="Qo‘lda USD kursi" />
+            <button type="submit" disabled={saving}>{saving ? '…' : 'Saqlash'}</button>
+          </form>
+        ) : (
+          <div className="fx-rate-row">
+            <span className="fx-rate-label">Qo‘lda</span>
+            <strong className="fx-rate-readonly">{manualRate ? moneyRate(manualRate) : '—'}</strong>
+          </div>
+        )
+      )}
+      <p className="fx-active-note">
+        Hisobda: <b>{displayRate ? `${moneyRate(displayRate)} so‘m` : '—'}</b>
+        {activeSource === 'bank' && activeBankName ? ` (${activeBankName})` : ''}
+      </p>
     </div>
   )
 }
@@ -1491,7 +1672,7 @@ function importPeriodLabel(summary) {
 function importPeriodNote(summary) {
   const usd = Number(summary.import_paid_usd || summary.import_paid_today_usd || 0)
   const rate = Number(summary.mb_rate_today || 0)
-  if (usd > 0 && rate > 0) return `$${money(usd)} · MB kurs ${money(rate)}`
+  if (usd > 0 && rate > 0) return `$${money(usd)} · MB kurs ${moneyRate(rate)}`
   return 'Yetkazuvchi to‘lovi (MB kursida)'
 }
 

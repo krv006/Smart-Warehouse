@@ -26,7 +26,13 @@ class ExchangeRateSerializer(ModelSerializer):
 class ExchangeRateSettingsSerializer(ModelSerializer):
     class Meta:
         model = ExchangeRateSettings
-        fields = ('auto_fetch_enabled', 'preferred_rate_source', 'updated_at')
+        fields = (
+            'auto_fetch_enabled',
+            'preferred_rate_source',
+            'preferred_bank_code',
+            'preferred_bank_side',
+            'updated_at',
+        )
         read_only_fields = ('updated_at',)
 
 
