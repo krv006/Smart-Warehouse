@@ -35,7 +35,9 @@ function resultTitle(section, row) {
 }
 
 function resultMeta(section, row) {
-  if (section === 'clients') return [row.phone, row.inn].filter(Boolean).join(' · ')
+  if (section === 'clients') {
+    return [row.phone, row.inn, row.pinfl, row.passport_number, row.director_jshshr].filter(Boolean).join(' · ')
+  }
   if (section === 'invoices') return [row.document_type_display || row.document_type, row.contract_number].filter(Boolean).join(' · ')
   if (section === 'products') return row.serial_number || row.barcode || ''
   if (section === 'contracts') return row.product_name || row.asos || ''
@@ -118,7 +120,7 @@ export default function GlobalSearch({ open, onClose, session, onNavigate }) {
             ref={inputRef}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Mijoz, buyurtma, mahsulot, shartnoma…"
+            placeholder="F.I.Sh, INN, JSHSHIR, passport, buyurtma…"
             aria-label="Qidiruv"
           />
           <kbd className="omnibox-kbd">Esc</kbd>

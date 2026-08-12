@@ -2295,7 +2295,7 @@ function rowMeta(title, row) {
   if (title === 'Import') return [row.status_display || row.status, row.supplier, row.expected_date].filter(Boolean).join(' • ') || '—'
   if (title === 'Qoldiqlar') return [row.warehouse_location, `bron: ${row.reserved_quantity || 0}`].filter(Boolean).join(' • ')
   if (title === 'Foydalanuvchilar') return [row.role, row.is_active ? 'faol' : 'bloklangan'].filter(Boolean).join(' • ')
-  if (title === 'Mijozlar') return [row.phone, row.passport_number, row.inn].filter(Boolean).join(' • ') || row.created_at || '—'
+  if (title === 'Mijozlar') return [row.phone, row.inn, row.pinfl, row.passport_number, row.director_jshshr].filter(Boolean).join(' • ') || row.created_at || '—'
   return row.serial_number || row.status || row.phone || row.created_at || '—'
 }
 

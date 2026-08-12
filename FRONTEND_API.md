@@ -182,7 +182,7 @@ Timeout: **8 soniya**. Xato klassi: `ApiError(message, status)`.
 | `products(params)` | GET | `/warehouse/products/` | `page_size=30`, `search`, `category` |
 | `stocks(params)` | GET | `/warehouse/stocks/` | `page_size=30`, `product`, `category`, `status` |
 | `addStock(id, payload)` | POST | `/warehouse/products/{id}/add-stock/` | kirim body |
-| `clients(params)` | GET | `/clients/` | `page_size=30`, `search`, `is_active`, `date_from`, `date_to` |
+| `clients(params)` | GET | `/clients/` | `page_size=30`, `search` (F.I.Sh, INN, JSHSHIR, passport, kompaniya, email), `is_active`, `date_from`, `date_to` |
 | `sales(params)` | GET | `/sales/` | `page_size=30`, `product`, `client`, `sold_date`, `date_from`, `date_to`, `search`, `ordering`, `page` |
 | `salesBulk(payload)` | POST | `/sales/bulk/` | bulk sales body |
 | `payments(params)` | GET | `/cash/payments/` | `page_size=30`, `status`, `order`, `sale`, `client`, `currency`, `include_paid`, `search`, `ordering`, `page` |
@@ -299,10 +299,12 @@ Asosiy URL lar (react-router):
 
 - Ochish: header tugmasi yoki **Ctrl+K** / **⌘+K** (`useGlobalSearchHotkey`).
 - Kamida **2** belgi; debounce bilan parallel so‘rovlar (`page_size=6`):
-  - Mijozlar → `api.clients({ search })`
+  - Mijozlar → `api.clients({ search })` — F.I.Sh, INN, JSHSHIR, passport, kompaniya, email
   - Buyurtmalar → `api.invoices({ search })`
   - Mahsulotlar → `api.products({ search })`
   - Shartnomalar → `api.contracts({ search })`
+- Mijoz natijasida meta: telefon, INN, JSHSHIR (`pinfl`), passport, rahbar JSHSHIR.
+- Placeholder: «F.I.Sh, INN, JSHSHIR, passport, buyurtma…»
 - Natija bosilganda: mijoz kartasi, buyurtma detail URL, Ombor yoki Shartnomalar sahifasi.
 
 ### Grid ro‘yxatlar, filtr, pagination (`ResourcePage` + `listFilters.js`)
@@ -596,7 +598,7 @@ Mazmun: `content_title`, `content_body` — frontend preview (`DocumentPreviewMo
 
 | Method | Path | Query / body | Ruxsat | api.js |
 |---|---|---|---|---|
-| GET | `/` | `page_size`, `search`, `is_active`, `date_from`, `date_to`, `ordering`, `page` | `can_view_clients` | ✅ `clients` |
+| GET | `/` | `page_size`, `search` (F.I.Sh, INN, JSHSHIR, passport, kompaniya, email), `is_active`, `date_from`, `date_to`, `ordering`, `page` | `can_view_clients` | ✅ `clients` |
 | POST/PATCH/DELETE | `/`, `/{uuid}/` | client body | `can_view_clients` | ✅ CRUD |
 
 Primary key — **UUID**. Maxfiy maydonlar bazada shifrlanadi.
@@ -1420,11 +1422,32 @@ DELETE /api/v1/warehouse/stocks/{id}/
 
 ```http
 GET /api/v1/clients/?page_size=30&search=smart
+GET /api/v1/clients/?page_size=30&search=310776556
+GET /api/v1/clients/?page_size=30&search=31208123456789
+GET /api/v1/clients/?page_size=30&search=AA1234567
 POST /api/v1/clients/
 GET /api/v1/clients/{uuid}/
 PATCH /api/v1/clients/{uuid}/
 DELETE /api/v1/clients/{uuid}/
 ```
+
+### Qidiruv (`search`)
+
+Backend: `apps/clients/filters.py` — `ClientSearchFilter`. Shifrlangan maydonlar (Fernet) serverda ochilib qidiriladi; `company_name` va `email` to‘g‘ridan-to‘g‘ri DB filter.
+
+| Qidiruv turi | Maydonlar |
+|---|---|
+| F.I.Sh | `full_name`, `first_name`, `last_name`, `middle_name`, `director_fish` (yuridik rahbar) |
+| INN / STIR | `inn` |
+| JSHSHIR | `pinfl` (jismoniy), `director_jshshr` (yuridik rahbar) |
+| Passport | `passport_number` |
+| Boshqa | `company_name`, `email` |
+
+Qismiy moslik (`icontains`) va raqamlar uchun bo‘shliqsiz solishtirish qo‘llab-quvvatlanadi (masalan `31208123456789`).
+
+### Ro‘yxat javobi (`ClientListSerializer`)
+
+`GET /clients/` maydonlari: `id`, `full_name`, `company_name`, `client_type`, `phone`, `inn`, `pinfl`, `passport_number`, `director_jshshr`, `director_fish`, `is_active`, `created_at`. Jismoniy shaxsda `full_name` familiya + ism + otasidan yig‘iladi.
 
 `can_view_clients` ruxsati kerak.
 
