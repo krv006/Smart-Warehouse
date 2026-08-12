@@ -181,6 +181,9 @@ db.sqlite3-journal
 frontend/node_modules/
 frontend/dist/
 
+# macOS
+.DS_Store
+
 # Flask stuff:
 instance/
 .webassets-cache
