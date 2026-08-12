@@ -200,9 +200,17 @@ class ExchangeRateSettings(TimeStampedModel):
 
     INFINBANK = 'infinbank'
     MANUAL = 'manual'
+    BANK = 'bank'
+    BUY = 'buy'
+    SELL = 'sell'
     SOURCE_CHOICES = (
         (INFINBANK, 'Infinbank'),
         (MANUAL, 'Qo\'lda'),
+        (BANK, 'Bank'),
+    )
+    SIDE_CHOICES = (
+        (BUY, 'Sotib olish'),
+        (SELL, 'Sotish'),
     )
 
     auto_fetch_enabled = BooleanField(default=True,
@@ -212,6 +220,18 @@ class ExchangeRateSettings(TimeStampedModel):
         choices=SOURCE_CHOICES,
         default=INFINBANK,
         help_text='USD hisob-kitoblarida qaysi kurs ishlatiladi',
+    )
+    preferred_bank_code = CharField(
+        max_length=10,
+        blank=True,
+        default='',
+        help_text='preferred_rate_source=bank bo‘lganda bankxizmatlari.uz bank kodi',
+    )
+    preferred_bank_side = CharField(
+        max_length=4,
+        choices=SIDE_CHOICES,
+        default=SELL,
+        help_text='Bank kursining qaysi ustuni hisob-kitobda ishlatiladi',
     )
 
     class Meta:

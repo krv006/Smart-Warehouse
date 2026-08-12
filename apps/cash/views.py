@@ -12,7 +12,8 @@ from apps.cash.serializers import (ExchangeRateSerializer, ExchangeRateSettingsS
                                    PaymentSerializer, PaymentOperatorSerializer,
                                    PaymentUpdateSerializer,
                                    PaymentPaySerializer)
-from apps.cash.services import (ExchangeRateFetchError, get_active_rate_record,
+from apps.cash.services import (ExchangeRateFetchError, get_active_rate_info,
+                                get_cached_market_usd_rates, get_market_usd_rates,
                                 get_today_rate, sync_today_usd_rate)
 from apps.common.permissions import (IsAccountantOrManagement,
                                      IsAccountantWithManagementRead,
@@ -72,15 +73,32 @@ class ExchangeRateViewSet(ModelViewSet):
 
         infinbank = get_today_rate(manual=False)
         manual = get_today_rate(manual=True)
-        active, active_source = get_active_rate_record()
+        active_info = get_active_rate_info()
         payload = {
             'infinbank': ExchangeRateSerializer(infinbank).data if infinbank else None,
             'manual': ExchangeRateSerializer(manual).data if manual else None,
-            'active_source': active_source,
+            'active_source': active_info['active_source'],
             'preferred_rate_source': settings.preferred_rate_source,
+            'preferred_bank_code': settings.preferred_bank_code,
+            'preferred_bank_side': settings.preferred_bank_side,
+            'currency': 'USD',
+            'mb_rate': str(active_info['mb_rate']),
+            'source': active_info['source'],
+            'rate_date': str(timezone.localdate()),
         }
-        if active:
-            payload.update(ExchangeRateSerializer(active).data)
+        if active_info.get('active_bank_code'):
+            payload['active_bank_code'] = active_info['active_bank_code']
+            payload['active_bank_name'] = active_info['active_bank_name']
+            payload['active_bank_side'] = active_info['active_bank_side']
+        record = active_info.get('record')
+        if record:
+            payload.update(ExchangeRateSerializer(record).data)
+
+        try:
+            payload['market_rates'] = get_market_usd_rates(force=refresh)
+        except ExchangeRateFetchError:
+            payload['market_rates'] = get_cached_market_usd_rates()
+
         return Response(payload)
 
     @action(detail=False, methods=['get', 'patch'], url_path='settings')
