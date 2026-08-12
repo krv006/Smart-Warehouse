@@ -7,7 +7,7 @@ const list = (data) => (Array.isArray(data) ? data : data?.results || [])
 
 const SECTIONS = [
   { id: 'clients', label: 'Mijozlar', icon: Users, ability: 'clients_view', load: (q) => api.clients({ search: q, page_size: 6 }) },
-  { id: 'orders', label: 'Buyurtmalar', icon: FileText, ability: 'orders_view', load: (q) => api.orders({ search: q, page_size: 6 }) },
+  { id: 'invoices', label: 'Buyurtmalar', icon: FileText, ability: 'einvoice_view', load: (q) => api.invoices({ search: q, page_size: 6 }) },
   { id: 'products', label: 'Mahsulotlar', icon: Package, ability: 'warehouse_view', load: (q) => api.products({ search: q, page_size: 6 }) },
   { id: 'contracts', label: 'Shartnomalar', icon: Truck, ability: 'contracts_view', load: (q) => api.contracts({ search: q, page_size: 6 }) },
 ]
@@ -20,7 +20,7 @@ function can(session, ability) {
 
 function resultHref(section, row) {
   if (section === 'clients') return clientDetailPath(row.id)
-  if (section === 'orders') return orderDetailPath(row.id)
+  if (section === 'invoices') return orderDetailPath(row.id)
   if (section === 'products') return pathForPage('Ombor')
   if (section === 'contracts') return pathForPage('Shartnomalar')
   return '/'
@@ -28,7 +28,7 @@ function resultHref(section, row) {
 
 function resultTitle(section, row) {
   if (section === 'clients') return row.company_name || row.full_name || `Mijoz #${row.id?.slice?.(0, 8)}`
-  if (section === 'orders') return row.client_name || row.contract_number || `Buyurtma #${row.id}`
+  if (section === 'invoices') return row.client_name || row.contract_number || row.name || `Buyurtma #${row.id}`
   if (section === 'products') return row.name || row.serial_number || `Mahsulot #${row.id}`
   if (section === 'contracts') return row.contract_number || `Shartnoma #${row.id}`
   return 'Yozuv'
@@ -36,7 +36,7 @@ function resultTitle(section, row) {
 
 function resultMeta(section, row) {
   if (section === 'clients') return [row.phone, row.inn].filter(Boolean).join(' · ')
-  if (section === 'orders') return [row.status_display || row.status, row.contract_number].filter(Boolean).join(' · ')
+  if (section === 'invoices') return [row.document_type_display || row.document_type, row.contract_number].filter(Boolean).join(' · ')
   if (section === 'products') return row.serial_number || row.barcode || ''
   if (section === 'contracts') return row.product_name || row.asos || ''
   return ''

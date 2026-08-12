@@ -3,13 +3,6 @@ export const MODULE_STATUS_OPTIONS = {
     { value: 'true', label: 'Faol' },
     { value: 'false', label: 'Nofaol' },
   ],
-  Buyurtmalar: [
-    { value: 'pending', label: 'Kutilmoqda' },
-    { value: 'partial', label: 'Qisman bron' },
-    { value: 'reserved', label: 'To‘liq bron' },
-    { value: 'fulfilled', label: 'Yetkazildi' },
-    { value: 'cancelled', label: 'Bekor qilindi' },
-  ],
   Import: [
     { value: 'new', label: 'Yangi' },
     { value: 'confirmed', label: 'Tasdiqlandi' },
@@ -26,7 +19,6 @@ export const MODULE_STATUS_OPTIONS = {
 
 export const MODULE_FILTER_FEATURES = {
   Mijozlar: { status: true, client: false, date: true },
-  Buyurtmalar: { status: true, client: true, date: true },
   Sotuvlar: { status: false, client: true, date: true },
   Import: { status: true, client: false, date: true },
   Ombor: { status: false, client: false, date: false },
@@ -53,7 +45,6 @@ export function hasActiveListFilters(filters = {}) {
 export function emptyStateConfig(title) {
   const map = {
     Mijozlar: { label: 'Hali mijoz yo‘q', cta: 'Birinchi mijozni qo‘shish' },
-    Buyurtmalar: { label: 'Hali buyurtma yo‘q', cta: 'Birinchi buyurtmani qo‘shish' },
     Sotuvlar: { label: 'Hali sotuv yo‘q', cta: 'Birinchi sotuvni qo‘shish' },
     Import: { label: 'Hali import yozuvi yo‘q', cta: 'Import qo‘shish' },
     Ombor: { label: 'Hali mahsulot yo‘q', cta: 'Birinchi mahsulotni qo‘shish' },

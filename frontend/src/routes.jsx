@@ -8,7 +8,7 @@ import { parseAppPath, pathForPage, crumbFromPath } from '../routes'
 
 /**
  * Main content router — maps URL to page components.
- * ResourcePage, Dashboard, Reports, EInvoice remain in App.jsx for now;
+ * ResourcePage, Dashboard, Reports, Buyurtmalar remain in App.jsx for now;
  * this module centralises route-to-view wiring.
  */
 export default function AppRoutes({
@@ -19,7 +19,7 @@ export default function AppRoutes({
   dashboardLoading,
   dashboardFilters,
   onDashboardFiltersChange,
-  onCreateOrder,
+  onCreateBuyurtma,
   onNavigate,
   navigateToPath,
   resourceReloadKey,
@@ -27,20 +27,17 @@ export default function AppRoutes({
   ResourcePage,
   Dashboard,
   ReportsPage,
-  EInvoicePage,
+  BuyurtmalarPage,
   Editor,
-  OrderEditor,
   clientEditFromDetail,
   setClientEditFromDetail,
   setResourceReloadKey,
-  orderModalOpen,
-  setOrderModalOpen,
-  orderPrefillClient,
-  setOrderPrefillClient,
   loadDashboard,
+  location,
 }) {
-  const location = useLocation()
-  const routeInfo = routeInfoProp || parseAppPath(location.pathname)
+  const locationFromHook = useLocation()
+  const currentLocation = location || locationFromHook
+  const routeInfo = routeInfoProp || parseAppPath(currentLocation.pathname)
   const active = routeInfo.page || 'Bosh sahifa'
   const activeGroup = getGroupForPage(active)
 
@@ -54,7 +51,7 @@ export default function AppRoutes({
           notify={notify}
           onNavigate={navigateToPath}
           onEditClient={(client) => setClientEditFromDetail(client)}
-          onNewOrder={(client) => onCreateOrder(client.id)}
+          onNewOrder={(client) => onCreateBuyurtma(client.id)}
           onNewSale={() => { navigateToPath(pathForPage('Sotuvlar')); notify('Yangi sotuv formasi ochiladi.', 'success') }}
         />
       )}
@@ -64,7 +61,7 @@ export default function AppRoutes({
           loading={dashboardLoading}
           period={dashboardFilters}
           onPeriodChange={onDashboardFiltersChange}
-          onCreateOrder={onCreateOrder}
+          onCreateBuyurtma={onCreateBuyurtma}
           onNavigate={onNavigate}
           session={session}
         />
@@ -72,10 +69,16 @@ export default function AppRoutes({
       {routeInfo.kind !== 'client-detail' && active === 'Hisobotlar' && can(session, 'reports_view') && (
         <ReportsPage notify={notify} />
       )}
-      {routeInfo.kind !== 'client-detail' && active === 'Elektron faktura' && can(session, 'einvoice_view') && (
-        <EInvoicePage notify={notify} session={session} />
+      {(routeInfo.kind === 'page' || routeInfo.kind === 'invoice-detail') && active === 'Buyurtmalar' && can(session, 'einvoice_view') && (
+        <BuyurtmalarPage
+          notify={notify}
+          session={session}
+          initialInvoiceId={routeInfo.kind === 'invoice-detail' ? routeInfo.invoiceId : null}
+          prefillClientId={currentLocation.state?.newBuyurtma ? (currentLocation.state?.clientId ?? null) : null}
+          startNew={Boolean(currentLocation.state?.newBuyurtma)}
+        />
       )}
-      {routeInfo.kind !== 'client-detail' && active !== 'Bosh sahifa' && active !== 'Hisobotlar' && active !== 'Elektron faktura' && isAccessiblePage(session, active) && resources[active] && (
+      {routeInfo.kind !== 'client-detail' && active !== 'Bosh sahifa' && active !== 'Hisobotlar' && active !== 'Buyurtmalar' && isAccessiblePage(session, active) && resources[active] && (
         <>
           {activeGroup && (
             <SectionTabs groupKey={activeGroup} active={active} onSelect={(page) => navigateToPath(pathForPage(page))} session={session} />
@@ -88,7 +91,6 @@ export default function AppRoutes({
             onDataChange={onDataChange}
             onNavigate={onNavigate}
             navigateToPath={navigateToPath}
-            initialOrderHistoryId={routeInfo.kind === 'order-detail' ? routeInfo.orderId : null}
           />
         </>
       )}
@@ -103,21 +105,7 @@ export default function AppRoutes({
           session={session}
         />
       )}
-      {orderModalOpen && can(session, 'orders_manage') && (
-        <OrderEditor
-          close={() => { setOrderModalOpen(false); setOrderPrefillClient(null) }}
-          done={() => {
-            setOrderModalOpen(false)
-            setOrderPrefillClient(null)
-            setResourceReloadKey((value) => value + 1)
-            loadDashboard(true)
-          }}
-          notify={notify}
-          session={session}
-          prefillClientId={orderPrefillClient}
-        />
-      )}
-      <span className="sr-only" aria-hidden="true">{crumbFromPath(location.pathname)}</span>
+      <span className="sr-only" aria-hidden="true">{crumbFromPath(currentLocation.pathname)}</span>
     </>
   )
 }

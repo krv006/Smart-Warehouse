@@ -11,7 +11,6 @@ export const PAGE_PATHS = {
   Kassa: '/moliya/kassa',
   Xarajatlar: '/moliya/xarajatlar',
   Hisobotlar: '/hisobotlar',
-  'Elektron faktura': '/elektron-faktura',
   Bildirishnomalar: '/bildirishnomalar',
   Foydalanuvchilar: '/foydalanuvchilar',
 }
@@ -20,7 +19,7 @@ const PATH_TO_PAGE = Object.fromEntries(
   Object.entries(PAGE_PATHS).map(([page, path]) => [path, page]),
 )
 
-export const CLIENT_TABS = ['umumiy', 'buyurtmalar', 'sotuvlar', 'tolovlar', 'hujjatlar', 'tarix']
+export const CLIENT_TABS = ['umumiy', 'buyurtmalar', 'sotuvlar', 'tolovlar']
 
 export function pathForPage(page) {
   return PAGE_PATHS[page] || '/'
@@ -41,12 +40,12 @@ export function parseAppPath(pathname) {
     }
   }
 
-  const orderMatch = clean.match(/^\/buyurtmalar\/(\d+)$/)
-  if (orderMatch) {
+  const invoiceMatch = clean.match(/^\/buyurtmalar\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i)
+  if (invoiceMatch) {
     return {
-      kind: 'order-detail',
+      kind: 'invoice-detail',
       page: 'Buyurtmalar',
-      orderId: Number(orderMatch[1]),
+      invoiceId: invoiceMatch[1],
       path: clean,
     }
   }
@@ -67,8 +66,13 @@ export function clientDetailPath(clientId, tab = 'umumiy') {
   return tab === 'umumiy' ? `/mijozlar/${clientId}` : `/mijozlar/${clientId}/${tab}`
 }
 
-export function orderDetailPath(orderId) {
-  return `/buyurtmalar/${orderId}`
+export function invoiceDetailPath(invoiceId) {
+  return `/buyurtmalar/${invoiceId}`
+}
+
+/** @deprecated use invoiceDetailPath */
+export function orderDetailPath(id) {
+  return invoiceDetailPath(id)
 }
 
 export function crumbFromPath(pathname) {
@@ -76,8 +80,8 @@ export function crumbFromPath(pathname) {
   if (parsed.kind === 'client-detail') {
     return `Mijozlar / ${parsed.tab}`
   }
-  if (parsed.kind === 'order-detail') {
-    return `Buyurtmalar / #${parsed.orderId}`
+  if (parsed.kind === 'invoice-detail') {
+    return `Buyurtmalar / ${parsed.invoiceId.slice(0, 8)}…`
   }
   if (parsed.page === 'Ombor' || parsed.page === 'Kategoriyalar' || parsed.page === 'Qoldiqlar') {
     if (parsed.page === 'Ombor') return 'Ombor / Mahsulotlar'
