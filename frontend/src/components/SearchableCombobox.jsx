@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { CaretDown, MagnifyingGlass, X } from '@phosphor-icons/react'
+import { CaretDown, MagnifyingGlass, SpinnerGap, X } from '@phosphor-icons/react'
 import FieldError from './FieldError'
 
 function useClickOutside(ref, handler, active) {
@@ -13,14 +13,27 @@ function useClickOutside(ref, handler, active) {
   }, [ref, handler, active])
 }
 
+function matchesNeedle(text, needle, compactNeedle) {
+  const plain = String(text || '').toLowerCase()
+  if (!plain) return false
+  if (needle && plain.includes(needle)) return true
+  if (compactNeedle && plain.replace(/\s+/g, '').includes(compactNeedle)) return true
+  return false
+}
+
 export default function SearchableCombobox({
   id,
   label,
   value,
   onChange,
   options = [],
+  selectedOption = null,
   getLabel = (item) => item.label ?? item.name ?? String(item),
+  getSearchText,
   getValue = (item) => item.value ?? item.id,
+  onSearch,
+  minSearchLength = 2,
+  searchDebounceMs = 280,
   placeholder = 'Qidirish...',
   emptyLabel = 'Tanlanmagan',
   required = false,
@@ -31,19 +44,54 @@ export default function SearchableCombobox({
 }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
+  const [asyncOptions, setAsyncOptions] = useState(null)
+  const [searching, setSearching] = useState(false)
   const wrapRef = useRef(null)
   const inputRef = useRef(null)
+  const debounceRef = useRef(null)
 
-  const selected = useMemo(
-    () => options.find((item) => String(getValue(item)) === String(value)),
-    [options, value, getValue],
-  )
+  const selected = useMemo(() => {
+    if (selectedOption && String(getValue(selectedOption)) === String(value)) return selectedOption
+    return options.find((item) => String(getValue(item)) === String(value))
+  }, [options, selectedOption, value, getValue])
 
   const filtered = useMemo(() => {
+    const source = onSearch && asyncOptions !== null ? asyncOptions : options
     const needle = query.trim().toLowerCase()
-    if (!needle) return options
-    return options.filter((item) => getLabel(item).toLowerCase().includes(needle))
-  }, [options, query, getLabel])
+    const compactNeedle = needle.replace(/\s+/g, '')
+    if (!needle || (onSearch && asyncOptions !== null)) return source
+    const searchFn = getSearchText || getLabel
+    return source.filter((item) => matchesNeedle(searchFn(item), needle, compactNeedle))
+  }, [options, asyncOptions, query, getLabel, getSearchText, onSearch])
+
+  const displayOptions = useMemo(() => {
+    if (!selected || !value) return filtered
+    if (filtered.some((item) => String(getValue(item)) === String(value))) return filtered
+    return [selected, ...filtered]
+  }, [filtered, selected, value, getValue])
+
+  useEffect(() => {
+    if (!onSearch || !open) return undefined
+    const q = query.trim()
+    if (q.length < minSearchLength) {
+      setAsyncOptions(null)
+      setSearching(false)
+      return undefined
+    }
+    window.clearTimeout(debounceRef.current)
+    setSearching(true)
+    debounceRef.current = window.setTimeout(async () => {
+      try {
+        const results = await onSearch(q)
+        setAsyncOptions(Array.isArray(results) ? results : [])
+      } catch {
+        setAsyncOptions([])
+      } finally {
+        setSearching(false)
+      }
+    }, searchDebounceMs)
+    return () => window.clearTimeout(debounceRef.current)
+  }, [query, onSearch, open, minSearchLength, searchDebounceMs])
 
   useEffect(() => {
     if (!value) setQuery('')
@@ -64,8 +112,11 @@ export default function SearchableCombobox({
     event.stopPropagation()
     onChange('')
     setQuery('')
+    setAsyncOptions(null)
     inputRef.current?.focus()
   }
+
+  const inputPlaceholder = loading || searching ? 'Qidirilmoqda...' : placeholder
 
   return (
     <div className="combobox-field" ref={wrapRef}>
@@ -83,7 +134,7 @@ export default function SearchableCombobox({
           type="text"
           className="combobox-input"
           value={query}
-          placeholder={loading ? 'Yuklanmoqda...' : placeholder}
+          placeholder={inputPlaceholder}
           disabled={disabled || loading}
           required={required && !value}
           autoComplete="off"
@@ -98,13 +149,14 @@ export default function SearchableCombobox({
           }}
           onKeyDown={(event) => {
             if (event.key === 'Escape') close()
-            if (event.key === 'Enter' && open && filtered[0]) {
+            if (event.key === 'Enter' && open && displayOptions[0]) {
               event.preventDefault()
-              pick(filtered[0])
+              pick(displayOptions[0])
             }
           }}
         />
-        {allowEmpty && value && (
+        {searching && <SpinnerGap size={14} className="combobox-icon combobox-spinner spin" aria-hidden="true" />}
+        {allowEmpty && value && !searching && (
           <button type="button" className="combobox-clear" onClick={clear} aria-label="Tozalash">
             <X size={14} />
           </button>
@@ -114,12 +166,15 @@ export default function SearchableCombobox({
           <ul id={id ? `${id}-listbox` : undefined} className="combobox-list" role="listbox">
             {allowEmpty && (
               <li>
-                <button type="button" className="combobox-option" onClick={() => { onChange(''); setQuery(''); close() }}>
+                <button type="button" className="combobox-option" onClick={() => { onChange(''); setQuery(''); setAsyncOptions(null); close() }}>
                   {emptyLabel}
                 </button>
               </li>
             )}
-            {filtered.length ? filtered.map((item) => (
+            {onSearch && query.trim().length > 0 && query.trim().length < minSearchLength && (
+              <li className="combobox-empty">Kamida {minSearchLength} ta belgi kiriting</li>
+            )}
+            {displayOptions.length ? displayOptions.map((item) => (
               <li key={getValue(item)}>
                 <button
                   type="button"
@@ -132,7 +187,9 @@ export default function SearchableCombobox({
                 </button>
               </li>
             )) : (
-              <li className="combobox-empty">Natija topilmadi</li>
+              !searching && !(onSearch && query.trim().length > 0 && query.trim().length < minSearchLength) && (
+                <li className="combobox-empty">{onSearch && !query.trim() ? 'F.I.Sh, INN/STIR, JSHSHIR, passport, kompaniya yoki email kiriting' : 'Natija topilmadi'}</li>
+              )
             )}
           </ul>
         )}

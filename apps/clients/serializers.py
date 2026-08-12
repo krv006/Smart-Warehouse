@@ -96,6 +96,7 @@ class ClientListSerializer(ModelSerializer):
     class Meta:
         model  = Client
         fields = ('id', 'full_name', 'company_name', 'client_type', 'phone', 'inn',
+                  'pinfl', 'passport_number', 'director_jshshr', 'director_fish',
                   'is_active', 'created_at')
 
     def to_representation(self, instance):
@@ -103,4 +104,13 @@ class ClientListSerializer(ModelSerializer):
         data['full_name'] = decrypt(instance.full_name)
         data['phone'] = decrypt(instance.phone)
         data['inn'] = decrypt(instance.inn)
+        data['pinfl'] = decrypt(instance.pinfl)
+        data['passport_number'] = decrypt(instance.passport_number)
+        data['director_jshshr'] = decrypt(instance.director_jshshr)
+        data['director_fish'] = decrypt(instance.director_fish)
+        if data.get('client_type') == Client.INDIVIDUAL:
+            parts = [decrypt(instance.last_name), decrypt(instance.first_name), decrypt(instance.middle_name)]
+            combined = ' '.join(part for part in parts if part).strip()
+            if combined:
+                data['full_name'] = combined
         return data
