@@ -45,7 +45,6 @@ referencing==0.37.0
 requests==2.34.2
 rpds-py==2026.6.3
 six==1.17.0
--e file:///Users/xazratbek/programming/Smart-Warehouse
 sqlparse==0.5.5
 typing-extensions==4.16.0
 tzdata==2026.3
