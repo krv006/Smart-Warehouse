@@ -2513,6 +2513,90 @@ function importTypeLabel(row) {
   return 'Mustaqil'
 }
 
+function importBatchKey(row) {
+  if (row.import_batch) return `batch:${row.import_batch}`
+  if (row.contract_number && row.contract_date) {
+    return `contract:${row.contract_number}|${row.contract_date}|${row.supplier || ''}`
+  }
+  return null
+}
+
+function belongsToSameImportBatch(a, b) {
+  if (a.zakaz_type === 'backorder' || b.zakaz_type === 'backorder') return false
+  if (a.order || b.order) return false
+  const keyA = importBatchKey(a)
+  const keyB = importBatchKey(b)
+  return Boolean(keyA && keyB && keyA === keyB)
+}
+
+function buildGroupedImportRow(primary, items) {
+  const quantity = items.reduce((sum, row) => sum + (Number(row.quantity) || 0), 0)
+  const received_qty = items.reduce((sum, row) => sum + (Number(row.received_qty) || 0), 0)
+  const hasTotals = items.every((row) => row.total != null)
+  const total = hasTotals ? items.reduce((sum, row) => sum + Number(row.total || 0), 0) : null
+  const paid_amount = items.reduce((sum, row) => sum + Number(row.paid_amount || 0), 0)
+  const names = items.map((row) => row.product_name).filter(Boolean)
+  const paymentStatuses = [...new Set(items.map((row) => row.payment_status).filter(Boolean))]
+  const statusValues = [...new Set(items.map((row) => row.status).filter(Boolean))]
+  const payment_status = paymentStatuses.length === 1 ? paymentStatuses[0] : 'mixed'
+  const status = statusValues.length === 1 ? statusValues[0] : 'mixed'
+  const status_display = statusValues.length === 1
+    ? (items[0].status_display || status)
+    : 'Aralash'
+  const ids = items.map((row) => row.id).sort((a, b) => a - b)
+  return {
+    ...primary,
+    id: primary.id,
+    _grouped: true,
+    _items: items,
+    _groupIds: ids,
+    quantity,
+    received_qty,
+    total,
+    paid_amount,
+    payment_status,
+    status,
+    status_display,
+    product_name: names.length > 1 ? `${names.length} ta mahsulot` : primary.product_name,
+    _productNames: names,
+    _idLabel: ids.length > 1 ? `${ids[0]}–${ids[ids.length - 1]}` : String(primary.id),
+  }
+}
+
+function groupImportRows(rawRows) {
+  const result = []
+  const used = new Set()
+  for (const row of rawRows) {
+    if (used.has(row.id)) continue
+    const cluster = [row]
+    used.add(row.id)
+    for (const other of rawRows) {
+      if (used.has(other.id)) continue
+      if (belongsToSameImportBatch(row, other)) {
+        cluster.push(other)
+        used.add(other.id)
+      }
+    }
+    cluster.sort((a, b) => a.id - b.id)
+    result.push(cluster.length === 1 ? cluster[0] : buildGroupedImportRow(cluster[0], cluster))
+  }
+  return result
+}
+
+function importPaymentLabel(row) {
+  if (row.payment_status === 'mixed') {
+    return { label: 'Aralash', tone: 'neutral' }
+  }
+  const meta = IMPORT_PAYMENT_BADGES[row.payment_status] || {
+    label: row.payment_status_display || row.payment_status || '—',
+    tone: 'neutral',
+  }
+  if (row.payment_status === 'partial' && Number(row.paid_amount) > 0) {
+    return { ...meta, label: `Qisman · ${money(row.paid_amount)} ${row.currency || 'UZS'}` }
+  }
+  return meta
+}
+
 function getGridColumns(title, session, { renderStatus } = {}) {
   const showPrices = can(session, 'prices_view')
   if (title === 'Mijozlar') {
@@ -2539,8 +2623,12 @@ function getGridColumns(title, session, { renderStatus } = {}) {
   if (title === 'Import') {
     const showPrices = can(session, 'prices_view')
     return [
-      { key: 'id', label: 'ID', sortable: true, className: 'col-id', render: (row) => row.id },
-      { key: 'product', label: 'Mahsulot', sortable: true, className: 'col-product', exportValue: (row) => rowTitle(title, row), render: (row) => tableCellText(rowTitle(title, row)) },
+      { key: 'id', label: 'ID', sortable: true, className: 'col-id', render: (row) => row._idLabel || row.id },
+      { key: 'product', label: 'Mahsulot', sortable: true, className: 'col-product', exportValue: (row) => rowTitle(title, row), render: (row) => (
+        row._grouped
+          ? tableCellText(row.product_name, row._productNames?.join('\n'))
+          : tableCellText(rowTitle(title, row))
+      ) },
       { key: 'type', label: 'Tur', className: 'col-type', render: (row) => (
         <StatusBadge status={row.zakaz_type || 'manual'} label={importTypeLabel(row)} tone="neutral" />
       ) },
@@ -2551,7 +2639,7 @@ function getGridColumns(title, session, { renderStatus } = {}) {
         return tableCellText(`${money(row.total)} ${row.currency || 'UZS'}`)
       } },
       { key: 'payment', label: 'To‘lov', className: 'col-pay', render: (row) => {
-        const meta = IMPORT_PAYMENT_BADGES[row.payment_status] || { label: row.payment_status_display || row.payment_status || '—', tone: 'neutral' }
+        const meta = importPaymentLabel(row)
         return <StatusBadge status={row.payment_status} label={meta.label} tone={meta.tone} />
       } },
       { key: 'received', label: 'Qabul', className: 'col-num', render: (row) => row.received_qty ?? 0 },
@@ -2559,6 +2647,9 @@ function getGridColumns(title, session, { renderStatus } = {}) {
       { key: 'expected_date', label: 'Kutil.', sortable: true, className: 'col-date', render: (row) => formatDateUz(row.expected_date) },
       { key: 'status', label: 'Holati', sortable: true, className: 'col-status', render: (row) => {
         if (renderStatus) return renderStatus(row)
+        if (row.status === 'mixed') {
+          return <StatusBadge status="mixed" label="Aralash" tone="neutral" />
+        }
         const meta = ORDER_STATUS_BADGES[row.status] || { label: row.status_display || row.status, tone: 'neutral' }
         return <StatusBadge status={row.status} label={meta.label} tone={meta.tone} />
       } },
@@ -2738,14 +2829,24 @@ function ProductContractsModal({ product, rows, close, onViewAll, onViewDetail }
 }
 
 function ImportHistoryModal({ item, close }) {
-  const history = item?.history || []
+  const batchEntries = item?._batchHistory || null
+  const history = batchEntries
+    ? batchEntries.flatMap((entry) => (entry.history || []).map((h) => ({
+      ...h,
+      _product: entry.product_name,
+      _zakazId: entry.id,
+    })))
+    : (item?.history || [])
+  const title = item?._grouped
+    ? `${item._items?.length || item._groupIds?.length || ''} ta mahsulot — import tarixi`
+    : (item?.product_name || `Import #${item?.id}`)
   return (
     <div className="modal-backdrop" role="presentation">
       <div className="editor import-history-modal">
         <div className="editor-head">
           <div>
             <p className="eyebrow">IMPORT TARIXI</p>
-            <h3>{item?.product_name || `Import #${item?.id}`}</h3>
+            <h3>{title}</h3>
           </div>
           <button type="button" className="icon-button" onClick={close} aria-label="Yopish"><X size={20} /></button>
         </div>
@@ -2754,8 +2855,9 @@ function ImportHistoryModal({ item, close }) {
         ) : (
           <ul className="import-history-list">
             {history.map((entry) => (
-              <li key={entry.id}>
+              <li key={`${entry._zakazId || item?.id}-${entry.id}`}>
                 <div>
+                  {entry._product && <small className="import-history-product">{entry._product}</small>}
                   <b>{entry.action_display || entry.action}</b>
                   {entry.new_status && <small>{entry.old_status || '—'} → {entry.new_status}</small>}
                   {entry.asos && <p>{entry.asos}</p>}
@@ -2899,15 +3001,28 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
     else if (title === 'Shartnomalar') setContractDetailId(row.id)
   }
 
-  const selectedRows = useMemo(
-    () => rows.filter((row) => selectedIds.includes(row.id)),
-    [rows, selectedIds],
+  const displayRows = useMemo(
+    () => (title === 'Import' ? groupImportRows(rows) : rows),
+    [title, rows],
   )
+
+  const selectedRows = useMemo(() => {
+    if (title !== 'Import') {
+      return rows.filter((row) => selectedIds.includes(row.id))
+    }
+    const expanded = []
+    for (const row of displayRows) {
+      if (!selectedIds.includes(row.id)) continue
+      if (row._grouped) expanded.push(...row._items)
+      else expanded.push(row)
+    }
+    return expanded
+  }, [rows, displayRows, selectedIds, title])
 
   const gridColumns = useMemo(() => getGridColumns(title, session, {
     renderStatus: (row) => {
       if (title === 'Import' && can(session, 'order_status_manage')) {
-        const locked = ['received', 'cancelled'].includes(row.status)
+        const locked = ['received', 'cancelled'].includes(row.status) || row.status === 'mixed'
         const transitions = {
           new: ['new', 'confirmed', 'cancelled'],
           confirmed: ['confirmed', 'ordered', 'cancelled'],
@@ -2927,7 +3042,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
             disabled={locked}
             onChange={(next) => {
               if (next === row.status) return
-              setStatusChange({ mode: 'import', rows: [row], targetStatus: next })
+              setStatusChange({ mode: 'import', rows: row._grouped ? row._items : [row], targetStatus: next })
             }}
           />
         )
@@ -2977,8 +3092,15 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
   const openImportHistory = async (row) => {
     setOpening(true)
     try {
-      const detail = await api.retrieve('/orders/zakaz/', row.id)
-      setImportHistory(detail)
+      if (row._grouped && row._groupIds?.length) {
+        const items = await Promise.all(
+          row._groupIds.map((id) => api.retrieve('/orders/zakaz/', id)),
+        )
+        setImportHistory({ ...row, _batchHistory: items })
+      } else {
+        const detail = await api.retrieve('/orders/zakaz/', row.id)
+        setImportHistory(detail)
+      }
     } catch (err) {
       notify(err.message)
     } finally {
@@ -3022,7 +3144,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
       </div>
       <section className="data-panel">
         <div className="panel-head">
-          <div><p className="eyebrow">RO‘YXAT</p><h3>{useGrid ? totalCount : rows.length} ta yozuv</h3></div>
+          <div><p className="eyebrow">RO‘YXAT</p><h3>{title === 'Import' && useGrid ? `${displayRows.length} ta import · ${totalCount} qator` : `${useGrid ? totalCount : rows.length} ta yozuv`}</h3></div>
           <div className="panel-head-actions">
             {useGrid && <ListFiltersPanel title={title} filters={listFilters} onChange={setListFilters} />}
             <form className="resource-search" onSubmit={handleSearch}>
@@ -3049,7 +3171,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
             <DataTable
               wrapClassName={title === 'Import' ? 'data-table-wrap--import' : ''}
               columns={gridColumns}
-              rows={rows}
+              rows={displayRows}
               sortKey={sortKey}
               sortDir={sortDir}
               onSort={handleSort}
@@ -3720,6 +3842,7 @@ const emptyManualImportLine = () => ({
 
 const emptyImportRow = () => ({
   key: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+  zakazId: null,
   source: 'existing',
   product: '',
   quantity: '1',
@@ -3727,14 +3850,27 @@ const emptyImportRow = () => ({
   manual: emptyManualImportLine(),
 })
 
+const zakazToImportRow = (zakaz) => ({
+  key: `z-${zakaz.id}`,
+  zakazId: zakaz.id,
+  source: 'existing',
+  product: String(zakaz.product),
+  quantity: String(zakaz.quantity),
+  unit_price: zakaz.unit_price != null ? String(zakaz.unit_price) : '',
+  manual: emptyManualImportLine(),
+})
+
 function ZakazEditor({ close, done, notify, item = null, session }) {
   const showPrices = can(session, 'prices_manage')
+  const showPayment = showPrices || can(session, 'cash_manage')
   const isManagement = can(session, 'order_status_manage')
   const isBackorder = item?.zakaz_type === 'backorder'
   const isNew = !item?.id
   const productLocked = Boolean(item?.order_contract)
+  const canMultiLine = !isBackorder && !productLocked
   const [products, setProducts] = useState([])
   const [saving, setSaving] = useState(false)
+  const [batchLoading, setBatchLoading] = useState(Boolean(item?.id && canMultiLine))
   const [importRows, setImportRows] = useState([emptyImportRow()])
   const [form, setForm] = useState(() => ({
     product: item?.product || '',
@@ -3758,6 +3894,48 @@ function ZakazEditor({ close, done, notify, item = null, session }) {
   useEffect(() => {
     api.products({ page_size: 500 }).then((data) => setProducts(list(data))).catch((err) => notify(err.message))
   }, [notify])
+
+  useEffect(() => {
+    if (!item?.id || !canMultiLine) {
+      setBatchLoading(false)
+      return
+    }
+    let cancelled = false
+    api.zakazBatch(item.id)
+      .then((data) => {
+        if (cancelled) return
+        const items = data?.items?.length ? data.items : [item]
+        setImportRows(items.map(zakazToImportRow))
+        const anchor = items[0] || item
+        const batchPaid = items.reduce((sum, row) => sum + Number(row.paid_amount || 0), 0)
+        setForm((prev) => ({
+          ...prev,
+          product: anchor.product || '',
+          quantity: anchor.quantity || '1',
+          received_qty: anchor.received_qty || '0',
+          unit_price: anchor.unit_price || '',
+          currency: anchor.currency || 'UZS',
+          supplier: anchor.supplier || '',
+          status: anchor.status || 'new',
+          payment_status: anchor.payment_status || 'unpaid',
+          paid_amount: anchor.payment_status === 'partial' && batchPaid > 0
+            ? String(batchPaid)
+            : (anchor.paid_amount || ''),
+          contract_number: anchor.contract_number || '',
+          contract_date: anchor.contract_date || todayValue(),
+          faktura: anchor.faktura || '',
+          expected_date: anchor.expected_date || '',
+          warehouse_location: anchor.warehouse_location || '',
+          asos: anchor.asos || '',
+          comment: anchor.comment || '',
+        }))
+      })
+      .catch((err) => notify(err.message))
+      .finally(() => {
+        if (!cancelled) setBatchLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [item, canMultiLine, notify])
 
   const updateImportRow = (index, patch) => {
     setImportRows((rows) => rows.map((row, i) => {
@@ -3834,7 +4012,7 @@ function ZakazEditor({ close, done, notify, item = null, session }) {
     }
   }
 
-  const importPaymentFields = showPrices && !isBackorder && (
+  const importPaymentFields = showPayment && !isBackorder && (
     <>
       <label>Valyuta<select value={form.currency} onChange={(event) => setForm({ ...form, currency: event.target.value })}><option value="UZS">UZS</option><option value="USD">USD</option></select></label>
       <label>To‘lov statusi
@@ -3873,57 +4051,117 @@ function ZakazEditor({ close, done, notify, item = null, session }) {
     </>
   )
 
+  const buildCommonPayload = () => Object.fromEntries(
+    Object.entries(form).filter(([key, value]) => !['product', 'quantity', 'unit_price', 'received_qty'].includes(key) && value !== '' && value !== null),
+  )
+
+  const applyPaymentPayload = (payload) => {
+    if (!showPayment) {
+      delete payload.unit_price
+      delete payload.currency
+      delete payload.payment_status
+      delete payload.paid_amount
+      if (payload.new_product) {
+        delete payload.new_product.purchase_price
+        delete payload.new_product.delivery_price
+      }
+      return payload
+    }
+    if (payload.payment_status === 'partial') {
+      payload.paid_amount = Number(form.paid_amount)
+    } else {
+      delete payload.paid_amount
+    }
+    return payload
+  }
+
   const submit = async (event) => {
     event.preventDefault()
     setSaving(true)
     try {
-      if (isNew && !isBackorder && !productLocked) {
-        validateImportRows()
-        if (showPrices && form.payment_status === 'partial' && (!form.paid_amount || Number(form.paid_amount) <= 0)) {
-          throw new Error('Qisman to\'lov uchun summa kiriting.')
-        }
-        const common = Object.fromEntries(
-          Object.entries(form).filter(([key, value]) => !['product', 'quantity', 'unit_price', 'received_qty'].includes(key) && value !== '' && value !== null),
-        )
-        if (importRows.length === 1) {
-          const row = importRows[0]
-          const payload = { ...common }
-          if (row.source === 'new') {
-            payload.new_product = buildNewProductPayload(row.manual)
-            payload.quantity = Number(row.manual.quantity || row.quantity || 1)
-            if (showPrices) payload.unit_price = Number(row.manual.unit_price || row.unit_price || 0)
-          } else {
-            payload.product = Number(row.product)
-            payload.quantity = Number(row.quantity || 1)
-            if (showPrices) payload.unit_price = Number(row.unit_price || 0)
+      if (canMultiLine && (isNew || importRows.some((row) => row.zakazId))) {
+        if (isNew) {
+          validateImportRows()
+          if (showPayment && form.payment_status === 'partial' && (!form.paid_amount || Number(form.paid_amount) <= 0)) {
+            throw new Error('Qisman to\'lov uchun summa kiriting.')
           }
-          if (showPrices && form.payment_status === 'partial') {
-            payload.paid_amount = Number(form.paid_amount)
-          }
-          if (!showPrices) {
-            delete payload.unit_price
-            delete payload.currency
-            delete payload.payment_status
-            if (payload.new_product) {
-              delete payload.new_product.purchase_price
-              delete payload.new_product.delivery_price
-            }
-          }
-          await api.create('/orders/zakaz/', payload)
-        } else {
           const bulkPayload = {
-            supplier: common.supplier,
-            expected_date: common.expected_date || undefined,
-            contract_number: common.contract_number,
-            contract_date: common.contract_date || undefined,
+            ...buildCommonPayload(),
             items: importRows.map((row) => buildImportItem(row)),
+          }
+          if (showPayment) {
+            bulkPayload.currency = form.currency
+            bulkPayload.payment_status = form.payment_status
+            if (form.payment_status === 'partial') {
+              bulkPayload.paid_amount = Number(form.paid_amount)
+            }
           }
           Object.keys(bulkPayload).forEach((key) => {
             if (bulkPayload[key] === undefined || bulkPayload[key] === '') delete bulkPayload[key]
           })
+          applyPaymentPayload(bulkPayload)
           await api.zakazBulk(bulkPayload)
+          notify('Import yaratildi.', 'success')
+          done()
+          return
         }
-        notify('Import yaratildi.', 'success')
+
+        if (showPayment && form.payment_status === 'partial' && (!form.paid_amount || Number(form.paid_amount) <= 0)) {
+          throw new Error('Qisman to\'lov uchun summa kiriting.')
+        }
+        validateImportRows()
+        const common = buildCommonPayload()
+        if (common.product) delete common.product
+        if (common.quantity) delete common.quantity
+        if (common.unit_price) delete common.unit_price
+        if (common.received_qty) delete common.received_qty
+        if (common.paid_amount) common.paid_amount = Number(common.paid_amount)
+        const statusPayload = {}
+        if (isManagement && form.status !== item.status) {
+          statusPayload.status = form.status
+          statusPayload.asos = form.asos
+        }
+        const lineTotals = importRows.map((row) => {
+          const price = row.source === 'new' ? row.manual.unit_price : row.unit_price
+          const qty = row.source === 'new' ? row.manual.quantity : row.quantity
+          return Number(price || 0) * Number(qty || 0)
+        })
+        const grandTotal = lineTotals.reduce((sum, value) => sum + value, 0)
+        for (const [index, row] of importRows.entries()) {
+          const rowPayload = {
+            quantity: Number(row.source === 'new' ? row.manual.quantity : row.quantity),
+          }
+          if (showPrices) {
+            rowPayload.unit_price = Number(row.source === 'new' ? row.manual.unit_price : row.unit_price)
+          }
+          if (showPayment) {
+            rowPayload.currency = form.currency
+            rowPayload.payment_status = form.payment_status
+            if (form.payment_status === 'partial' && grandTotal > 0) {
+              rowPayload.paid_amount = Math.round((Number(form.paid_amount) * lineTotals[index] / grandTotal) * 100) / 100
+            }
+          }
+          if (row.zakazId === item.id && isManagement) {
+            rowPayload.received_qty = Number(form.received_qty || 0)
+          }
+          if (row.zakazId) {
+            const patchPayload = { ...common, ...rowPayload, ...statusPayload }
+            if (row.zakazId !== item.id) {
+              delete patchPayload.status
+              delete patchPayload.asos
+            }
+            if (patchPayload.payment_status !== 'partial') delete patchPayload.paid_amount
+            await api.update('/orders/zakaz/', row.zakazId, patchPayload)
+          } else {
+            const createPayload = applyPaymentPayload({
+              ...common,
+              ...buildImportItem(row),
+              ...rowPayload,
+            })
+            await api.create('/orders/zakaz/', createPayload)
+          }
+        }
+        notify('Import yangilandi.', 'success')
         done()
         return
       }
@@ -3959,12 +4197,16 @@ function ZakazEditor({ close, done, notify, item = null, session }) {
       <form className="editor import-editor" onSubmit={submit}>
         <div className="editor-head"><div><p className="eyebrow">{item?.id ? 'IMPORT TAHRIRI' : 'YANGI IMPORT'}</p><h3>Yetkazuvchidan import</h3></div><button type="button" className="icon-button" onClick={close} aria-label="Yopish"><X size={20} /></button></div>
         <div className="form-grid">
-          {isNew && !isBackorder && !productLocked ? (
+          {canMultiLine && (isNew || importRows.some((row) => row.zakazId)) ? (
             <div className="full-width import-lines">
+              {batchLoading ? (
+                <p className="muted">Mahsulot qatorlari yuklanmoqda…</p>
+              ) : (
+              <>
               <div className="import-lines-head">
                 <div>
                   <p className="eyebrow">MAHSULOTLAR</p>
-                  <p className="muted import-lines-hint">Ro‘yxatdagi «raqam» — mahsulot identifikatori (seriya), «Miqdor» esa import soni.</p>
+                  <p className="muted import-lines-hint">Ro‘yxatdagi «raqam» — mahsulot identifikatori (seriya), «Miqdor» esa import soni. Har qator alohida: ombordan yoki yangi mahsulot.</p>
                 </div>
                 <button type="button" className="secondary-button" onClick={addImportRow}>
                   <Plus size={16} />Qator qo‘shish
@@ -3977,6 +4219,7 @@ function ZakazEditor({ close, done, notify, item = null, session }) {
                       Manba
                       <select
                         value={row.source}
+                        disabled={Boolean(row.zakazId)}
                         onChange={(e) => updateImportRow(index, {
                           source: e.target.value,
                           product: '',
@@ -3987,7 +4230,7 @@ function ZakazEditor({ close, done, notify, item = null, session }) {
                         <option value="new">Yangi mahsulot</option>
                       </select>
                     </label>
-                    {importRows.length > 1 && (
+                    {importRows.length > 1 && !row.zakazId && (
                       <button type="button" className="icon-button" aria-label="Qatorni o‘chirish" onClick={() => removeImportRow(index)}>
                         <X size={18} />
                       </button>
@@ -4038,6 +4281,8 @@ function ZakazEditor({ close, done, notify, item = null, session }) {
                   )}
                 </div>
               ))}
+              </>
+              )}
             </div>
           ) : (
             <div className={`import-top-row${isManagement ? ' has-received' : ''}`}>
@@ -4063,15 +4308,28 @@ function ZakazEditor({ close, done, notify, item = null, session }) {
             </div>
           )}
 
-          {showPrices && !isBackorder && (item?.id || productLocked) && <>
+          {showPayment && !isBackorder && (item?.id || productLocked) && !canMultiLine && <>
             <label>Narx<input required={!item?.id && showPrices} min="0" step="0.01" type="number" value={form.unit_price} onChange={(event) => setForm({ ...form, unit_price: event.target.value })} /></label>
             {importPaymentFields}
           </>}
-          {showPrices && !isBackorder && isNew && !productLocked && importPaymentFields}
+          {showPayment && !isBackorder && isNew && canMultiLine && importPaymentFields}
+          {showPayment && !isBackorder && item?.id && canMultiLine && importPaymentFields}
+          {!showPayment && canMultiLine && !isBackorder && (
+            <p className="muted full-width import-payment-hint">To‘lov holati (qisman / to‘langan) faqat boshqaruv yoki buxgalter tomonidan belgilanadi.</p>
+          )}
           {form.currency === 'USD' && showPrices && !isBackorder && (
             <div className="full-width"><FxRatePanel session={session} notify={notify} compact /></div>
           )}
-          {isManagement && <label>Status<select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value })}><option value="new">Yangi</option><option value="confirmed">Tasdiqlandi</option><option value="ordered">Etkazuvchiga yuborildi</option><option value="received">Qabul qilindi</option><option value="cancelled">Bekor qilindi</option></select></label>}
+          {isManagement && (
+            canMultiLine && (isNew || importRows.some((row) => row.zakazId)) ? (
+              <>
+                <label className="field-received">Qabul qilingan (asosiy qator)<input min="0" type="number" value={form.received_qty} onChange={(event) => setForm({ ...form, received_qty: event.target.value })} /></label>
+                <label>Status<select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value })}><option value="new">Yangi</option><option value="confirmed">Tasdiqlandi</option><option value="ordered">Etkazuvchiga yuborildi</option><option value="received">Qabul qilindi</option><option value="cancelled">Bekor qilindi</option></select></label>
+              </>
+            ) : (
+              <label>Status<select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value })}><option value="new">Yangi</option><option value="confirmed">Tasdiqlandi</option><option value="ordered">Etkazuvchiga yuborildi</option><option value="received">Qabul qilindi</option><option value="cancelled">Bekor qilindi</option></select></label>
+            )
+          )}
           <label>Yetkazuvchi<input value={form.supplier} onChange={(event) => setForm({ ...form, supplier: event.target.value })} /></label>
           <label>Shartnoma raqami<input value={form.contract_number} onChange={(event) => setForm({ ...form, contract_number: event.target.value.replace(/[^\d/]/g, '') })} placeholder="12/1108" /></label>
           <label>Shartnoma sanasi<input type="date" value={form.contract_date} onChange={(event) => setForm({ ...form, contract_date: event.target.value })} /></label>

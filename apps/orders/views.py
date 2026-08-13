@@ -2,6 +2,7 @@ from apps.common.querysets import apply_date_range
 import json
 from django.utils import timezone
 from django.utils.dateparse import parse_date
+from django.db.models import Q
 from drf_spectacular.utils import extend_schema, extend_schema_view
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
@@ -450,6 +451,7 @@ class ZakazViewSet(CreateModelMixin, ListModelMixin,
         'product':         ['exact'],
         'order':           ['exact'],
         'contract_number': ['exact'],
+        'contract_date':   ['exact'],
     }
     search_fields      = ('product__name', 'product__serial_number',
                           'supplier', 'contract_number', 'faktura', 'comment')
@@ -500,6 +502,44 @@ class ZakazViewSet(CreateModelMixin, ListModelMixin,
             ZakazBulkCreateSerializer(context={'request': request}).to_representation(zakazlar),
             status=201,
         )
+
+    @extend_schema(
+        summary="Import guruhi (bir bulk yaratishdagi barcha qatorlar)",
+        description=(
+            "Bir xil shartnoma (contract_number + contract_date + supplier) "
+            "bilan yaratilgan manual import qatorlarini qaytaradi. Tahrir "
+            "modali barcha mahsulotlarni ko'rsatish uchun ishlatiladi."
+        ),
+        tags=["Zakaz"],
+    )
+    @action(detail=True, methods=['get'])
+    def batch(self, request, pk=None):
+        zakaz = self.get_object()
+        serializer_class = self.get_serializer_class()
+        if zakaz.zakaz_type != Zakaz.MANUAL or zakaz.order_id:
+            return Response({'items': [serializer_class(zakaz, context={'request': request}).data]})
+
+        siblings = (Zakaz.objects
+                    .filter(zakaz_type=Zakaz.MANUAL)
+                    .exclude(status=Zakaz.CANCELLED)
+                    .select_related('product', 'created_by', 'order')
+                    .prefetch_related('history__changed_by')
+                    .order_by('id'))
+
+        if zakaz.import_batch:
+            siblings = siblings.filter(import_batch=zakaz.import_batch)
+        elif zakaz.contract_number:
+            siblings = siblings.filter(contract_number=zakaz.contract_number,
+                                       contract_date=zakaz.contract_date)
+            if zakaz.supplier:
+                siblings = siblings.filter(supplier=zakaz.supplier)
+            else:
+                siblings = siblings.filter(Q(supplier__isnull=True) | Q(supplier=''))
+        else:
+            siblings = Zakaz.objects.filter(pk=zakaz.pk)
+
+        data = serializer_class(siblings, many=True, context={'request': request}).data
+        return Response({'items': data})
 
 
 # ── Mahsulot shartnomalari reestri ───────────────────────────────────────────

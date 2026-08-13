@@ -230,6 +230,7 @@ export const api = {
   order: (id) => request(`/orders/${id}/`),
   zakaz: (params = {}) => request(`/orders/zakaz/${toQuery({ page_size: 30, ...params })}`),
   zakazBulk: (payload) => request('/orders/zakaz/bulk/', { method: 'POST', body: JSON.stringify(payload) }),
+  zakazBatch: (id) => request(`/orders/zakaz/${id}/batch/`),
   contracts: (params = {}) => request(`/orders/contracts/${toQuery({ page_size: 30, ...params })}`),
   productContracts: (id) => request(`/warehouse/products/${id}/contracts/`),
   categories: (params = {}) => request(`/warehouse/categories/${toQuery({ page_size: 30, ...params })}`),

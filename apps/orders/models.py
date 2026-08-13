@@ -2,7 +2,7 @@ from django.conf import settings
 from django.db import models, transaction
 from django.db.models import (
     CharField, ForeignKey, CASCADE, PROTECT, SET_NULL,
-    PositiveIntegerField, DecimalField, DateField, DateTimeField, TextField, FileField,
+    PositiveIntegerField, DecimalField, DateField, DateTimeField, TextField, FileField, UUIDField,
 )
 from django.db.models import F
 from django.utils import timezone
@@ -583,6 +583,8 @@ class Zakaz(TimeStampedModel):
                                     null=True, blank=True, related_name='zakazlar',
                                     verbose_name='Yaratuvchi')
     comment            = TextField(blank=True, null=True)
+    import_batch       = UUIDField(null=True, blank=True, db_index=True,
+                                   help_text='Bir bulk importdagi qatorlarni bog‘laydi')
 
     class Meta:
         db_table            = 'orders_zakaz'
