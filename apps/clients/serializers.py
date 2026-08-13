@@ -1,7 +1,15 @@
-from rest_framework.serializers import ModelSerializer
+from django.core.exceptions import ValidationError as DjangoValidationError
+from rest_framework.serializers import ModelSerializer, ValidationError
 
 from apps.clients.encryption import encrypt, decrypt
 from apps.clients.models import Client
+from apps.common.validators import validate_jshshir
+
+_ENCRYPT_FIELDS = (
+    'full_name', 'first_name', 'last_name', 'middle_name',
+    'pinfl', 'inn', 'passport_number', 'phone',
+    'director_jshshr', 'director_fish', 'bank_account',
+)
 
 
 class ClientSerializer(ModelSerializer):
@@ -42,38 +50,35 @@ class ClientSerializer(ModelSerializer):
                 data['full_name'] = combined
         return data
 
+    def _encrypt_field_values(self, raw):
+        for field in _ENCRYPT_FIELDS:
+            if field in raw and raw.get(field):
+                raw[field] = encrypt(raw[field])
+
+    def _validate_plaintext_fields(self, raw):
+        client_type = raw.get(
+            'client_type',
+            getattr(self.instance, 'client_type', Client.INDIVIDUAL),
+        )
+        try:
+            if client_type == Client.INDIVIDUAL:
+                if 'pinfl' in raw:
+                    validate_jshshir(raw.get('pinfl') or '', required=not self.instance)
+                elif not self.instance:
+                    validate_jshshir('', required=True)
+            elif client_type == Client.LEGAL and raw.get('director_jshshr'):
+                validate_jshshir(raw['director_jshshr'])
+        except DjangoValidationError as exc:
+            raise ValidationError(list(exc.messages)) from exc
+
     def to_internal_value(self, data):
         raw = super().to_internal_value(data)
-        if 'full_name' in raw and raw.get('full_name'):
-            raw['full_name'] = encrypt(raw['full_name'])
-        if 'first_name' in raw and raw.get('first_name'):
-            raw['first_name'] = encrypt(raw['first_name'])
-        if 'last_name' in raw and raw.get('last_name'):
-            raw['last_name'] = encrypt(raw['last_name'])
-        if 'middle_name' in raw and raw.get('middle_name'):
-            raw['middle_name'] = encrypt(raw['middle_name'])
-        if 'pinfl' in raw and raw.get('pinfl'):
-            raw['pinfl'] = encrypt(raw['pinfl'])
-        if 'inn' in raw and raw.get('inn'):
-            raw['inn'] = encrypt(raw['inn'])
-        if 'passport_number' in raw and raw.get('passport_number'):
-            raw['passport_number'] = encrypt(raw['passport_number'])
-        if 'phone' in raw and raw.get('phone'):
-            raw['phone'] = encrypt(raw['phone'])
-        if 'director_jshshr' in raw and raw.get('director_jshshr'):
-            raw['director_jshshr'] = encrypt(raw['director_jshshr'])
-        if 'director_fish' in raw and raw.get('director_fish'):
-            raw['director_fish'] = encrypt(raw['director_fish'])
-        if 'bank_account' in raw and raw.get('bank_account'):
-            raw['bank_account'] = encrypt(raw['bank_account'])
 
         if raw.get('client_type') == Client.INDIVIDUAL:
             parts = [raw.get('last_name') or '', raw.get('first_name') or '', raw.get('middle_name') or '']
             combined = ' '.join(part for part in parts if part).strip()
             if combined and not raw.get('full_name'):
                 raw['full_name'] = combined
-            if raw.get('full_name'):
-                raw['full_name'] = encrypt(raw['full_name'])
             raw['company_name'] = ''
             raw['inn'] = ''
             raw['director_jshshr'] = ''
@@ -89,6 +94,9 @@ class ClientSerializer(ModelSerializer):
             raw['pinfl'] = ''
             raw['passport_number'] = ''
             raw['full_name'] = ''
+
+        self._validate_plaintext_fields(raw)
+        self._encrypt_field_values(raw)
         return raw
 
 

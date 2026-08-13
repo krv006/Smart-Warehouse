@@ -6,7 +6,7 @@ from rest_framework.serializers import (ModelSerializer, ValidationError,
 
 from apps.invoices.models import ElectronicInvoice, ExecutorType, InvoiceLineItem, VatPercent
 from apps.invoices.services import sync_invoice_contract_registry
-from apps.warehouse.models import Product
+from apps.warehouse.models import Product, ProductUnit
 
 
 class InvoiceLineItemSerializer(ModelSerializer):
@@ -74,6 +74,18 @@ class ElectronicInvoiceSerializer(ModelSerializer):
             raise ValidationError({'executor_client': 'Bajaruvchi korxonani tanlang.'})
         if executor_type == ExecutorType.COMPANY_PROFILE:
             attrs['executor_client'] = None
+        client = attrs.get('client', getattr(self.instance, 'client', None))
+        exec_client = attrs.get('executor_client', getattr(self.instance, 'executor_client', None))
+        if (
+            executor_type == ExecutorType.CLIENT
+            and client
+            and exec_client
+            and client.pk == exec_client.pk
+        ):
+            raise ValidationError({
+                'executor_client': 'Bajaruvchi va buyurtmachi bir xil bo‘lmasin.',
+                'client': 'Bajaruvchi va buyurtmachi bir xil bo‘lmasin.',
+            })
         return attrs
 
     def get_document_type_display(self, obj):
@@ -100,19 +112,15 @@ class ElectronicInvoiceSerializer(ModelSerializer):
     def _apply_product_defaults(self, line_data):
         product = line_data.get('product')
         if isinstance(product, Product):
-            if not line_data.get('product_name'):
-                line_data['product_name'] = product.name
-            if not line_data.get('barcode') and product.barcode:
-                line_data['barcode'] = product.barcode
-            if not line_data.get('identification_code'):
-                line_data['identification_code'] = product.serial_number
-            if not line_data.get('unit'):
-                line_data['unit'] = product.unit
+            line_data['product_name'] = product.name
+            line_data['identification_code'] = product.serial_number or line_data.get('identification_code', '')
+            line_data['barcode'] = product.barcode or line_data.get('barcode', '')
+            line_data['unit'] = product.unit or line_data.get('unit') or ProductUnit.PIECE
             if line_data.get('unit_price') in (None, '', 0):
                 price = product.selling_price or product.delivery_price
                 if price is not None:
                     line_data['unit_price'] = price
-            if line_data.get('vat_percent') in (None, '') and product.vat_percent:
+            if line_data.get('vat_percent') in (None, '', VatPercent.NONE) and product.vat_percent:
                 line_data['vat_percent'] = product.vat_percent
         return line_data
 

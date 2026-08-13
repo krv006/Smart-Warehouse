@@ -1,6 +1,7 @@
 from django.urls import path
 from apps.reports.views import (SalesExportView, StockExportView,
                                  ExpensesExportView, PaymentsExportView,
+                                 ImportsExportView,
                                  FinancialSummaryView, WarehouseReportView,
                                  CashReportView, ExpensesReportView,
                                  TopProductsView, MonthlyTrendView)
@@ -10,6 +11,8 @@ urlpatterns = [
     path('excel/stock/',    StockExportView.as_view(),    name='report-stock-excel'),
     path('excel/expenses/', ExpensesExportView.as_view(), name='report-expenses-excel'),
     path('excel/payments/', PaymentsExportView.as_view(), name='report-payments-excel'),
+    path('excel/kassa/',    PaymentsExportView.as_view(),    name='report-kassa-excel'),
+    path('excel/imports/',  ImportsExportView.as_view(),     name='report-imports-excel'),
     path('summary/',        FinancialSummaryView.as_view(),  name='report-summary'),
     path('warehouse/',      WarehouseReportView.as_view(),   name='report-warehouse'),
     path('cash/',           CashReportView.as_view(),        name='report-cash'),

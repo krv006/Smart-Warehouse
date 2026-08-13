@@ -66,6 +66,9 @@ class Expense(TimeStampedModel):
     comment      = TextField(blank=True, null=True,
                              help_text='"other" toifasida majburiy')
     attachment   = FileField(upload_to='expenses/', null=True, blank=True)
+    zakaz        = ForeignKey('orders.Zakaz', on_delete=SET_NULL,
+                              null=True, blank=True, related_name='expenses',
+                              help_text='Import (zakaz) bo\'yicha avtomatik chiqim')
 
     class Meta:
         db_table = 'expenses_expense'

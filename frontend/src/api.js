@@ -243,6 +243,7 @@ export const api = {
   notificationsMarkAllRead: () => request('/notifications/mark_all_read/', { method: 'POST' }),
   payments: (params = {}) => request(`/cash/payments/${toQuery({ page_size: 30, ...params })}`),
   paymentsSummary: () => request('/cash/payments/summary/'),
+  kassaLedger: (params = {}) => request(`/cash/payments/ledger/${toQuery({ page_size: 25, ...params })}`),
   sales: (params = {}) => request(`/sales/${toQuery({ page_size: 30, ...params })}`),
   salesBulk: (payload) => request('/sales/bulk/', { method: 'POST', body: JSON.stringify(payload) }),
   expenses: (params = {}) => request(`/expenses/expenses/${toQuery({ page_size: 30, ...params })}`),
@@ -270,8 +271,24 @@ export const api = {
   cancelOrder: (id, payload) => request(`/orders/${id}/cancel/`, { method: 'POST', body: JSON.stringify(payload) }),
   createOrderZakaz: (id, payload) => request(`/orders/${id}/create-zakaz/`, { method: 'POST', body: JSON.stringify(payload) }),
   addStock: (id, payload) => request(`/warehouse/products/${id}/add-stock/`, { method: 'POST', body: JSON.stringify(payload) }),
-  exportSales: () => download('/reports/excel/sales/', 'sales.xlsx'),
-  exportStock: () => download('/reports/excel/stock/', 'stock.xlsx'),
-  exportExpenses: () => download('/reports/excel/expenses/', 'expenses.xlsx'),
-  exportPayments: () => download('/reports/excel/payments/', 'payments.xlsx'),
+  exportSales: (params = {}) => download(`/reports/excel/sales/${toQuery(params)}`, 'sotuvlar.xlsx'),
+  exportStock: (params = {}) => download(`/reports/excel/stock/${toQuery(params)}`, 'ombor.xlsx'),
+  exportExpenses: (params = {}) => download(`/reports/excel/expenses/${toQuery(params)}`, 'xarajatlar.xlsx'),
+  exportPayments: (params = {}) => download(`/reports/excel/payments/${toQuery(params)}`, 'kassa.xlsx'),
+  exportKassa: (params = {}) => download(`/reports/excel/kassa/${toQuery(params)}`, 'kassa.xlsx'),
+  exportImports: (params = {}) => download(`/reports/excel/imports/${toQuery(params)}`, 'import.xlsx'),
+  exportReport: (type, params = {}) => {
+    const routes = {
+      sales: ['/reports/excel/sales/', 'sotuvlar'],
+      stock: ['/reports/excel/stock/', 'ombor'],
+      expenses: ['/reports/excel/expenses/', 'xarajatlar'],
+      kassa: ['/reports/excel/kassa/', 'kassa'],
+      payments: ['/reports/excel/payments/', 'kassa'],
+      import: ['/reports/excel/imports/', 'import'],
+    }
+    const [path, prefix] = routes[type] || routes.sales
+    const q = toQuery(params)
+    const suffix = params.date_from || params.date_to || new Date().toISOString().slice(0, 10)
+    return download(`${path}${q}`, `${prefix}_${suffix}.xlsx`)
+  },
 }

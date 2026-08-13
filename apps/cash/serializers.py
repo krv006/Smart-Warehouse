@@ -63,6 +63,7 @@ class PaymentSerializer(ModelSerializer):
             'id', 'source',
             'sale', 'sale_info',
             'order', 'order_info',
+            'zakaz',
             'client', 'client_name',
             'total_amount', 'commission', 'paid_amount',
             'remaining', 'currency', 'due_date',
@@ -72,7 +73,9 @@ class PaymentSerializer(ModelSerializer):
         read_only_fields = ('total_amount', 'commission', 'status', 'created_at')
 
     def get_source(self, obj):
-        """To'lov manbai: sotuv yoki buyurtma."""
+        """To'lov manbai: sotuv, buyurtma yoki import."""
+        if obj.zakaz_id:
+            return 'import'
         if obj.order_id:
             return 'order'
         if obj.sale_id:
@@ -127,14 +130,14 @@ class PaymentSerializer(ModelSerializer):
         return value
 
     def validate(self, attrs):
-        # Yangi to'lov sotuvga YOKI buyurtmaga bog'lanishi shart
         if self.instance is None:
-            if not attrs.get('sale') and not attrs.get('order'):
+            links = sum(bool(attrs.get(k)) for k in ('sale', 'order', 'zakaz'))
+            if links == 0:
                 raise ValidationError(
-                    'To\'lov sotuv (sale) yoki buyurtma (order) ga bog\'lanishi kerak.')
-            if attrs.get('sale') and attrs.get('order'):
+                    'To\'lov sotuv (sale), buyurtma (order) yoki import (zakaz) ga bog\'lanishi kerak.')
+            if links > 1:
                 raise ValidationError(
-                    'To\'lov bir vaqtda ham sotuv, ham buyurtmaga bog\'lana olmaydi.')
+                    'To\'lov bir vaqtda faqat bitta manbaga bog\'lanishi mumkin.')
         return attrs
 
     @transaction.atomic
@@ -189,6 +192,8 @@ class PaymentOperatorSerializer(ModelSerializer):
         read_only_fields = fields
 
     def get_source(self, obj):
+        if obj.zakaz_id:
+            return 'import'
         if obj.order_id:
             return 'order'
         if obj.sale_id:

@@ -98,6 +98,8 @@ export function validateClientFields(form) {
     if (innErr) errors.inn = innErr
     const mfoErr = validateMfo(form.mfo, { required: false })
     if (mfoErr) errors.mfo = mfoErr
+    const jshshirErr = validateJshshir(form.director_jshshr, { required: false })
+    if (jshshirErr) errors.director_jshshr = jshshirErr
   } else {
     if (!(form.full_name || '').trim()) errors.full_name = 'To‘liq ism kiritilishi shart'
     const pinflErr = validateJshshir(form.pinfl, { required: true })
