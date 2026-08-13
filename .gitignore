@@ -182,6 +182,9 @@ db.sqlite3-journal
 frontend/node_modules/
 frontend/dist/
 
+# Local UI sandbox (gitga chiqmasin)
+frontend-v2/
+
 # macOS
 .DS_Store
 

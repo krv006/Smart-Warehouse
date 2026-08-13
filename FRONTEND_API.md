@@ -24,6 +24,7 @@ Production override: `VITE_API_BASE_URL` (masalan `https://api.example.com/api/v
 | 6 | Role, `abilities` va **UI gating** |
 | 7 | Valyuta kursi (backend + `FxRatePanel`) |
 | 8–16 | Modul bo‘yicha batafsil (buyurtma, zakaz, ombor, …) |
+| 9a–9b | Import UI — ro‘yxat sahifasi va `ZakazEditor` (tugma matnlari, maydonlar) |
 | 17 | Hisobotlar va Excel export |
 | 17a | Buyurtmalar — `/invoices/` (batafsil) |
 | 17b | Excel export UI — `ReportExportPanel`, `FilterDateRangeCalendar` |
@@ -326,7 +327,7 @@ Yordamchi kutubxonalar: `lib/utils.js` (`money`, `todayValue`, `formatDateUz`, `
 | Bosh sahifa | `reports`, `monthlyTrend` | `/reports/summary/` | Filtrli dashboard: **Tushum**, **Import chiqim**, **Kassa balansi**, Savdo (`Dashboard` komponenti) |
 | Hisobotlar | `reports`, `expensesSummary`, `paymentsSummary`, `exportReport` | `/reports/*`, `/expenses/summary/`, `/cash/payments/summary/` | Tablar: Moliyaviy, Ombor, Sotuvlar, Xarajatlar, **Excel** (`ReportExportPanel`) |
 | Buyurtmalar | `invoices`, `invoice`, `createInvoice`, `updateInvoice`, `removeInvoice`, `nextContractNumber`, `companyProfile`, `clients` (qidiruv/qo‘shish) | `/invoices/`, `/company-profile/`, `/clients/` | `BuyurtmalarPage` — ro‘yxat, ko‘rish modali, alohida editor sahifalari (§17a) |
-| Import | `zakaz`, `zakazBulk`, `create`, `update` | `/orders/zakaz/`, `/orders/zakaz/bulk/` | Ko‘p qatorli import; `payment_status` / `paid_amount` → kassadan chiqim (§17c); grid ustunlari: To‘lov, Summa |
+| Import | `zakaz`, `zakazBulk`, `create`, `update` | `/orders/zakaz/`, `/orders/zakaz/bulk/` | **`ResourcePage`** + **`ZakazEditor`** — ko‘p qator, Manba dropdown, kassa chiqimi (§9a–9b, §17c); grid: To‘lov, Summa |
 | Shartnomalar | `contracts`, `retrieve` | `/orders/contracts/` | Read-only |
 | Korxona profili | `companyProfile`, `updateCompanyProfile` | `/company-profile/` | Profil dropdown |
 | Ombor | `products`, `create`, `update`, `addStock`, `productContracts` | `/warehouse/products/` | `warehouse_create` ability |
@@ -1572,14 +1573,205 @@ Bir nechta mahsulot uchun zakaz yaratadi. Har bir `items` qatori mavjud `product
 }
 ```
 
-Mahsulot dropdown formati: `{name} · raqam: {serial_number}` — bu identifikator, import miqdori emas (`quantity` alohida maydonda).
+Mahsulot dropdown formati: `{name} · raqam: {serial_number}` — bu identifikator, import miqdori emas (`quantity` alohida maydonda). `productOptionLabel()` (`App.jsx`).
 
-**Frontend (`ZakazEditor`, yangi import):**
+> **Bulk cheklov:** ko‘p qatorli yaratish (`POST /orders/zakaz/bulk/`) faqat `supplier`, `contract_number`, `contract_date`, `expected_date`, `items[]` yuboradi. **`payment_status` / `paid_amount` / `currency` bulk da yuborilmaydi** — to‘lov holati faqat bitta qatorli `POST /orders/zakaz/` da (`importRows.length === 1`). Ko‘p qator + to‘lov holati kerak bo‘lsa, har bir zakazni alohida yarating yoki backend kengaytiring.
 
-- Bir nechta qator: har biri **Ombordan tanlash** yoki **Yangi mahsulot** (`new_product`).
-- 1 ta qator → `POST /orders/zakaz/`; 2+ qator → `POST /orders/zakaz/bulk/`.
-- Ombordan mahsulot tanlanganda **Narx** maydoni avtomatik `purchase_price` dan to‘ldiriladi (`prices_manage` bo‘lsa).
-- `POST /warehouse/products/` — `serial_number` bo‘sh bo‘lsa backend `IMP-{timestamp}` beradi (`apps/warehouse/product_utils.ensure_product_serial_number`).
+---
+
+### 9a. Import ro‘yxat sahifasi UI (`ResourcePage`, path `/import`)
+
+Komponent: `ResourcePage` (`App.jsx`, `title="Import"`). Grid: `GRID_PAGES`, `page_size=25`.
+
+#### Sahifa sarlavhasi
+
+| Element | Matn / xulq |
+|---|---|
+| Eyebrow | `MODUL` |
+| Sarlavha (H1) | `Import` |
+| Asosiy tugma | **`+ Yangi qo‘shish`** — `procurement_manage` bo‘lsa; `ZakazEditor` modali ochiladi (`setEditing({})`) |
+| Panel eyebrow | `RO‘YXAT` |
+| Panel sarlavha | `{N} ta yozuv` (`totalCount`) |
+| Qidiruv | placeholder: **`Qidirish`**; submit → `search` query param |
+
+#### Bulk amallar (`BulkActionsBar`, tanlangan qatorlar)
+
+| Tugma | Matn | Ability | API |
+|---|---|---|---|
+| Eksport | **`Eksport`** + DownloadSimple ikon | — | Frontend CSV (`exportRowsCsv`) |
+| Bulk status | **`Status o‘zgartirish`** | `order_status_manage` | Har tanlangan qator uchun ketma-ket `PATCH /orders/zakaz/{id}/` — `StatusChangeModal` |
+
+#### Grid ustunlari (UI label → maydon)
+
+| Ustun | Label | Maydon / render |
+|---|---|---|
+| ID | `ID` | `id` |
+| Mahsulot | `Mahsulot` | `product_name` |
+| Tur | `Tur` | `zakaz_type`: **`Mustaqil`** (`manual`) yoki **`Backorder`** |
+| Shartnoma | `Shart.` | `contract_number` |
+| Miqdor | `Zak.` | `quantity` |
+| Summa | `Summa` | `total` + `currency` — faqat `prices_view` |
+| To‘lov | `To‘lov` | `payment_status` badge: **`To‘lanmagan`** / **`Qisman`** / **`To‘langan`** |
+| Qabul | `Qabul` | `received_qty` |
+| Yetkazuvchi | `Etkaz.` | `supplier` |
+| Kutilgan sana | `Kutil.` | `expected_date` |
+| Holati | `Holati` | `status` — inline `InlineStatusSelect` (`order_status_manage`) |
+| Yaratuvchi | `Yaratdi` | `created_by_name` |
+
+Sort (`GRID_SORT_FIELDS`): `id`, `product`→`created_at`, `created_at`, `status`, `supplier`, `expected_date`.
+
+#### Qator amallari (Amallar ustuni)
+
+| Tugma | `aria-label` | Vazifa |
+|---|---|---|
+| Tarix | **`Tarix`** | `GET /orders/zakaz/{id}/` → **`ImportHistoryModal`** |
+| Tahrirlash | **`Tahrirlash`** | `ZakazEditor` (mavjud yozuv) — `procurement_manage` |
+
+#### `ImportHistoryModal`
+
+| Element | Matn |
+|---|---|
+| Eyebrow | **`IMPORT TARIXI`** |
+| Sarlavha | `{product_name}` yoki `Import #{id}` |
+| Bo‘sh holat | **`Tarix yozuvlari yo‘q.`** |
+| Har yozuv | `action_display`, `{old_status} → {new_status}`, `asos`, sana/vaqt |
+
+#### Inline status (`InlineStatusSelect`, `StatusChangeModal`)
+
+Faqat **`order_status_manage`**. Ruxsat etilgan o‘tishlar: `new → confirmed → ordered → received` (bekor alohida).
+
+Status label matnlari (`StatusChangeModal.jsx`):
+
+| Kod | UI matn |
+|---|---|
+| `new` | Yangi |
+| `confirmed` | Tasdiqlandi |
+| `ordered` | Etkazuvchiga yuborildi |
+| `received` | Qabul qilindi |
+| `cancelled` | Bekor qilindi |
+
+Bulk modal eyebrow: **`STATUS O‘ZGARTIRISH`**. Majburiy maydonlar status bo‘yicha: `asos`; `confirmed`/`ordered`/`received` da shartnoma; `received` da faktura + qabul miqdori.
+
+Filtr paneli (`ListFiltersPanel`): **status**, **sana oralig‘i** (`date_from`, `date_to`).
+
+---
+
+### 9b. Yangi / tahrir import modali — `ZakazEditor`
+
+Komponent: `ZakazEditor` (`App.jsx`). Modal class: `editor import-editor`.
+
+#### Modal sarlavhasi
+
+| Rejim | Eyebrow | H3 |
+|---|---|---|
+| Yangi | **`YANGI IMPORT`** | **`Yetkazuvchidan import`** |
+| Tahrir | **`IMPORT TAHRIRI`** | **`Yetkazuvchidan import`** |
+| Yopish | `aria-label`: **`Yopish`** | — |
+| Pastki tugmalar | **`Bekor qilish`** / **`Saqlash`** | |
+
+#### Qaysi UI ko‘rinadi? (rejimlar)
+
+| Shart | Ko‘rinish |
+|---|---|
+| Yangi + `zakaz_type !== backorder` + `order_contract` yo‘q | **Ko‘p qatorli** MAHSULOTLAR bloki (§9b.1) |
+| Mavjud yozuv yoki backorder yoki buyurtmadan kelgan (`order_contract`) | **Bitta mahsulot** qatori (select + miqdor; Management da qabul miqdori) |
+| Backorder | Mahsulot select **disabled** (`productLocked`); miqdor faqat Management tahririda |
+
+Ability kalitlari:
+
+| Ability | Ta’sir |
+|---|---|
+| `prices_manage` | Narx, valyuta, to‘lov statusi, yangi mahsulot narxi |
+| `prices_view` | Gridda summa ustuni (editor narx kiritish emas) |
+| `order_status_manage` | Status select, `received_qty` |
+
+#### 9b.1. MAHSULOTLAR bloki (faqat yangi mustaqil import)
+
+| Element | Aniq UI matni |
+|---|---|
+| Bo‘lim eyebrow | **`MAHSULOTLAR`** |
+| Yordamchi matn | **`Ro‘yxatdagi «raqam» — mahsulot identifikatori (seriya), «Miqdor» esa import soni.`** |
+| Qator qo‘shish | **`+ Qator qo‘shish`** (`secondary-button`, Plus ikon) |
+| Qator o‘chirish | **`Qatorni o‘chirish`** (`aria-label`, X ikon) — faqat 2+ qator bo‘lsa; oxirgi qator qoladi |
+| Har qator — dropdown label | **`Manba`** |
+| Manba variant 1 | **`Ombordan tanlash`** (`source=existing` → API: `product`) |
+| Manba variant 2 | **`Yangi mahsulot`** (`source=new` → API: `new_product`) |
+
+**Manba = Ombordan tanlash** (`existing`):
+
+| Label | Maydon | Eslatma |
+|---|---|---|
+| Mahsulot | `<select>` | placeholder: **`Mahsulotni tanlang`**; variantlar: `productOptionLabel` |
+| Miqdor | `number` | min 1 |
+| Narx | `number` | faqat `prices_manage`; tanlanganda avtomatik `purchase_price` |
+
+**Manba = Yangi mahsulot** (`new`):
+
+| Label | Maydon | Eslatma |
+|---|---|---|
+| Tovar nomi | `input` | majburiy |
+| Mahsulot raqami | `input` | placeholder: **`Bo‘sh qoldirilsa avtomatik`** → backend `IMP-{timestamp}` |
+| Shtrix kod | `input` | ixtiyoriy |
+| O‘lchov birligi | `<select>` | `productUnits` ro‘yxati (dona, kg, …) |
+| Miqdor | `number` | min 1 |
+| Narx | `number` | faqat `prices_manage` |
+| QQS % | `<select>` | QQS siz / 0% / 6% / 12% / 15% |
+| Yetkazish | read-only | hisoblangan |
+| QQS miqdori | read-only | hisoblangan |
+| JAMI | read-only | hisoblangan |
+| Izoh satri | **`Yangi mahsulot import bilan birga ombor ro‘yxatiga qo‘shiladi.`** | |
+
+Frontend validatsiya (toast xato):
+
+- `{N}-qator: miqdor kamida 1 bo‘lishi kerak.`
+- `{N}-qator: tovar nomi kiritilishi shart.`
+- `{N}-qator: mahsulotni tanlang.`
+- `{N}-qator: narx kiritilishi shart.` (`prices_manage`)
+- **`Qisman to'lov uchun summa kiriting.`**
+
+#### 9b.2. Umumiy maydonlar (barcha rejimlar)
+
+| Label | Maydon | Eslatma |
+|---|---|---|
+| Valyuta | `<select>` | **`UZS`** / **`USD`** — faqat `prices_manage` va backorder emas |
+| To‘lov statusi | `<select>` | **`To‘lanmagan`** / **`Qisman`** / **`To‘langan`** |
+| Qisman to‘langan summa | `number` | faqat `partial`; placeholder: **`Masalan, 500000`** |
+| Hint (partial) | **`Kiritilgan summa saqlangach kassadan chiqim (xarajat) sifatida yoziladi.`** | |
+| Hint (unpaid) | **`To‘lanmagan import summasi kassadan chiqim sifatida yoziladi.`** | |
+| Status | `<select>` | faqat `order_status_manage`: Yangi, Tasdiqlandi, Etkazuvchiga yuborildi, Qabul qilindi, Bekor qilindi |
+| Yetkazuvchi | `input` | |
+| Shartnoma raqami | `input` | placeholder: **`12/1108`**; faqat raqam va `/` |
+| Shartnoma sanasi | `date` | default bugun |
+| Faktura | `input` | |
+| Kutilgan sana | `date` | |
+| Ombor joyi | `input` | |
+| Asos | `textarea` | tahrirda status o‘zgarsa majburiy |
+| Izoh | `textarea` | |
+
+USD tanlanganda: **`FxRatePanel`** (`compact`) — Import editor ichida kurs.
+
+#### 9b.3. Saqlash → API mapping
+
+| Holat | Chaqiruv |
+|---|---|
+| 1 qator, `existing` | `POST /orders/zakaz/` — `product`, `quantity`, umumiy maydonlar, ixtiyoriy `payment_status` / `paid_amount` |
+| 1 qator, `new` | `POST /orders/zakaz/` — `new_product`, `quantity`, … |
+| 2+ qator | `POST /orders/zakaz/bulk/` — faqat `items[]` + shartnoma/yetkazuvchi (to‘lov maydonlari **yo‘q**) |
+| Mavjud yozuv | `PATCH /orders/zakaz/{id}/` |
+
+Muvaffaqiyat toast: **`Import yaratildi.`** / **`Import yangilandi.`**
+
+Operator (`prices_manage` yo‘q): payload dan `unit_price`, `currency`, `payment_status` olib tashlanadi; `new_product` ichidan `purchase_price`, `delivery_price` olib tashlanadi.
+
+---
+
+**Frontend (`ZakazEditor`) — qisqa xulosa:**
+
+- Har qator **`Manba`** dropdown: **`Ombordan tanlash`** yoki **`Yangi mahsulot`**.
+- **`+ Qator qo‘shish`** — yangi import qatori.
+- 1 qator → `POST /orders/zakaz/`; 2+ → `POST /orders/zakaz/bulk/` (to‘lovsiz).
+- Ombordan tanlanganda **Narx** avtomatik `purchase_price` (`prices_manage`).
+- `serial_number` bo‘sh bo‘lsa backend `IMP-{timestamp}` (`ensure_product_serial_number`).
 
 ### Status PATCH
 
@@ -2634,6 +2826,8 @@ notifications: 30s
 - USD kurs: `preferred_rate_source` (`infinbank` \| `manual` \| `bank`), `preferred_bank_code`, `preferred_bank_side`; `latest` javobidagi `mb_rate`, `market_rates`, `infinbank`/`manual`.
 - `FxRatePanel`: topbar — `header` (bank dropdown + kurs); editorlar — `compact` (dropdown + Qo‘lda). FX boshqaruv — `users_manage`.
 - Import grid status (inline + bulk) — `order_status_manage`, `procurement_manage` emas.
+- Import yangi modal: **`+ Qator qo‘shish`**, **`Manba`** → **`Ombordan tanlash`** / **`Yangi mahsulot`** — §9b; bulk da to‘lov maydonlari yuborilmaydi.
+- `ZakazEditor` / Import grid barcha UI label matnlari §9a–9b da — yangi label qo‘shilsa hujjat yangilansin.
 - `SaleEditor`, `BuyurtmalarPage`: `api.products()` doim; mijoz qidiruv — `searchClients()` + `fetchClient()` faqat `clients_view`.
 - `DataTable` Amallar ustuni: `.row-actions` flex wrapper; grid da `flex-wrap: nowrap`, tugmalar 36px balandlik.
 - Invoice javobida `prices_view` yo‘q bo‘lsa `total_delivery`, `total_vat`, `grand_total` ham yo‘q.
