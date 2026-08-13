@@ -627,7 +627,7 @@ Celery beat: `refresh_infinbank_usd_rate` har **1 soat** (`root/celery.py`). `au
 
 Singleton (`pk=1`). Buyurtmalar editorida bajaruvchi **«Korxona profili (bizning)»** tanlanganda «Bajaruvchi» bloki uchun ishlatiladi.
 
-**Validatsiya (backend + frontend):** STIR — 9 raqam; JSHSHIR — 14; MFO — 5; OKED — 5; telefon — `+998…`; bank hisob — 20 raqam. Xatoliklar maydon ostida qizil matn (`FieldError` / `ApiError.fields`); forma validatsiyasida toast ishlatilmaydi. Frontend: `frontend/src/lib/uzValidators.js` → `validateCompanyProfile()` (`CompanyProfileModal`).
+**Validatsiya (backend + frontend):** STIR — 9 raqam; JSHSHIR — 14 raqam, 1-raqam 1–6 (checksum yo‘q); MFO — 5; OKED — 5; telefon — `+998…`; bank hisob — 20 raqam. Xatoliklar maydon ostida qizil matn (`FieldError` / `ApiError.fields`); forma validatsiyasida toast ishlatilmaydi. Frontend: `frontend/src/lib/uzValidators.js` → `validateCompanyProfile()` (`CompanyProfileModal`).
 
 **Mijozlar editor validatsiyasi** (`Editor`, title=`Mijozlar`) — `validateClientFields()` (`uzValidators.js`), saqlashdan oldin client-side; backend `ClientSerializer` alohida UZ regex qo‘llamaydi.
 
@@ -638,7 +638,7 @@ Singleton (`pk=1`). Buyurtmalar editorida bajaruvchi **«Korxona profili (biznin
 | Yuridik | `inn` | Ixtiyoriy; to‘ldirilsa STIR 9 raqam |
 | Yuridik | `mfo` | Ixtiyoriy; to‘ldirilsa 5 raqam |
 | Jismoniy | `full_name` | Majburiy |
-| Jismoniy | `pinfl` | Majburiy, JSHSHIR 14 raqam + kontrol |
+| Jismoniy | `pinfl` | Majburiy, JSHSHIR 14 raqam, 1-raqam 1–6 |
 | Jismoniy | `passport_number` | Majburiy |
 | Jismoniy | `phone` | Majburiy, `validateUzPhone` |
 | Ikkala | `email` | Ixtiyoriy; format tekshiruvi |

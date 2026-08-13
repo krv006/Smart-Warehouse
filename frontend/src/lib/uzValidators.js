@@ -18,9 +18,6 @@ export function validateJshshir(value, { required = false } = {}) {
   const digits = onlyDigits(raw)
   if (digits.length !== 14) return 'JSHSHIR 14 ta raqamdan iborat bo‘lishi kerak.'
   if (!'123456'.includes(digits[0])) return 'JSHSHIR birinchi raqami noto‘g‘ri.'
-  const weights = [7, 3, 1]
-  const total = digits.slice(0, 13).split('').reduce((sum, ch, i) => sum + Number(ch) * weights[i % 3], 0)
-  if (total % 10 !== Number(digits[13])) return 'JSHSHIR kontrol raqami noto‘g‘ri.'
   return null
 }
 

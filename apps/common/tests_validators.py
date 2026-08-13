@@ -35,5 +35,10 @@ class UzValidatorsTests(SimpleTestCase):
         validate_uz_phone('+998939498849')
         validate_uz_phone('939498849')
 
-    def test_jshshir_checksum(self):
+    def test_jshshir_format(self):
         validate_jshshir('301019900010017')
+        validate_jshshir('26874128741871')
+        with self.assertRaisesMessage(Exception, '14 ta raqam'):
+            validate_jshshir('123')
+        with self.assertRaisesMessage(Exception, 'birinchi raqami'):
+            validate_jshshir('70101990001001')

@@ -32,10 +32,6 @@ def validate_jshshir(value: str, *, required: bool = False) -> None:
         raise ValidationError('JSHSHIR 14 ta raqamdan iborat bo‘lishi kerak.')
     if digits[0] not in '123456':
         raise ValidationError('JSHSHIR birinchi raqami noto‘g‘ri.')
-    weights = (7, 3, 1)
-    total = sum(int(digits[i]) * weights[i % 3] for i in range(13))
-    if total % 10 != int(digits[13]):
-        raise ValidationError('JSHSHIR kontrol raqami noto‘g‘ri.')
 
 
 def validate_mfo(value: str, *, required: bool = False) -> None:
