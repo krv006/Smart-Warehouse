@@ -155,7 +155,9 @@ Manba: `frontend/src/api.js`.
 | `request(path, options)` | JWT bilan so‘rov; 401 da bir marta refresh + retry |
 | `download(path, filename)` | Blob yuklab olish (Excel export) |
 
-Timeout: **8 soniya**. Xato klassi: `ApiError(message, status)`.
+Timeout: **8 soniya**. Xato klassi: `ApiError(message, status, fields?)` — `fields` maydon xatoliklari (`company_name`, `inn`, …) uchun; forma ostida qizil matn ko‘rsatishda ishlatiladi.
+
+**429 (throttle):** `request()` bir marta qayta urinadi (kutish `Retry-After` yoki javob matnidan, max **5 s**). Xabar o‘zbekcha: «Juda ko‘p so‘rov yuborildi…».
 
 ### `api` obyekti
 
@@ -260,7 +262,7 @@ await api.remove('/auth/users/', id)
 |---|---|---|---|
 | Bosh sahifa | `reports`, `monthlyTrend` | `/reports/*` | Filtrli |
 | Hisobotlar | `reports`, `expensesSummary`, `paymentsSummary`, `export*` | `/reports/*`, `/expenses/summary/`, `/cash/payments/summary/` | Filtrsiz reports |
-| Buyurtmalar | `invoices`, `invoice`, `createInvoice`, `updateInvoice`, `removeInvoice`, `nextContractNumber`, `companyProfile` | `/invoices/`, `/company-profile/` | `BuyurtmalarPage` — ro‘yxat + editor, preview; `/buyurtmalar/{uuid}` tahrir |
+| Buyurtmalar | `invoices`, `invoice`, `createInvoice`, `updateInvoice`, `removeInvoice`, `nextContractNumber`, `companyProfile`, `clients` (qidiruv/qo‘shish) | `/invoices/`, `/company-profile/`, `/clients/` | `BuyurtmalarPage` — ro‘yxat, ko‘rish modali, alohida editor sahifalari (§17a) |
 | Import | `zakaz`, `create`, `update` | `/orders/zakaz/` | `new_product` inline (manual import); inline/bulk status — faqat `order_status_manage` |
 | Shartnomalar | `contracts`, `retrieve` | `/orders/contracts/` | Read-only |
 | Korxona profili | `companyProfile`, `updateCompanyProfile` | `/company-profile/` | Profil dropdown |
@@ -293,7 +295,11 @@ Asosiy URL lar (react-router):
 | `/`, `/buyurtmalar`, `/import`, … | `PAGE_PATHS` dagi ro‘yxat sahifalari |
 | `/mijozlar/{uuid}` | Mijoz kartasi, tab `umumiy` |
 | `/mijozlar/{uuid}/{tab}` | `buyurtmalar`, `sotuvlar`, `tolovlar` |
-| `/buyurtmalar/{uuid}` | Buyurtmalar ro‘yxati + shu invoice tahriri (`initialInvoiceId`) |
+| `/buyurtmalar/yangi` | Yangi buyurtma (to‘liq sahifa editor) |
+| `/buyurtmalar/{uuid}/tahrir` | Mavjud buyurtmani tahrirlash |
+| `/buyurtmalar/{uuid}` | To‘g‘ridan-to‘g‘ri URL — shartnoma ko‘rish modali (ro‘yxat + modal) |
+
+Ro‘yxatdan **ko‘z** ikonkasi URL o‘zgartirmaydi — `loadInvoiceForView(id)` bir marta `GET /invoices/{uuid}/` + `GET /clients/{uuid}/` chaqiradi va `InvoiceContractModal` ochiladi.
 
 ### Global qidiruv (`GlobalSearch.jsx`)
 
@@ -358,7 +364,7 @@ Forma editorlari mahsulotlarni **mustaqil** yuklaydi; mijozlar faqat `clients_vi
 | Komponent | Mahsulot | Mijoz |
 |---|---|---|
 | `SaleEditor` | `api.products({ page_size: 500 })` | `SearchableCombobox` + `searchClients()` (`onSearch`) |
-| `BuyurtmalarPage` | `api.products({ page_size: 200 })` | `SearchableCombobox` + `searchClients()`; tanlangan mijoz `fetchClient()` |
+| `BuyurtmalarPage` | `api.products({ page_size: 200 })` | `SearchableCombobox` + `searchClients()`; tanlangan mijoz `fetchClient()`; **+** tugmasi — `clients_manage` bo‘lsa yangi yuridik hamkor (`Editor`, `POST /clients/`) |
 
 `clients_view` yo‘q bo‘lsa mijoz combobox ishlamaydi; 403 xato chiqmasligi uchun `api.clients()` chaqirilmaydi.
 
@@ -383,7 +389,9 @@ Buyurtmalar editoridagi **Hamkorning ma’lumotlari** va **Sotuv** editoridagi m
 | Passport | `passport_number` |
 | Boshqa | `company_name`, `email` |
 
-Shifrlangan maydonlar serverda ochiladi. Kamida **2** belgi; debounce **280 ms** (`SearchableCombobox`). Tanlangan mijoz `GET /clients/{uuid}/` orqali to‘liq yuklanadi (STIR, bank, MFO, manzil va hokazo).
+Shifrlangan maydonlar serverda ochiladi. Kamida **2** belgi; debounce **400 ms** (`SearchableCombobox`). Tanlangan mijoz `GET /clients/{uuid}/` orqali to‘liq yuklanadi (STIR, bank, MFO, manzil va hokazo).
+
+**Buyurtma qatorlari — tovar tanlash:** «Tovar nomi» maydoni qo‘lda yoki datalist orqali; yonidagi **quti** ikonkasi `ProductPickerModal` ochadi (`products` ro‘yxatidan qidiruv). Tanlanganda `product`, `identification_code`, `barcode`, `unit`, narx maydonlari to‘ldiriladi.
 
 ### `FxRatePanel` rejimlari (`App.jsx`)
 
@@ -585,6 +593,8 @@ Celery beat: `refresh_infinbank_usd_rate` har **1 soat** (`root/celery.py`). `au
 
 Singleton (`pk=1`). Buyurtmalar previewda «Bajaruvchi» sifatida ishlatiladi.
 
+**Validatsiya (backend + frontend):** STIR — 9 raqam; JSHSHIR — 14; MFO — 5; OKED — raqam; telefon — `+998…`; bank hisob — 20 raqam. Xatoliklar maydon ostida qizil matn (`FieldError` / `ApiError.fields`); forma validatsiyasida toast ishlatilmaydi. Frontend: `frontend/src/lib/uzValidators.js`, `CompanyProfileModal`.
+
 ### Buyurtmalar (invoices) — `/api/v1/invoices/`
 
 | Method | Path | Query / body | Ruxsat | api.js |
@@ -707,9 +717,22 @@ Backend mahsulotdan `product_name`, `barcode`, `identification_code`, `unit`, na
 
 **Narx ko‘rinishi:** `prices_view` yo‘q foydalanuvchilar uchun qator narxlari (`unit_price`, `delivery_amount`, `vat_amount`, `total_amount`) va invoice jami maydonlari (`total_delivery`, `total_vat`, `grand_total`) javobdan olib tashlanadi. Frontend `BuyurtmalarPage` da `can(session, 'prices_view')` bilan jami blokni yashiradi.
 
-Frontend: `BuyurtmalarPage` — ro‘yxat, tahrir, `DocumentPreviewModal` (mazmun + jadval + rekvizitlar). Mahsulot mustaqil yuklanadi. **Hamkorning ma’lumotlari** — `SearchableCombobox` + `searchClients()` (§3, mijoz qidiruv jadvali); tanlangan mijoz `fetchClient()` bilan to‘liq yuklanadi.
+### UI oqimlari (`BuyurtmalarPage`)
 
-Korxona profili (`GET/PATCH /company-profile/`) previewda «Bajaruvchi» blokida ishlatiladi.
+| Rejim | URL | API chaqiriqlari |
+|---|---|---|
+| Ro‘yxat | `/buyurtmalar` | `GET /invoices/`, `GET /warehouse/products/`, `GET /company-profile/` (sahifa ochilganda bir marta) |
+| Ko‘rish (modal) | Ro‘yxatda qoladi yoki `/buyurtmalar/{uuid}` | `GET /invoices/{uuid}/`, `GET /clients/{uuid}/` — **bir marta** (`viewFetchKeyRef` dublikatni bloklaydi) |
+| Yangi | `/buyurtmalar/yangi` | Yuqoridagilar + `GET /orders/next-contract-number/` (sana o‘zgarganda) |
+| Tahrir | `/buyurtmalar/{uuid}/tahrir` | `GET /invoices/{uuid}/`, `GET /company-profile/` |
+
+**Layout:** «Sizning ma’lumotlaringiz» | «Hamkorning ma'lumotlari» yonma-yon (`PartyInfoGrid`). Ko‘rish — `InvoiceContractModal` (jadval + mazmun + «2. Tomonlarni yuridik manzillari va rekvizitlari»). Tahrir/yangi — `DocumentPreviewModal` («Hujjatni ko‘rsatish»).
+
+**Validatsiya:** `validateEInvoice()` — xatoliklar input ostida; «Hujjatni ko‘rsatish» / «Saqlash» da toast o‘rniga scroll birinchi qizil maydonga.
+
+**Shartnomalar reestri:** SK (`document_type=contract_sk`) saqlanganda backend `ProductContract` ga `INVOICE_CREATED` / `INVOICE_EDITED` yozuvi qo‘shadi (tovar `product` FK bilan mos bo‘lsa).
+
+Korxona profili (`GET/PATCH /company-profile/`) «Bajaruvchi» blokida ishlatiladi; profil yangilanganda `company-profile-updated` eventi editorlarni yangilaydi.
 
 ---
 
@@ -893,6 +916,8 @@ Operator uchun narx/foyda maydonlari ayrim javoblarda qaytmaydi. Frontend bunday
 | Global qidiruv — mijozlar | `clients_view` | `GlobalSearch.jsx` |
 | Global qidiruv — buyurtmalar | `einvoice_view` | `GlobalSearch.jsx` |
 | Hamkor / mijoz combobox (Buyurtmalar, Sotuv) | `clients_view` | `SearchableCombobox`, `lib/clients.js` |
+| Yangi hamkor (+) Buyurtmalar editorida | `clients_manage` | `Editor` → `POST /clients/` |
+| Tovar tanlash (qator) | `einvoice_manage` (editor) | `ProductPickerModal` |
 | Editor mijoz combobox | `clients_view` | `SaleEditor`, `BuyurtmalarPage` |
 | Editor mahsulot combobox | (ability shart emas) | `api.products()` doim chaqiriladi |
 | Invoice jami / qator narxlari | `prices_view` | `BuyurtmalarPage`, backend serializer |
@@ -2139,6 +2164,9 @@ notifications: 30s
 - `SaleEditor`, `BuyurtmalarPage`: `api.products()` doim; mijoz qidiruv — `searchClients()` + `fetchClient()` faqat `clients_view`.
 - `DataTable` Amallar ustuni: `.row-actions` flex wrapper; grid da `flex-wrap: nowrap`, tugmalar 36px balandlik.
 - Invoice javobida `prices_view` yo‘q bo‘lsa `total_delivery`, `total_vat`, `grand_total` ham yo‘q.
+- Buyurtma ko‘rish: bir invoice uchun takroriy `GET /invoices/{id}/` yuborilmasin (`viewFetchKeyRef`).
+- Korxona profili / invoice forma validatsiyasi — inline `FieldError`, toast emas.
+- `ApiError.fields` — PATCH xatoliklarini maydon bo‘yicha ko‘rsatish.
 
 ## 21. Rol matritsasi (11 qoida)
 

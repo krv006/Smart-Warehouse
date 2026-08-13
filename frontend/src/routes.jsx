@@ -69,13 +69,18 @@ export default function AppRoutes({
       {routeInfo.kind !== 'client-detail' && active === 'Hisobotlar' && can(session, 'reports_view') && (
         <ReportsPage notify={notify} />
       )}
-      {(routeInfo.kind === 'page' || routeInfo.kind === 'invoice-detail') && active === 'Buyurtmalar' && can(session, 'einvoice_view') && (
+      {(routeInfo.kind === 'page' || routeInfo.kind === 'invoice-detail' || routeInfo.kind === 'invoice-new' || routeInfo.kind === 'invoice-edit') && active === 'Buyurtmalar' && can(session, 'einvoice_view') && (
         <BuyurtmalarPage
           notify={notify}
           session={session}
-          initialInvoiceId={routeInfo.kind === 'invoice-detail' ? routeInfo.invoiceId : null}
-          prefillClientId={currentLocation.state?.newBuyurtma ? (currentLocation.state?.clientId ?? null) : null}
-          startNew={Boolean(currentLocation.state?.newBuyurtma)}
+          routeMode={
+            routeInfo.kind === 'invoice-new' ? 'new'
+              : routeInfo.kind === 'invoice-edit' ? 'edit'
+                : routeInfo.kind === 'invoice-detail' ? 'view'
+                  : 'list'
+          }
+          invoiceId={routeInfo.invoiceId || null}
+          prefillClientId={routeInfo.kind === 'invoice-new' ? (currentLocation.state?.clientId ?? null) : null}
         />
       )}
       {routeInfo.kind !== 'client-detail' && active !== 'Bosh sahifa' && active !== 'Hisobotlar' && active !== 'Buyurtmalar' && isAccessiblePage(session, active) && resources[active] && (

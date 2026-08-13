@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.db.models import (CharField, TextField, BooleanField,
                               ForeignKey, CASCADE, SET_NULL)
+from django.utils import timezone
 
 from apps.common.models import TimeStampedModel
 

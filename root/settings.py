@@ -12,6 +12,11 @@ load_dotenv(BASE_DIR / '.env')
 
 DEBUG = os.environ.get('DEBUG', 'False') == 'True'
 
+# Dev rejimda global throttle o'chiriladi — qidiruv, avtoyangilash va formalar
+# tez ketma-ket so'rov yuborishi mumkin; login throttle alohida qoladi.
+if DEBUG:
+    REST_FRAMEWORK['DEFAULT_THROTTLE_CLASSES'] = []
+
 # SECRET_KEY — production'da (.env) MAJBURIY. Ishonchsiz kalit bilan
 # istalgan kishi yaroqli JWT yasab, superuser nomidan kira olardi.
 SECRET_KEY = os.environ.get('SECRET_KEY')

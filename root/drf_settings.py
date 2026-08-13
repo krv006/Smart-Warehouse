@@ -19,14 +19,14 @@ REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": [
         "rest_framework.renderers.JSONRenderer",
     ],
-    # Brute-force / DoS himoyasi — so'rovlar sonini cheklash
-    "DEFAULT_THROTTLE_CLASSES": [
-        "rest_framework.throttling.AnonRateThrottle",
-        "rest_framework.throttling.UserRateThrottle",
-    ],
+    # Brute-force / DoS himoyasi — faqat autentifikatsiyalangan foydalanuvchi
+    # (AnonRateThrottle olib tashlandi: token/refresh va boshqa ochiq endpointlar
+    # 60/min chekloviga tushib, UI «Request was throttled» xatosini berardi).
+    # Login alohida LoginRateThrottle bilan himoyalangan (apps/users/views.py).
+    "DEFAULT_THROTTLE_CLASSES": [],
     "DEFAULT_THROTTLE_RATES": {
-        "anon":  "60/min",     # autentifikatsiyasiz
-        "user":  "1000/min",   # tizimga kirgan foydalanuvchi
+        "anon":  "60/min",     # LoginRateThrottle scope (login endpoint)
+        "user":  "5000/min",   # tizimga kirgan foydalanuvchi
         "login": "10/min",     # login urinishlari (parol brute-force ga qarshi)
     },
 }

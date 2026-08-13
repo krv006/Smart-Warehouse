@@ -5,6 +5,7 @@ from rest_framework.serializers import (ModelSerializer, ValidationError,
                                         SerializerMethodField)
 
 from apps.invoices.models import ElectronicInvoice, InvoiceLineItem, VatPercent
+from apps.invoices.services import sync_invoice_contract_registry
 from apps.warehouse.models import Product
 
 
@@ -128,6 +129,8 @@ class ElectronicInvoiceSerializer(ModelSerializer):
             line_data = self._apply_product_defaults(line_data)
             line_data = self._compute_line(line_data, reverse)
             InvoiceLineItem.objects.create(invoice=invoice, **line_data)
+        sync_invoice_contract_registry(invoice, created=True,
+                                       user=self.context['request'].user)
         return invoice
 
     @transaction.atomic
@@ -169,4 +172,6 @@ class ElectronicInvoiceSerializer(ModelSerializer):
                 for key, val in computed.items():
                     setattr(line, key, val)
                 line.save()
+        sync_invoice_contract_registry(invoice, created=False,
+                                       user=self.context['request'].user)
         return invoice

@@ -712,6 +712,8 @@ class ProductContract(TimeStampedModel):
     ZAKAZ_RECEIVED  = 'zakaz_received'
     ZAKAZ_CANCELLED = 'zakaz_cancelled'
     STOCK_IN        = 'stock_in'
+    INVOICE_CREATED = 'invoice_created'
+    INVOICE_EDITED  = 'invoice_edited'
 
     SOURCE_CHOICES = (
         (ORDER_CREATED,   'Buyurtma yaratildi'),
@@ -724,6 +726,8 @@ class ProductContract(TimeStampedModel):
         (ZAKAZ_RECEIVED,  'Zakaz qabul qilindi'),
         (ZAKAZ_CANCELLED, 'Zakaz bekor qilindi'),
         (STOCK_IN,        'Kirim (mahsulot keldi)'),
+        (INVOICE_CREATED, 'Buyurtma (SK) yaratildi'),
+        (INVOICE_EDITED,  'Buyurtma (SK) tahrirlandi'),
     )
 
     product         = ForeignKey('warehouse.Product', on_delete=CASCADE,
@@ -737,6 +741,9 @@ class ProductContract(TimeStampedModel):
                                  null=True, blank=True,
                                  related_name='contract_entries')
     zakaz           = ForeignKey('orders.Zakaz', on_delete=SET_NULL,
+                                 null=True, blank=True,
+                                 related_name='contract_entries')
+    invoice         = ForeignKey('invoices.ElectronicInvoice', on_delete=SET_NULL,
                                  null=True, blank=True,
                                  related_name='contract_entries')
     created_by      = ForeignKey(settings.AUTH_USER_MODEL, on_delete=SET_NULL,
@@ -759,7 +766,7 @@ class ProductContract(TimeStampedModel):
 
 def register_contract(product, source_type, *, contract_number=None,
                       contract_date=None, asos=None, faktura=None,
-                      order=None, zakaz=None, user=None):
+                      order=None, zakaz=None, invoice=None, user=None):
     """
     Shartnoma reestriga AVTOMATIK yozuv (background).
     Har bir holat/detal o'z yozuvi bilan saqlanadi — o'chirilmaydi,
@@ -774,6 +781,7 @@ def register_contract(product, source_type, *, contract_number=None,
         faktura=faktura,
         order=order,
         zakaz=zakaz,
+        invoice=invoice,
         created_by=user,
     )
 

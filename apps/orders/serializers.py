@@ -515,7 +515,7 @@ class ProductContractSerializer(ModelSerializer):
                   'contract_number', 'contract_date',
                   'asos', 'faktura',
                   'source_type', 'source_type_display',
-                  'order', 'zakaz',
+                  'order', 'zakaz', 'invoice',
                   'created_by', 'created_by_name', 'created_at')
 
     def get_product_name(self, obj):
