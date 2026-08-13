@@ -323,7 +323,7 @@ Yordamchi kutubxonalar: `lib/utils.js` (`money`, `todayValue`, `formatDateUz`, `
 
 | UI sahifa | `api.js` | Backend path | Eslatma |
 |---|---|---|---|
-| Bosh sahifa | `reports`, `monthlyTrend` | `/reports/*` | Filtrli |
+| Bosh sahifa | `reports`, `monthlyTrend` | `/reports/summary/` | Filtrli dashboard: **Tushum**, **Import chiqim**, **Kassa balansi**, Savdo (`Dashboard` komponenti) |
 | Hisobotlar | `reports`, `expensesSummary`, `paymentsSummary`, `exportReport` | `/reports/*`, `/expenses/summary/`, `/cash/payments/summary/` | Tablar: Moliyaviy, Ombor, Sotuvlar, Xarajatlar, **Excel** (`ReportExportPanel`) |
 | Buyurtmalar | `invoices`, `invoice`, `createInvoice`, `updateInvoice`, `removeInvoice`, `nextContractNumber`, `companyProfile`, `clients` (qidiruv/qo‘shish) | `/invoices/`, `/company-profile/`, `/clients/` | `BuyurtmalarPage` — ro‘yxat, ko‘rish modali, alohida editor sahifalari (§17a) |
 | Import | `zakaz`, `zakazBulk`, `create`, `update` | `/orders/zakaz/`, `/orders/zakaz/bulk/` | Ko‘p qatorli import; `payment_status` / `paid_amount` → kassadan chiqim (§17c); grid ustunlari: To‘lov, Summa |
@@ -2177,6 +2177,19 @@ Bosh sahifa `api.reports(params)` va `api.monthlyTrend(6, params)` chaqiradi. Um
 
 Default bosh sahifa filtri: bugungi sana (`date_from` = `date_to` = bugun).
 
+**Dashboard metrik kartalari** (`Dashboard` — `App.jsx`):
+
+| Kartochka | API maydon | Hisoblash | Eslatma |
+|---|---|---|---|
+| Tushum | `kassa_collected_uzs` / `_usd` | Kassa jurnali `kind=in` (`build_ledger_entries`) — faqat sotuv/buyurtma tranzaksiyalari | Import **kirmaydi** |
+| Import chiqim | `import_paid_uzs` / `_usd` | Kassa jurnali `kind=out` (Expense + zakaz) | Kassadan chiqim |
+| Kassa balansi | `net_balance_uzs` / `_usd` | `kassa_collected` − `import_paid` (davr bo‘yicha) | Kassa sahifasi bilan bir xil formula |
+| Savdo | `sales_revenue_uzs` | `Sale.sold_price × quantity` (`sold_date` bo‘yicha) | Import emas |
+| Ombordagi birliklar | `warehouse.total_quantity` | `/reports/warehouse/` | Snapshot |
+| Kechikkan to‘lovlar | `overdue_payments_count` | Payment overdue count | |
+
+**Muhim:** Tushum va Import chiqim **alohida** ko‘rsatiladi; bir xil summa bo‘lishi mumkin (bugun 50M sotuv + 50M import), lekin bu turli operatsiyalar. **Balans** kartochkasi (`Tushum − Import`) haqiqiy kassa o‘zgarishini ko‘rsatadi.
+
 **Frontend UI:** `Dashboard` — `Filtrlar` + `Yangi buyurtma` (`einvoice_manage`). Mobilda (`≤768px`) tugma qator ichida ixcham (`dashboard-toolbar`): filtr chapda kengayadi, tugma o‘ngda `width: auto`; juda tor ekranda (`≤420px`) faqat `+` ikonka (`aria-label="Yangi buyurtma"`).
 
 Misol:
@@ -2216,6 +2229,9 @@ Javob (asosiy maydonlar):
   "import_paid_usd": "0",
   "import_paid_today_uzs": "0",
   "import_paid_today_usd": "0",
+  "import_out_uzs": "8000000",
+  "net_balance_uzs": "4000000",
+  "net_balance_usd": "0",
   "mb_rate_today": "11934.61",
   "expenses_uzs": "1200000",
   "expenses_usd": "0",
@@ -2225,7 +2241,14 @@ Javob (asosiy maydonlar):
 }
 ```
 
-Eslatma: `import_paid_*` — to‘langan MANUAL zakazlar (yetkazuvchi to‘lovi). `kassa_collected_*` — mijoz to‘lov tranzaksiyalari.
+Eslatma:
+
+- `kassa_collected_*` — kassa jurnalidagi **tushumlar** (`PaymentTransaction`, `payment.zakaz` bo‘sh). Import Payment emas.
+- `import_paid_*` / `import_out_uzs` — kassa jurnalidagi **import chiqimlari** (`Expense` + `zakaz` FK).
+- `net_balance_*` — `kassa_collected − import_paid` (davr bo‘yicha). Backend: `_ledger_in_uzs()` / `_ledger_out_uzs()` (`apps/cash/ledger.py`).
+- `sales_revenue_*` — sotuv summasi (`sold_date`); import bilan aralashmaydi.
+
+`client` yoki `payment_status` filtri bo‘lsa ledger override o‘rniga eski `_kassa_collected` / `_import_paid_totals` ishlatiladi.
 
 ### Oylik trend
 
@@ -2257,7 +2280,9 @@ Javob — array (eng yangi oy birinchi):
 ]
 ```
 
-Frontend: `api.monthlyTrend(6, params)`.
+Frontend: `api.monthlyTrend(6, params)`. Jadval ustunlari: **Oy**, **Tushum**, **Import chiqim**, **Balans** (`kassa_uzs − import_uzs`), **Savdo**.
+
+Oylik trend ham kassa jurnalidan hisoblanadi (`_ledger_in_uzs` / `_ledger_out_uzs`) — `client`/`payment_status` filtri bo‘lmasa.
 
 ### Ombor hisoboti
 
@@ -2590,6 +2615,7 @@ notifications: 30s
 - Sotuv/import yaratilganda avtomatik kassa sinxroni (`sync_sale_payment`, `sync_zakaz_expense`) — qo‘lda Payment yaratish shart emas.
 - `FilterDateRangeCalendar` — dashboard, export va filtrlarda bir xil oralik tanlash UX.
 - Bosh sahifa dashboard filtrlari `api.reports()` va `api.monthlyTrend()` ga uzatilsin.
+- Dashboard: Tushum / Import chiqim / Kassa balansi alohida; import tushum sifatida ko‘rsatilmasin (`net_balance_uzs`).
 - Kassa ro‘yxatida `paid` default yashirin; kerak bo‘lsa `?status=paid` yoki `?include_paid=true`.
 - Buyurtma yaratishda `api.nextContractNumber({ contract_date })` bilan raqam olinadi.
 - Yangi backend endpoint qo‘shilganda `api.js` → UI → `FRONTEND_API.md` §4 jadval yangilansin.

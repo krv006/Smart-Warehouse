@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import {
   Warehouse, Bell, Buildings, CaretDown, ChartLineUp,
   ClipboardText, ClockCounterClockwise, CurrencyCircleDollar, DownloadSimple, Eye, FileText, Funnel, House, MagnifyingGlass,
-  Package, PencilSimple, Plus, SignOut, SpinnerGap, Trash, TrendDown, TrendUp, Truck, UserGear, Users, WarningCircle, X, XCircle, DotsThree, CaretLeft, CaretRight, CheckCircle,
+  Package, PencilSimple, Plus, SignOut, SpinnerGap, Trash, TrendDown, TrendUp, Truck, UserGear, Users, Wallet, WarningCircle, X, XCircle, DotsThree, CaretLeft, CaretRight, CheckCircle,
 } from '@phosphor-icons/react'
 import { api, clearStoredSession, refreshAccessToken, saveSession, setAuthFailureHandler, tokenExpiresAt } from './api'
 import DataTable, { BulkActionsBar, StatusBadge, TablePagination } from './components/DataTable'
@@ -1645,7 +1645,7 @@ function importPeriodNote(summary) {
   const usd = Number(summary.import_paid_usd || summary.import_paid_today_usd || 0)
   const rate = Number(summary.mb_rate_today || 0)
   if (usd > 0 && rate > 0) return `$${money(usd)} · MB kurs ${moneyRate(rate)}`
-  return 'Yetkazuvchi to‘lovi (MB kursida)'
+  return 'Kassadan chiqim (yetkazuvchi to‘lovi)'
 }
 
 function filterContextNote(filters, lookup = {}) {
@@ -2106,11 +2106,21 @@ function Dashboard({ data, loading, period, onPeriodChange, onCreateBuyurtma, on
     ? `$${money(summary.kassa_collected_usd || 0)}`
     : `${money(summary.kassa_collected_uzs || summary.kassa_collected_today_uzs || 0)} so‘m`
   const salesValue = money(summary.sales_revenue_uzs || summary.sales_revenue_total || 0)
+  const netBalance = period.currency === 'USD'
+    ? Number(summary.net_balance_usd || 0)
+    : Number(summary.net_balance_uzs ?? (
+      Number(summary.kassa_collected_uzs || 0) - Number(summary.import_paid_uzs || summary.import_out_uzs || 0)
+    ))
+  const netValue = period.currency === 'USD'
+    ? `$${money(netBalance)}`
+    : `${money(netBalance)} so‘m`
+  const netTone = netBalance >= 0 ? 'up' : 'down'
   const kassaNote = (period.currency === 'USD'
-    ? periodMetricNote('Mijoz to‘lovlari (USD)', period)
-    : periodMetricNote('Mijoz to‘lovlari', period)) + filterSuffix
+    ? periodMetricNote('Sotuv va buyurtma tushumlari (USD)', period)
+    : periodMetricNote('Sotuv va buyurtma tushumlari (import emas)', period)) + filterSuffix
   const salesNote = periodMetricNote('Faqat sotuvlar (import emas)', period) + filterSuffix
   const importNote = importPeriodNote(summary) + filterSuffix
+  const balanceNote = periodMetricNote('Tushum − import chiqim', period) + filterSuffix
   const overdueNote = (period.payment_status ? 'Filtrlangan to‘lovlar' : 'Hozirgi holat') + filterSuffix
 
   return (
@@ -2129,7 +2139,8 @@ function Dashboard({ data, loading, period, onPeriodChange, onCreateBuyurtma, on
 
       <section className="metric-grid">
         <Metric icon={CurrencyCircleDollar} label="Tushum" value={kassaValue} note={kassaNote} trend="up" />
-        <Metric icon={Truck} label="Import" value={importPeriodLabel(summary)} note={importNote} trend="neutral" />
+        <Metric icon={Truck} label="Import chiqim" value={importPeriodLabel(summary)} note={importNote} trend="down" />
+        <Metric icon={Wallet} label="Kassa balansi" value={netValue} note={balanceNote} trend={netTone} />
         <Metric icon={ClipboardText} label="Savdo" value={`${salesValue} so‘m`} note={salesNote} trend="up" />
         <Metric icon={Package} label="Ombordagi birliklar" value={money(warehouse.total_quantity)} note={`${warehouse.total_product_types || 0} turdagi mahsulot · hozirgi holat`} trend="neutral" />
         <Metric icon={FileText} label="Kechikkan to‘lovlar" value={summary.overdue_payments_count || 0} note={overdueNote} trend="down" />
@@ -2161,7 +2172,8 @@ function Dashboard({ data, loading, period, onPeriodChange, onCreateBuyurtma, on
               <tr>
                 <th>Oy</th>
                 <th>Tushum</th>
-                <th>Import</th>
+                <th>Import chiqim</th>
+                <th>Balans</th>
                 <th>Savdo</th>
               </tr>
             </thead>
@@ -2177,6 +2189,7 @@ function Dashboard({ data, loading, period, onPeriodChange, onCreateBuyurtma, on
                         ? `$${money(row.import_usd)}`
                         : '—'}
                   </td>
+                  <td>{money(Number(row.kassa_uzs || 0) - Number(row.import_uzs || 0))} so‘m</td>
                   <td>{money(row.sales_uzs)} so‘m</td>
                 </tr>
               ))}

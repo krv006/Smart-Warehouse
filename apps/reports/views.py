@@ -10,6 +10,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.cash.ledger import build_ledger_entries
 from apps.cash.models import Payment, ExchangeRate, PaymentTransaction
 from apps.cash.services import get_active_mb_rate
 from apps.common.permissions import IsAccountantOrManagement
@@ -126,6 +127,24 @@ def _kassa_collected(date_from=None, date_to=None, currency=None,
     if date_to:
         qs = qs.filter(created_at__date__lte=date_to)
     return qs.aggregate(total=Sum('amount'))['total'] or Decimal('0')
+
+
+def _ledger_in_uzs(date_from=None, date_to=None):
+    """Kassa jurnalidagi tushumlar — import PaymentTransaction emas."""
+    entries = build_ledger_entries(date_from=date_from, date_to=date_to, kind='in')
+    return sum(
+        (Decimal(e['amount']) for e in entries if e.get('currency') == Payment.UZS),
+        Decimal('0'),
+    )
+
+
+def _ledger_out_uzs(date_from=None, date_to=None):
+    """Kassa jurnalidagi import chiqimlari (Expense)."""
+    entries = build_ledger_entries(date_from=date_from, date_to=date_to, kind='out')
+    return sum(
+        (Decimal(e['amount']) for e in entries if e.get('currency') == Payment.UZS),
+        Decimal('0'),
+    )
 
 
 def _import_paid_totals(date_from=None, date_to=None, currency=None,
@@ -319,6 +338,10 @@ class FinancialSummaryView(APIView):
             today, today, **dash_kw,
         )
 
+        ledger_from = date_from if filtered else None
+        ledger_to = date_to if filtered else None
+        ledger_out_uzs = _ledger_out_uzs(ledger_from, ledger_to)
+
         if filtered:
             sales_period = _sales_revenue(date_from, date_to, **dash_kw)
             if currency == Payment.USD:
@@ -346,6 +369,21 @@ class FinancialSummaryView(APIView):
             kassa_period_uzs = kassa_all_uzs
             kassa_period_usd = kassa_all_usd
             import_period_uzs, import_period_usd, _ = _import_paid_totals()
+
+        # Kassa jurnali bilan bir xil: tushum faqat sotuv/buyurtma, import — chiqim
+        if not client_id and not payment_status:
+            if currency in (None, '', Payment.UZS):
+                kassa_period_uzs = _ledger_in_uzs(ledger_from, ledger_to)
+                import_period_uzs = ledger_out_uzs
+            if currency == Payment.USD:
+                kassa_period_usd = _kassa_collected(
+                    ledger_from, ledger_to, Payment.USD, **kassa_kw,
+                )
+
+        net_balance_uzs = kassa_period_uzs - (
+            import_period_uzs if currency != Payment.USD else Decimal('0')
+        )
+        net_balance_usd = kassa_period_usd - (import_period_usd or Decimal('0'))
 
         overdue_qs = _filter_payments(
             Payment.objects.filter(
@@ -417,6 +455,9 @@ class FinancialSummaryView(APIView):
             'import_paid_usd':          import_period_usd,
             'import_paid_today_uzs':    import_today_uzs,
             'import_paid_today_usd':    import_today_usd,
+            'import_out_uzs':           ledger_out_uzs,
+            'net_balance_uzs':          net_balance_uzs,
+            'net_balance_usd':          net_balance_usd,
             'mb_rate_today':            mb_rate,
             'expenses_uzs':             expenses_uzs.aggregate(t=Sum('amount'))['t'] or 0,
             'expenses_usd':             expenses_usd.aggregate(t=Sum('amount'))['t'] or 0,
@@ -473,10 +514,12 @@ class MonthlyTrendView(APIView):
             if currency == Payment.USD:
                 kassa = _kassa_collected(start, end, Payment.USD, **kassa_kw)
             else:
-                kassa = _kassa_collected(start, end, Payment.UZS, **kassa_kw)
+                kassa = _ledger_in_uzs(start, end)
             import_uzs, import_usd, _ = _import_paid_totals(
                 start, end, currency, **dash_kw,
             )
+            if currency != Payment.USD and not client_id and not payment_status:
+                import_uzs = _ledger_out_uzs(start, end)
             sales = _sales_revenue(start, end, **dash_kw)
             rows.append({
                 'year':          year,
