@@ -3737,6 +3737,402 @@ label.field-invalid textarea:focus,
   }
 }
 
+/* ── Buyurtmalar: shartnoma ko‘rish modali ── */
+.buyurtmalar-panel .data-table-wrap {
+  margin-top: 8px;
+}
+
+.buyurtmalar-loading {
+  display: flex;
+  justify-content: center;
+  padding: 48px 16px;
+}
+
+.invoice-contract-backdrop {
+  padding: 24px 16px;
+}
+
+.invoice-contract-modal {
+  width: min(920px, 100%);
+  max-height: min(92vh, 960px);
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 24px 28px 20px;
+}
+
+.invoice-contract-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.invoice-contract-head h2 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.invoice-contract-subtitle {
+  margin: 6px 0 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.invoice-contract-meta {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.invoice-contract-parties {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.invoice-contract-party {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  background: var(--surface-2, #f8fafc);
+}
+
+.invoice-contract-party-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.invoice-contract-party strong {
+  display: block;
+  font-size: 16px;
+  line-height: 1.35;
+}
+
+.invoice-contract-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.invoice-contract-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.invoice-contract-table th,
+.invoice-contract-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.invoice-contract-table th {
+  background: #eef2ff;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.invoice-contract-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.invoice-contract-summary {
+  margin: 14px 0 0;
+  text-align: right;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.invoice-contract-mazmun {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 8px;
+}
+
+.invoice-contract-mazmun-body {
+  white-space: pre-wrap;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.invoice-contract-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+@media (max-width: 768px) {
+  .invoice-contract-parties {
+    grid-template-columns: 1fr;
+  }
+
+  .invoice-contract-modal {
+    padding: 18px 16px;
+  }
+
+  .invoice-contract-requisites-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.e-invoice-page--editor .e-invoice-form {
+  max-width: none;
+}
+
+.e-invoice-parties-section {
+  padding-top: 4px;
+}
+
+.e-invoice-parties-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  align-items: start;
+}
+
+.e-invoice-party-panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 18px 20px;
+  background: var(--surface);
+  min-height: 100%;
+}
+
+.e-invoice-party-panel h3 {
+  margin: 0 0 14px;
+  font-size: 15px;
+}
+
+.e-invoice-party-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.e-invoice-party-panel-head h3 {
+  margin: 0;
+}
+
+.e-invoice-party-add {
+  flex-shrink: 0;
+}
+
+.e-invoice-product-field {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.e-invoice-product-field input {
+  flex: 1;
+  min-width: 0;
+}
+
+.e-invoice-product-pick {
+  flex-shrink: 0;
+  align-self: stretch;
+}
+
+.product-picker-modal {
+  width: min(100%, 560px);
+  max-height: min(70vh, 520px);
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  gap: 16px;
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+.product-picker-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.product-picker-head h3 {
+  margin: 6px 0 0;
+}
+
+.product-picker-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+}
+
+.product-picker-search input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  padding: 10px 0;
+  min-width: 0;
+}
+
+.product-picker-list {
+  overflow: auto;
+  display: grid;
+  gap: 6px;
+  min-height: 120px;
+}
+
+.product-picker-empty {
+  margin: 0;
+  padding: 16px 4px;
+  text-align: center;
+}
+
+.product-picker-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+.product-picker-item:hover {
+  border-color: var(--primary);
+  background: var(--surface);
+}
+
+.product-picker-item-name {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.product-picker-item-code {
+  font-size: 12px;
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+}
+
+.party-info-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 16px;
+  margin: 0;
+}
+
+.party-info-grid > div {
+  display: grid;
+  gap: 2px;
+}
+
+.party-info-grid .party-info-wide {
+  grid-column: 1 / -1;
+}
+
+.party-info-grid dt {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+}
+
+.party-info-grid dd {
+  margin: 0;
+  font-size: 13px;
+  word-break: break-word;
+}
+
+.invoice-contract-requisites-section {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+
+.invoice-contract-requisites-section h3 {
+  margin: 0 0 16px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.invoice-contract-requisites-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+
+.contract-party-requisites h4 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.contract-party-requisites-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.contract-party-requisites-list > div {
+  display: grid;
+  grid-template-columns: 88px 1fr;
+  gap: 10px;
+  align-items: start;
+}
+
+.contract-party-requisites-list dt {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.contract-party-requisites-list dd {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+@media (max-width: 960px) {
+  .e-invoice-parties-row,
+  .party-info-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .party-info-grid .party-info-wide {
+    grid-column: auto;
+  }
+}
+
 /* ── Data grid (CRM) ── */
 .data-table-wrap {
   overflow-x: auto;

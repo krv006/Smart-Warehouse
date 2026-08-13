@@ -40,6 +40,21 @@ export function parseAppPath(pathname) {
     }
   }
 
+  const invoiceNewMatch = clean === '/buyurtmalar/yangi'
+  if (invoiceNewMatch) {
+    return { kind: 'invoice-new', page: 'Buyurtmalar', path: clean }
+  }
+
+  const invoiceEditMatch = clean.match(/^\/buyurtmalar\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/tahrir$/i)
+  if (invoiceEditMatch) {
+    return {
+      kind: 'invoice-edit',
+      page: 'Buyurtmalar',
+      invoiceId: invoiceEditMatch[1],
+      path: clean,
+    }
+  }
+
   const invoiceMatch = clean.match(/^\/buyurtmalar\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i)
   if (invoiceMatch) {
     return {
@@ -70,6 +85,14 @@ export function invoiceDetailPath(invoiceId) {
   return `/buyurtmalar/${invoiceId}`
 }
 
+export function invoiceNewPath() {
+  return '/buyurtmalar/yangi'
+}
+
+export function invoiceEditPath(invoiceId) {
+  return `/buyurtmalar/${invoiceId}/tahrir`
+}
+
 /** @deprecated use invoiceDetailPath */
 export function orderDetailPath(id) {
   return invoiceDetailPath(id)
@@ -82,6 +105,12 @@ export function crumbFromPath(pathname) {
   }
   if (parsed.kind === 'invoice-detail') {
     return `Buyurtmalar / ${parsed.invoiceId.slice(0, 8)}…`
+  }
+  if (parsed.kind === 'invoice-new') {
+    return 'Buyurtmalar / Yangi'
+  }
+  if (parsed.kind === 'invoice-edit') {
+    return `Buyurtmalar / Tahrir / ${parsed.invoiceId.slice(0, 8)}…`
   }
   if (parsed.page === 'Ombor' || parsed.page === 'Kategoriyalar' || parsed.page === 'Qoldiqlar') {
     if (parsed.page === 'Ombor') return 'Ombor / Mahsulotlar'

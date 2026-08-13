@@ -33,7 +33,7 @@ export default function SearchableCombobox({
   getValue = (item) => item.value ?? item.id,
   onSearch,
   minSearchLength = 2,
-  searchDebounceMs = 280,
+  searchDebounceMs = 400,
   placeholder = 'Qidirish...',
   emptyLabel = 'Tanlanmagan',
   required = false,

@@ -527,12 +527,12 @@ class ProductContractViewSet(ListModelMixin, RetrieveModelMixin,
     o'zgartirilmaydi/o'chirilmaydi (audit butunligi).
     """
     queryset           = (ProductContract.objects
-                          .select_related('product', 'order', 'zakaz',
+                          .select_related('product', 'order', 'zakaz', 'invoice',
                                           'created_by'))
     serializer_class   = ProductContractSerializer
     permission_classes = (IsAuthenticated,)
     filterset_fields   = ('product', 'contract_number', 'source_type',
-                          'order', 'zakaz', 'contract_date')
+                          'order', 'zakaz', 'invoice', 'contract_date')
     search_fields      = ('contract_number', 'faktura', 'asos',
                           'product__name', 'product__serial_number')
     ordering_fields    = ('created_at', 'contract_date')

@@ -113,6 +113,7 @@ class Command(BaseCommand):
         parser.add_argument('--payments', type=int, default=40, help="To'lovlar soni")
         parser.add_argument('--orders',   type=int, default=20, help='Buyurtmalar soni')
         parser.add_argument('--zakazlar', type=int, default=15, help='Zakazlar soni')
+        parser.add_argument('--invoices', type=int, default=5, help='Elektron shartnomalar (SK) soni')
 
     @transaction.atomic
     def handle(self, *args, **options):
@@ -148,6 +149,8 @@ class Command(BaseCommand):
         self._seed_payments(options['payments'], sales, clients)
         self._seed_orders(options['orders'], products, clients, users)
         self._seed_zakazlar(options['zakazlar'], products, users)
+        self._seed_company_profile()
+        self._seed_invoices(options['invoices'], products, clients, users)
         self._seed_notifications(products, users)
         self._seed_telegram_settings()
 
@@ -157,7 +160,9 @@ class Command(BaseCommand):
     def _clear(self):
         from apps.cash.models import Payment
         from apps.clients.models import Client
+        from apps.common.company import CompanyProfile
         from apps.expenses.models import Expense, ExpenseSubType, ExpenseType
+        from apps.invoices.models import ElectronicInvoice
         from apps.notifications.models import Notification, TelegramSettings
         from apps.orders.models import Order, Zakaz
         from apps.sales.models import Sale
@@ -166,6 +171,7 @@ class Command(BaseCommand):
 
         self.stdout.write('>>> Baza tozalanmoqda...')
         Payment.objects.all().delete()   # PROTECT: Order/Sale dan oldin
+        ElectronicInvoice.objects.all().delete()
         Zakaz.objects.all().delete()
         Order.objects.all().delete()
         Sale.objects.all().delete()
@@ -191,6 +197,7 @@ class Command(BaseCommand):
             ('operator1',   'op1pass',  User.OPERATOR,   False),
             ('accountant1', 'acc1pass', User.ACCOUNTANT, False),
             ('manager1',    'mgr1pass', User.MANAGEMENT, True),
+            ('demo_ombor',  'Demo@2026!', User.MANAGEMENT, True),
         ]
         for username, pwd, role, can_view in fixed:
             u, _ = User.objects.get_or_create(
@@ -476,6 +483,8 @@ class Command(BaseCommand):
 
     # ── Orders (Bron) ─────────────────────────────────────────────────────────
     def _seed_orders(self, count, products, clients, users):
+        if count <= 0:
+            return
         from apps.orders.models import (Order, OrderItem, OrderHistory,
                                         ProductContract, register_contract,
                                         allocate_pending_orders)
@@ -657,6 +666,8 @@ class Command(BaseCommand):
 
     # ── Zakazlar (Etkazuvchidan buyurtma) ────────────────────────────────────────
     def _seed_zakazlar(self, count, products, users):
+        if count <= 0:
+            return
         from apps.orders.models import (Zakaz, ZakazHistory, ProductContract,
                                         register_contract)
         from apps.warehouse.models import Stock
@@ -811,6 +822,104 @@ class Command(BaseCommand):
             made += 1
 
         self.stdout.write(ok(f'{made} ta zakaz yaratildi (shartnoma/asos/faktura bilan)'))
+
+    def _seed_company_profile(self):
+        from apps.common.company import CompanyProfile
+
+        profile = CompanyProfile.get_profile()
+        profile.name = 'SwiftCore MChJ'
+        profile.stir = '305123456'
+        profile.director_jshshr = '301019900010017'
+        profile.director_fish = 'Karimov Jasur Akmal o\'g\'li'
+        profile.mfo = '00401'
+        profile.bank_name = 'Kapitalbank'
+        profile.oked = '62010'
+        profile.bank_account = '20208000123456789012'
+        profile.address = 'Toshkent shahri, Yunusobod tumani'
+        profile.phone = '+998939498849'
+        profile.save()
+        self.stdout.write(ok('Korxona profili to\'ldirildi (SwiftCore MChJ)'))
+
+    def _seed_invoices(self, count, products, clients, users):
+        from datetime import date, timedelta
+
+        from apps.invoices.models import DocumentType, ElectronicInvoice, InvoiceLineItem, VatPercent
+        from apps.invoices.services import sync_invoice_contract_registry
+        from apps.users.models import User
+
+        if not products or not clients:
+            return
+
+        creator = next((u for u in users if u.username == 'demo_ombor'), None)
+        if not creator:
+            creator = next((u for u in users if u.is_management), users[0])
+
+        legal_clients = [c for c in clients if getattr(c, 'client_type', '') == 'legal']
+        pick_clients = legal_clients or clients
+
+        samples = [
+            {
+                'contract_number': '1/1308',
+                'place_signed': 'Toshkent shahri',
+                'content_title': '1. Tez kelishi kere',
+                'content_body': 'Nimadir',
+            },
+            {
+                'contract_number': '2/1308',
+                'place_signed': 'Toshkent shahri',
+                'content_title': '1. Yetkazish shartlari',
+                'content_body': 'Mahsulotlar omborga yetkazilguncha shartnoma amal qiladi.',
+            },
+        ]
+
+        made = 0
+        today = timezone.now().date()
+        for i in range(count):
+            product = products[i % len(products)]
+            client = pick_clients[i % len(pick_clients)]
+            sample = samples[i % len(samples)]
+            contract_date = today - timedelta(days=i * 3)
+            valid_until = date(contract_date.year, 12, 31)
+
+            invoice = ElectronicInvoice.objects.create(
+                document_type=DocumentType.CONTRACT_SK,
+                name='Shartnoma',
+                contract_number=sample['contract_number'] if i < len(samples) else f'{i + 1}/1308',
+                place_signed=sample.get('place_signed', 'Toshkent shahri'),
+                contract_date=contract_date,
+                valid_until=valid_until,
+                client=client,
+                reverse_calculation=False,
+                content_title=sample.get('content_title', '1.'),
+                content_body=sample.get('content_body', ''),
+                comment='Seed buyurtma',
+                created_by=creator,
+            )
+
+            qty = 10 - i if i < 5 else 5
+            unit_price = Decimal('3000000') if product.selling_price is None else product.selling_price
+            delivery, vat, total = InvoiceLineItem.compute_line(
+                qty, unit_price, VatPercent.TWELVE,
+            )
+            InvoiceLineItem.objects.create(
+                invoice=invoice,
+                line_number=1,
+                product=product,
+                product_name=product.name,
+                identification_code=product.serial_number,
+                barcode=product.barcode or '',
+                unit=product.unit,
+                quantity=qty,
+                unit_price=unit_price,
+                delivery_amount=delivery,
+                vat_percent=VatPercent.TWELVE,
+                vat_amount=vat,
+                total_amount=total,
+            )
+            sync_invoice_contract_registry(invoice, created=True, user=creator)
+            made += 1
+
+        self.stdout.write(ok(f'{made} ta elektron shartnoma (SK) yaratildi'))
 
     # ── Notifications ─────────────────────────────────────────────────────────
     def _seed_notifications(self, products, users):

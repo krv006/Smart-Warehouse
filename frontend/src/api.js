@@ -7,14 +7,55 @@ let refreshPromise = null
 let authFailureHandler = null
 
 export class ApiError extends Error {
-  constructor(message, status) { super(message); this.status = status }
+  constructor(message, status, fields = null) {
+    super(message)
+    this.status = status
+    this.fields = fields
+  }
+}
+
+function fieldErrors(data) {
+  if (!data || typeof data !== 'object' || Array.isArray(data) || data.detail) return {}
+  const errors = {}
+  Object.entries(data).forEach(([key, value]) => {
+    if (key === 'non_field_errors') return
+    const flat = Array.isArray(value) ? value.flat(Infinity).filter(Boolean) : [value]
+    const message = flat.find((item) => typeof item === 'string')
+    if (message) errors[key] = message
+  })
+  return errors
 }
 
 function errorMessage(data) {
   if (!data || typeof data !== 'object') return 'So‘rovni bajarib bo‘lmadi.'
-  if (data.detail) return data.detail
+  if (data.detail) {
+    const detail = String(data.detail)
+    if (/throttled/i.test(detail)) {
+      const match = detail.match(/(\d+)\s+seconds?/i)
+      return match
+        ? `Juda ko‘p so‘rov yuborildi. ${match[1]} soniyadan keyin qayta urinib ko‘ring.`
+        : 'Juda ko‘p so‘rov yuborildi. Biroz kutib qayta urinib ko‘ring.'
+    }
+    return detail
+  }
   const messages = Object.values(data).flat(Infinity).filter(Boolean)
   return messages.join(' ') || 'So‘rovni bajarib bo‘lmadi.'
+}
+
+function retryAfterSeconds(response, data) {
+  const header = response.headers.get('Retry-After')
+  if (header) {
+    const parsed = Number.parseInt(header, 10)
+    if (Number.isFinite(parsed) && parsed > 0) return parsed
+  }
+  const detail = typeof data?.detail === 'string' ? data.detail : ''
+  const match = detail.match(/(\d+)\s+seconds?/i)
+  if (match) return Number.parseInt(match[1], 10)
+  return 2
+}
+
+function wait(ms) {
+  return new Promise((resolve) => { window.setTimeout(resolve, ms) })
 }
 
 async function readResponse(response) {
@@ -140,7 +181,7 @@ export async function download(path, filename = 'export.xlsx') {
 }
 
 export async function request(path, options = {}) {
-  const { skipAuth = false, retry = true, ...fetchOptions } = options
+  const { skipAuth = false, retry = true, throttleRetry = true, ...fetchOptions } = options
   let token = skipAuth ? null : localStorage.getItem(ACCESS_KEY)
   let response = await fetchRequest(path, fetchOptions, token)
 
@@ -155,10 +196,17 @@ export async function request(path, options = {}) {
     }
   }
 
+  let data = await readResponse(response)
+
+  if (response.status === 429 && throttleRetry) {
+    const delaySec = retryAfterSeconds(response, data)
+    await wait(Math.min(delaySec, 5) * 1000)
+    return request(path, { skipAuth, retry, throttleRetry: false, ...fetchOptions })
+  }
+
   if (response.status === 401 && !skipAuth) notifyAuthFailure()
-  const data = await readResponse(response)
   if (!response.ok) {
-    throw new ApiError(errorMessage(data), response.status)
+    throw new ApiError(errorMessage(data), response.status, fieldErrors(data))
   }
   return data
 }

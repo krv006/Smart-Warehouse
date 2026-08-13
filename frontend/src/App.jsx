@@ -16,8 +16,9 @@ import FieldError from './components/FieldError'
 import EmptyState from './components/EmptyState'
 import StatusChangeModal, { InlineStatusSelect } from './components/StatusChangeModal'
 import { buildListQueryParams, emptyStateConfig, exportRowsCsv, hasActiveListFilters } from './listFilters'
-import { clientDetailPath, crumbFromPath, parseAppPath, pathForPage } from './routes'
+import { clientDetailPath, crumbFromPath, invoiceDetailPath, invoiceEditPath, invoiceNewPath, parseAppPath, pathForPage } from './routes'
 import { clientOptionLabel, clientSearchText, fetchClient, searchClients } from './lib/clients'
+import { validateClientFields, validateCompanyProfile } from './lib/uzValidators'
 
 const NAV_GROUPS = {
   Ombor: [
@@ -1206,6 +1207,7 @@ const emptyCompanyProfile = () => ({
   bank_account: '',
   address: '',
   phone: '',
+  email: '',
 })
 
 function CompanyProfileModal({ close, notify, session }) {
@@ -1213,6 +1215,40 @@ function CompanyProfileModal({ close, notify, session }) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState(emptyCompanyProfile)
+  const [errors, setErrors] = useState({})
+  const [validatedOnce, setValidatedOnce] = useState(false)
+
+  const clearFieldError = (key) => {
+    setErrors((current) => {
+      if (!current[key]) return current
+      const next = { ...current }
+      delete next[key]
+      return next
+    })
+  }
+
+  const updateField = (key, value) => {
+    clearFieldError(key)
+    setForm((current) => ({ ...current, [key]: value }))
+  }
+
+  const runValidation = () => {
+    const nextErrors = validateCompanyProfile(form)
+    setErrors(nextErrors)
+    setValidatedOnce(true)
+    return nextErrors
+  }
+
+  const handleFieldBlur = (key) => {
+    if (!validatedOnce) return
+    const nextErrors = validateCompanyProfile(form)
+    setErrors((current) => {
+      const next = { ...current }
+      if (nextErrors[key]) next[key] = nextErrors[key]
+      else delete next[key]
+      return next
+    })
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -1230,6 +1266,7 @@ function CompanyProfileModal({ close, notify, session }) {
             bank_account: data.bank_account || '',
             address: data.address || '',
             phone: data.phone || '',
+            email: data.email || '',
           })
         }
       })
@@ -1241,21 +1278,34 @@ function CompanyProfileModal({ close, notify, session }) {
   const submit = async (event) => {
     event.preventDefault()
     if (!canEdit) return
+    const nextErrors = runValidation()
+    if (Object.keys(nextErrors).length) {
+      document.querySelector('.company-profile-editor .field-error')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      return
+    }
     setSaving(true)
     try {
       await api.updateCompanyProfile(form)
+      window.dispatchEvent(new CustomEvent('company-profile-updated'))
       notify('Korxona profili saqlandi.', 'success')
       close()
     } catch (err) {
-      notify(err.message)
+      if (err.fields && Object.keys(err.fields).length) {
+        setErrors((current) => ({ ...current, ...err.fields }))
+        setValidatedOnce(true)
+      } else {
+        notify(err.message)
+      }
     } finally {
       setSaving(false)
     }
   }
 
+  const fieldClass = (key) => (errors[key] ? 'field-invalid' : '')
+
   return (
     <div className="modal-backdrop" role="presentation">
-      <form className="editor company-profile-editor" onSubmit={submit}>
+      <form className="editor company-profile-editor" onSubmit={submit} noValidate>
         <div className="editor-head">
           <div>
             <p className="eyebrow">PROFIL</p>
@@ -1270,16 +1320,104 @@ function CompanyProfileModal({ close, notify, session }) {
               {!canEdit && ' Faqat ko‘rish rejimi.'}
             </p>
             <div className="form-grid">
-              <label>STIR / INN<input value={form.stir} onChange={(e) => setForm({ ...form, stir: e.target.value })} disabled={!canEdit} /></label>
-              <label className="full-width">Nomi<input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} disabled={!canEdit} /></label>
-              <label>Rahbar JSHSHIR<input value={form.director_jshshr} onChange={(e) => setForm({ ...form, director_jshshr: e.target.value })} disabled={!canEdit} maxLength={14} /></label>
-              <label>Rahbar F.I.Sh.<input value={form.director_fish} onChange={(e) => setForm({ ...form, director_fish: e.target.value })} disabled={!canEdit} /></label>
-              <label>MFO<input value={form.mfo} onChange={(e) => setForm({ ...form, mfo: e.target.value })} disabled={!canEdit} /></label>
-              <label>Bank nomi<input value={form.bank_name} onChange={(e) => setForm({ ...form, bank_name: e.target.value })} disabled={!canEdit} /></label>
-              <label>OKED<input value={form.oked} onChange={(e) => setForm({ ...form, oked: e.target.value })} disabled={!canEdit} /></label>
-              <label>Hisob raqami<input value={form.bank_account} onChange={(e) => setForm({ ...form, bank_account: e.target.value })} disabled={!canEdit} /></label>
-              <label className="full-width">Manzil<textarea rows="2" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} disabled={!canEdit} /></label>
-              <label>Telefon<input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} disabled={!canEdit} /></label>
+              <label className={fieldClass('stir')}>STIR / INN
+                <input
+                  value={form.stir}
+                  onChange={(e) => updateField('stir', e.target.value.replace(/\D/g, '').slice(0, 9))}
+                  onBlur={() => handleFieldBlur('stir')}
+                  disabled={!canEdit}
+                  inputMode="numeric"
+                  placeholder="9 ta raqam"
+                  aria-invalid={Boolean(errors.stir)}
+                />
+                <FieldError message={errors.stir} />
+              </label>
+              <label className={`full-width${errors.name ? ' field-invalid' : ''}`}>Nomi
+                <input value={form.name} onChange={(e) => updateField('name', e.target.value)} disabled={!canEdit} />
+                <FieldError message={errors.name} />
+              </label>
+              <label className={fieldClass('director_jshshr')}>Rahbar JSHSHIR
+                <input
+                  value={form.director_jshshr}
+                  onChange={(e) => updateField('director_jshshr', e.target.value.replace(/\D/g, '').slice(0, 14))}
+                  onBlur={() => handleFieldBlur('director_jshshr')}
+                  disabled={!canEdit}
+                  inputMode="numeric"
+                  placeholder="14 ta raqam"
+                  aria-invalid={Boolean(errors.director_jshshr)}
+                />
+                <FieldError message={errors.director_jshshr} />
+              </label>
+              <label className={fieldClass('director_fish')}>Rahbar F.I.Sh.
+                <input value={form.director_fish} onChange={(e) => updateField('director_fish', e.target.value)} disabled={!canEdit} />
+                <FieldError message={errors.director_fish} />
+              </label>
+              <label className={fieldClass('mfo')}>MFO
+                <input
+                  value={form.mfo}
+                  onChange={(e) => updateField('mfo', e.target.value.replace(/\D/g, '').slice(0, 5))}
+                  onBlur={() => handleFieldBlur('mfo')}
+                  disabled={!canEdit}
+                  inputMode="numeric"
+                  placeholder="5 ta raqam"
+                  aria-invalid={Boolean(errors.mfo)}
+                />
+                <FieldError message={errors.mfo} />
+              </label>
+              <label className={fieldClass('bank_name')}>Bank nomi
+                <input value={form.bank_name} onChange={(e) => updateField('bank_name', e.target.value)} disabled={!canEdit} />
+                <FieldError message={errors.bank_name} />
+              </label>
+              <label className={fieldClass('oked')}>OKED
+                <input
+                  value={form.oked}
+                  onChange={(e) => updateField('oked', e.target.value.replace(/\D/g, '').slice(0, 5))}
+                  onBlur={() => handleFieldBlur('oked')}
+                  disabled={!canEdit}
+                  inputMode="numeric"
+                  placeholder="5 ta raqam"
+                  aria-invalid={Boolean(errors.oked)}
+                />
+                <FieldError message={errors.oked} />
+              </label>
+              <label className={fieldClass('bank_account')}>Hisob raqami
+                <input
+                  value={form.bank_account}
+                  onChange={(e) => updateField('bank_account', e.target.value.replace(/\D/g, '').slice(0, 20))}
+                  onBlur={() => handleFieldBlur('bank_account')}
+                  disabled={!canEdit}
+                  inputMode="numeric"
+                  placeholder="20 ta raqam"
+                  aria-invalid={Boolean(errors.bank_account)}
+                />
+                <FieldError message={errors.bank_account} />
+              </label>
+              <label className={`full-width${errors.address ? ' field-invalid' : ''}`}>Manzil
+                <textarea rows="2" value={form.address} onChange={(e) => updateField('address', e.target.value)} disabled={!canEdit} />
+                <FieldError message={errors.address} />
+              </label>
+              <label className={fieldClass('phone')}>Telefon
+                <input
+                  value={form.phone}
+                  onChange={(e) => updateField('phone', e.target.value)}
+                  onBlur={() => handleFieldBlur('phone')}
+                  disabled={!canEdit}
+                  placeholder="+998 XX XXX XX XX"
+                  aria-invalid={Boolean(errors.phone)}
+                />
+                <FieldError message={errors.phone} />
+              </label>
+              <label className={fieldClass('email')}>E-mail
+                <input
+                  type="email"
+                  value={form.email || ''}
+                  onChange={(e) => updateField('email', e.target.value)}
+                  onBlur={() => handleFieldBlur('email')}
+                  disabled={!canEdit}
+                  aria-invalid={Boolean(errors.email)}
+                />
+                <FieldError message={errors.email} />
+              </label>
             </div>
           </>
         )}
@@ -1482,7 +1620,7 @@ function App() {
 
   const openBuyurtma = (clientId = null) => {
     if (!can(session, 'einvoice_manage')) return notify('Bu amalni bajarish uchun ruxsatingiz yo‘q.')
-    routerNavigate(pathForPage('Buyurtmalar'), { state: { newBuyurtma: true, clientId } })
+    routerNavigate(invoiceNewPath(), { state: clientId ? { clientId } : {} })
   }
 
   if (!session) return <Login onSuccess={setSession} />
@@ -1548,13 +1686,18 @@ function App() {
           />
         )}
         {routeInfo.kind !== 'client-detail' && active === 'Hisobotlar' && can(session, 'reports_view') && <ReportsPage notify={notify} />}
-        {(routeInfo.kind === 'page' || routeInfo.kind === 'invoice-detail') && active === 'Buyurtmalar' && can(session, 'einvoice_view') && (
+        {(routeInfo.kind === 'page' || routeInfo.kind === 'invoice-detail' || routeInfo.kind === 'invoice-new' || routeInfo.kind === 'invoice-edit') && active === 'Buyurtmalar' && can(session, 'einvoice_view') && (
           <BuyurtmalarPage
             notify={notify}
             session={session}
-            initialInvoiceId={routeInfo.kind === 'invoice-detail' ? routeInfo.invoiceId : null}
-            prefillClientId={location.state?.newBuyurtma ? (location.state?.clientId ?? null) : null}
-            startNew={Boolean(location.state?.newBuyurtma)}
+            routeMode={
+              routeInfo.kind === 'invoice-new' ? 'new'
+                : routeInfo.kind === 'invoice-edit' ? 'edit'
+                  : routeInfo.kind === 'invoice-detail' ? 'view'
+                    : 'list'
+            }
+            invoiceId={routeInfo.invoiceId || null}
+            prefillClientId={routeInfo.kind === 'invoice-new' ? (location.state?.clientId ?? null) : null}
           />
         )}
         {routeInfo.kind !== 'client-detail' && active !== 'Bosh sahifa' && active !== 'Hisobotlar' && active !== 'Buyurtmalar' && isAccessiblePage(session, active) && resources[active] && (
@@ -2592,7 +2735,7 @@ function getGridColumns(title, session, { renderStatus } = {}) {
   return []
 }
 
-function ContractDetailModal({ id, close, onNavigate }) {
+function ContractDetailModal({ id, close, onNavigate, navigateToPath }) {
   const [detail, setDetail] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -2645,11 +2788,17 @@ function ContractDetailModal({ id, close, onNavigate }) {
               <div><dt>Faktura</dt><dd>{detail.faktura || '—'}</dd></div>
               <div><dt>Buyurtma</dt><dd>{detail.order ? `#${detail.order}` : '—'}</dd></div>
               <div><dt>Import</dt><dd>{detail.zakaz ? `#${detail.zakaz}` : '—'}</dd></div>
+              <div><dt>Buyurtma (SK)</dt><dd>{detail.invoice ? detail.contract_number || `#${detail.invoice}` : '—'}</dd></div>
               <div><dt>Yaratgan</dt><dd>{detail.created_by_name || '—'}</dd></div>
               <div><dt>Yaratilgan vaqt</dt><dd>{detail.created_at || '—'}</dd></div>
             </dl>
-            {(detail.order || detail.zakaz) && onNavigate && (
+            {(detail.order || detail.zakaz || detail.invoice) && onNavigate && (
               <div className="contract-detail-links">
+                {detail.invoice && navigateToPath && (
+                  <button type="button" className="secondary-button" onClick={() => { close(); navigateToPath(invoiceDetailPath(detail.invoice)) }}>
+                    Buyurtmaga (SK) o‘tish
+                  </button>
+                )}
                 {detail.order && (
                   <button type="button" className="secondary-button" onClick={() => goTo('Buyurtmalar')}>
                     Buyurtmaga o‘tish
@@ -2948,7 +3097,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
           <h1>{getPageDisplayTitle(title)}</h1>
           {title === 'Shartnomalar' && (
             <p className="contracts-registry-note">
-              Yozuvlar avtomatik yaratiladi (buyurtma, import, kirim). Qo‘lda qo‘shish mumkin emas.
+              Yozuvlar avtomatik yaratiladi (buyurtma SK, import, kirim). Qo‘lda qo‘shish mumkin emas.
             </p>
           )}
         </div>
@@ -3125,6 +3274,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
           id={contractDetailId}
           close={() => setContractDetailId(null)}
           onNavigate={onNavigate}
+          navigateToPath={navigateToPath}
         />
       )}
       {statusChange && (
@@ -3147,18 +3297,7 @@ const fields = {
 }
 
 function validateClientForm(form) {
-  const errors = {}
-  if (form.client_type === 'legal') {
-    if (!(form.company_name || '').trim()) errors.company_name = 'Korxona nomi kiritilishi shart'
-    if (!(form.phone || '').trim()) errors.phone = 'Telefon kiritilishi shart'
-  } else {
-    if (!(form.full_name || '').trim()) errors.full_name = 'To‘liq ism kiritilishi shart'
-    if (!(form.pinfl || '').trim()) errors.pinfl = 'JSHR kiritilishi shart'
-    if (!(form.passport_number || '').trim()) errors.passport_number = 'Pasport kiritilishi shart'
-    if (!(form.phone || '').trim()) errors.phone = 'Telefon kiritilishi shart'
-  }
-  if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) errors.email = 'E-mail noto‘g‘ri'
-  return errors
+  return validateClientFields(form)
 }
 
 function validateEditorForm(title, form, visibleFields) {
@@ -3248,10 +3387,11 @@ function Editor({ title, item, path, close, done, notify, session }) {
       }
     }
     try {
-      item.id ? await api.update(path, item.id, payload) : await api.create(path, payload)
-      done()
+      const result = item.id ? await api.update(path, item.id, payload) : await api.create(path, payload)
+      done(result)
     } catch (err) {
-      notify(err.message)
+      if (err.fields && Object.keys(err.fields).length) setErrors((current) => ({ ...current, ...err.fields }))
+      else notify(err.message)
     } finally {
       setSaving(false)
     }
@@ -3290,10 +3430,16 @@ function Editor({ title, item, path, close, done, notify, session }) {
               {form.client_type === 'legal' ? (
                 <>
                   <label>Korxona nomi<input value={form.company_name ?? ''} onChange={(event) => setForm({ ...form, company_name: event.target.value })} /><FieldError message={errors.company_name} /></label>
-                  <label>INN (STIR)<input value={form.inn ?? ''} onChange={(event) => setForm({ ...form, inn: event.target.value })} /></label>
-                  <label>Rahbar JSHSHIR<input value={form.director_jshshr ?? ''} onChange={(event) => setForm({ ...form, director_jshshr: event.target.value })} /></label>
+                  <label className={errors.inn ? 'field-invalid' : ''}>INN (STIR)
+                    <input value={form.inn ?? ''} onChange={(event) => { setErrors((current) => { const next = { ...current }; delete next.inn; return next }); setForm({ ...form, inn: event.target.value.replace(/\D/g, '').slice(0, 9) }) }} inputMode="numeric" placeholder="9 ta raqam" aria-invalid={Boolean(errors.inn)} />
+                    <FieldError message={errors.inn} />
+                  </label>
+                  <label>Rahbar JSHSHIR<input value={form.director_jshshr ?? ''} onChange={(event) => setForm({ ...form, director_jshshr: event.target.value.replace(/\D/g, '').slice(0, 14) })} inputMode="numeric" placeholder="14 ta raqam" /></label>
                   <label>Rahbar F.I.Sh.<input value={form.director_fish ?? ''} onChange={(event) => setForm({ ...form, director_fish: event.target.value })} /></label>
-                  <label>MFO<input value={form.mfo ?? ''} onChange={(event) => setForm({ ...form, mfo: event.target.value })} /></label>
+                  <label className={errors.mfo ? 'field-invalid' : ''}>MFO
+                    <input value={form.mfo ?? ''} onChange={(event) => { setErrors((current) => { const next = { ...current }; delete next.mfo; return next }); setForm({ ...form, mfo: event.target.value.replace(/\D/g, '').slice(0, 5) }) }} inputMode="numeric" placeholder="5 ta raqam" aria-invalid={Boolean(errors.mfo)} />
+                    <FieldError message={errors.mfo} />
+                  </label>
                   <label>OKED<input value={form.oked ?? ''} onChange={(event) => setForm({ ...form, oked: event.target.value })} /></label>
                   <label>Bank nomi<input value={form.bank_name ?? ''} onChange={(event) => setForm({ ...form, bank_name: event.target.value })} /></label>
                   <label>Hisob raqami<input value={form.bank_account ?? ''} onChange={(event) => setForm({ ...form, bank_account: event.target.value })} /></label>
@@ -4120,6 +4266,207 @@ function EInvoiceFieldError({ message }) {
   return <span className="field-error" role="alert">{message}</span>
 }
 
+function invoiceProductsLabel(row) {
+  const lines = row.lines || []
+  if (!lines.length) return '—'
+  const names = lines.map((line) => line.product_name).filter(Boolean)
+  if (!names.length) return '—'
+  if (names.length === 1) return names[0]
+  return `${names[0]} (+${names.length - 1})`
+}
+
+function invoiceTotalQuantity(row) {
+  return (row.lines || []).reduce((sum, line) => sum + Number(line.quantity || 0), 0)
+}
+
+function buildInvoiceTotals(invoice) {
+  const lines = (invoice?.lines || []).map((line) => calcInvoiceLine(line, invoice?.reverse_calculation))
+  return lines.reduce((acc, line) => ({
+    delivery: acc.delivery + Number(line.delivery_amount || 0),
+    vat: acc.vat + Number(line.vat_amount || 0),
+    grand: acc.grand + Number(line.total_amount || 0),
+  }), { delivery: 0, vat: 0, grand: 0 })
+}
+
+function companyPartyData(company) {
+  return {
+    name: company?.name,
+    address: company?.address,
+    phone: company?.phone,
+    fax: company?.fax,
+    stir: company?.stir,
+    oked: company?.oked,
+    bank_account: company?.bank_account,
+    bank_name: company?.bank_name,
+    mfo: company?.mfo,
+    director_jshshr: company?.director_jshshr,
+    director_fish: company?.director_fish,
+  }
+}
+
+function clientPartyData(client) {
+  return {
+    name: client?.company_name || client?.full_name,
+    address: client?.address,
+    phone: client?.phone,
+    fax: client?.fax,
+    stir: client?.inn,
+    oked: client?.oked,
+    bank_account: client?.bank_account,
+    bank_name: client?.bank_name,
+    mfo: client?.mfo,
+    director_jshshr: client?.director_jshshr || client?.pinfl,
+    director_fish: client?.director_fish || client?.full_name,
+  }
+}
+
+function PartyInfoGrid({ data }) {
+  return (
+    <dl className="party-info-grid">
+      <div><dt>STIR</dt><dd>{data.stir || '—'}</dd></div>
+      <div><dt>Nomi</dt><dd>{data.name || '—'}</dd></div>
+      <div><dt>JSHSHIR</dt><dd>{data.director_jshshr || '—'}</dd></div>
+      <div><dt>F.I.Sh.</dt><dd>{data.director_fish || '—'}</dd></div>
+      <div><dt>MFO</dt><dd>{data.mfo || '—'}</dd></div>
+      <div><dt>Bank</dt><dd>{data.bank_name || '—'}</dd></div>
+      <div><dt>OKED</dt><dd>{data.oked || '—'}</dd></div>
+      <div><dt>Hisob raqami</dt><dd>{data.bank_account || '—'}</dd></div>
+      <div className="party-info-wide"><dt>Manzil</dt><dd>{data.address || '—'}</dd></div>
+      <div><dt>Telefon</dt><dd>{data.phone || '—'}</dd></div>
+      <div><dt>Faks</dt><dd>{data.fax || '—'}</dd></div>
+    </dl>
+  )
+}
+
+function ContractPartyRequisites({ title, data }) {
+  return (
+    <div className="contract-party-requisites">
+      <h4>{title}</h4>
+      <dl className="contract-party-requisites-list">
+        <div><dt>Nomi</dt><dd>{data.name || '—'}</dd></div>
+        <div><dt>Manzil</dt><dd>{data.address || '—'}</dd></div>
+        <div><dt>Telefon</dt><dd>{data.phone || '—'}</dd></div>
+        <div><dt>Faks</dt><dd>{data.fax || '—'}</dd></div>
+        <div><dt>STIR</dt><dd>{data.stir || '—'}</dd></div>
+        <div><dt>IFUT/OKED</dt><dd>{data.oked || '—'}</dd></div>
+        <div><dt>X/R</dt><dd>{data.bank_account || '—'}</dd></div>
+        <div><dt>Bank</dt><dd>{data.bank_name || '—'}</dd></div>
+        <div><dt>MFO</dt><dd>{data.mfo || '—'}</dd></div>
+      </dl>
+    </div>
+  )
+}
+
+function InvoiceContractModal({ invoice, company, client, showPrices, onClose, onEdit, canEdit }) {
+  const lines = (invoice.lines || []).map((line) => calcInvoiceLine(line, invoice.reverse_calculation))
+  const totals = buildInvoiceTotals(invoice)
+  const customerName = client?.company_name || client?.full_name || invoice.client_name || '—'
+  const validRange = invoice.valid_until
+    ? `${formatDateUz(invoice.contract_date)} — ${formatDateUz(invoice.valid_until)} gacha`
+    : formatDateUz(invoice.contract_date)
+
+  return (
+    <div className="modal-backdrop invoice-contract-backdrop" role="presentation" onClick={onClose}>
+      <div className="invoice-contract-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+        <header className="invoice-contract-head">
+          <div>
+            <h2>Shartnoma № {invoice.contract_number || '—'}</h2>
+            <p className="invoice-contract-subtitle">{documentTypeLabel(invoice.document_type)}</p>
+            <p className="invoice-contract-meta">
+              {[invoice.place_signed, validRange].filter(Boolean).join(' · ') || '—'}
+            </p>
+          </div>
+          <button type="button" className="icon-button" onClick={onClose} aria-label="Yopish"><X size={20} /></button>
+        </header>
+
+        <div className="invoice-contract-parties">
+          <div className="invoice-contract-party">
+            <span className="invoice-contract-party-label">Bajaruvchi</span>
+            <strong>{company?.name || '—'}</strong>
+          </div>
+          <div className="invoice-contract-party">
+            <span className="invoice-contract-party-label">Buyurtmachi</span>
+            <strong>{customerName}</strong>
+          </div>
+        </div>
+
+        <div className="invoice-contract-table-wrap">
+          <table className="invoice-contract-table">
+            <thead>
+              <tr>
+                <th>№</th>
+                <th>Mahsulot</th>
+                <th>Shtrix</th>
+                <th>Birlik</th>
+                <th>Soni</th>
+                {showPrices && (
+                  <>
+                    <th>Narx</th>
+                    <th>QQS%</th>
+                    <th>QQS</th>
+                    <th>Jami</th>
+                  </>
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {lines.map((line, index) => (
+                <tr key={index}>
+                  <td>{index + 1}</td>
+                  <td>{line.product_name || '—'}</td>
+                  <td>{line.barcode || '—'}</td>
+                  <td>{unitLabel(line.unit)}</td>
+                  <td>{money(line.quantity)}</td>
+                  {showPrices && (
+                    <>
+                      <td>{moneyDecimal(line.unit_price)}</td>
+                      <td>{vatLabel(line.vat_percent)}</td>
+                      <td>{moneyDecimal(line.vat_amount)}</td>
+                      <td><strong>{moneyDecimal(line.total_amount)}</strong></td>
+                    </>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {showPrices && (
+          <p className="invoice-contract-summary">
+            Yetkazish: <strong>{moneyDecimal(totals.delivery)}</strong>
+            {' · '}
+            QQS: <strong>{moneyDecimal(totals.vat)}</strong>
+            {' · '}
+            Jami: <strong>{moneyDecimal(totals.grand)}</strong>
+          </p>
+        )}
+
+        {(invoice.content_title || invoice.content_body) && (
+          <div className="invoice-contract-mazmun">
+            {invoice.content_title ? <strong>{invoice.content_title}</strong> : null}
+            {invoice.content_body ? <div className="invoice-contract-mazmun-body">{invoice.content_body}</div> : null}
+          </div>
+        )}
+
+        <section className="invoice-contract-requisites-section">
+          <h3>2. Tomonlarni yuridik manzillari va rekvizitlari</h3>
+          <div className="invoice-contract-requisites-grid">
+            <ContractPartyRequisites title="Bajaruvchi" data={companyPartyData(company)} />
+            <ContractPartyRequisites title="Buyurtmachi" data={clientPartyData(client) || { name: invoice.client_name }} />
+          </div>
+        </section>
+
+        <div className="invoice-contract-actions">
+          {canEdit && onEdit && (
+            <button type="button" className="secondary-button" onClick={onEdit}>Tahrirlash</button>
+          )}
+          <button type="button" className="primary-button" onClick={onClose}>Yopish</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function DocumentPreviewModal({ invoice, company, client, totals, showPrices, onClose }) {
   const lines = (invoice.lines || []).map((line) => calcInvoiceLine(line, invoice.reverse_calculation))
   const amountWords = numberToWordsUzbek(totals.grand)
@@ -4267,10 +4614,70 @@ function DocumentPreviewModal({ invoice, company, client, totals, showPrices, on
   )
 }
 
-function BuyurtmalarPage({ notify, session, initialInvoiceId = null, prefillClientId = null, startNew = false }) {
+function scrollToFirstEInvoiceError() {
+  document.querySelector('.e-invoice-form .field-error, .e-invoice-form .input-invalid, .e-invoice-form .field-invalid')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+}
+
+function ProductPickerModal({ products, onSelect, onClose }) {
+  const [query, setQuery] = useState('')
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return products
+    return products.filter((p) => {
+      const name = (p.name || '').toLowerCase()
+      const code = (p.serial_number || '').toLowerCase()
+      const barcode = (p.barcode || '').toLowerCase()
+      return name.includes(q) || code.includes(q) || barcode.includes(q)
+    })
+  }, [products, query])
+
+  return (
+    <div className="modal-backdrop product-picker-backdrop" role="presentation" onClick={onClose}>
+      <div className="product-picker-modal" role="dialog" aria-modal="true" aria-labelledby="product-picker-title" onClick={(event) => event.stopPropagation()}>
+        <div className="product-picker-head">
+          <div>
+            <p className="eyebrow">OMBOR</p>
+            <h3 id="product-picker-title">Tovarni tanlash</h3>
+          </div>
+          <button type="button" className="icon-button" onClick={onClose} aria-label="Yopish"><X size={20} /></button>
+        </div>
+        <label className="product-picker-search">
+          <MagnifyingGlass size={18} />
+          <input
+            autoFocus
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Nom, identifikatsiya kodi, shtrix kod..."
+          />
+        </label>
+        <div className="product-picker-list">
+          {filtered.length === 0 ? (
+            <p className="muted product-picker-empty">Tovar topilmadi.</p>
+          ) : (
+            filtered.map((product) => (
+              <button
+                type="button"
+                key={product.id}
+                className="product-picker-item"
+                onClick={() => onSelect(product)}
+              >
+                <span className="product-picker-item-name">{product.name}</span>
+                {product.serial_number ? <span className="product-picker-item-code">{product.serial_number}</span> : null}
+              </button>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null, prefillClientId = null }) {
   const navigate = useNavigate()
   const showPrices = can(session, 'prices_view')
   const canManage = can(session, 'einvoice_manage')
+  const isListPage = routeMode === 'list' || routeMode === 'view'
+  const isEditorPage = routeMode === 'new' || routeMode === 'edit'
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState(null)
@@ -4279,10 +4686,51 @@ function BuyurtmalarPage({ notify, session, initialInvoiceId = null, prefillClie
   const [company, setCompany] = useState(null)
   const [saving, setSaving] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
+  const [viewInvoice, setViewInvoice] = useState(null)
+  const [viewClient, setViewClient] = useState(null)
+  const [viewLoading, setViewLoading] = useState(false)
   const [contractNumberEdited, setContractNumberEdited] = useState(false)
   const [errors, setErrors] = useState({})
   const [validatedOnce, setValidatedOnce] = useState(false)
-  const routeBootstrapped = useRef(false)
+  const [clientQuickAddOpen, setClientQuickAddOpen] = useState(false)
+  const [productPickerLineIndex, setProductPickerLineIndex] = useState(null)
+  const routeBootstrapped = useRef('')
+  const notifyRef = useRef(notify)
+  const sessionRef = useRef(session)
+  const viewFetchKeyRef = useRef(null)
+
+  notifyRef.current = notify
+  sessionRef.current = session
+
+  const loadInvoiceForView = async (id) => {
+    const fetchKey = String(id)
+    if (!fetchKey || viewFetchKeyRef.current === fetchKey) return
+    viewFetchKeyRef.current = fetchKey
+    setViewLoading(true)
+
+    try {
+      const detail = await api.invoice(id)
+      if (viewFetchKeyRef.current !== fetchKey) return
+
+      let clientDetail = null
+      if (detail.client && can(sessionRef.current, 'clients_view')) {
+        clientDetail = await fetchClient(detail.client).catch(() => null)
+      }
+      if (viewFetchKeyRef.current !== fetchKey) return
+
+      setViewInvoice(detail)
+      setViewClient(clientDetail)
+    } catch (err) {
+      if (viewFetchKeyRef.current === fetchKey) {
+        viewFetchKeyRef.current = null
+        notifyRef.current(err.message)
+      }
+    } finally {
+      if (viewFetchKeyRef.current === fetchKey) {
+        setViewLoading(false)
+      }
+    }
+  }
 
   const clearFieldError = (key) => {
     setErrors((current) => {
@@ -4322,25 +4770,98 @@ function BuyurtmalarPage({ notify, session, initialInvoiceId = null, prefillClie
       setProducts(list(productData))
       setCompany(profile)
     } catch (err) {
-      notify(err.message)
+      notifyRef.current(err.message)
     } finally {
       setLoading(false)
     }
-  }, [notify, session])
+  }, [session?.id])
+
+  const refreshCompanyProfile = useCallback(async () => {
+    try {
+      const profile = await api.companyProfile()
+      setCompany(profile)
+      return profile
+    } catch (err) {
+      notifyRef.current(err.message)
+      return null
+    }
+  }, [])
 
   useEffect(() => { load() }, [load])
 
   useEffect(() => {
-    if (!editing?.client || !can(session, 'clients_view')) {
+    const handler = () => { refreshCompanyProfile() }
+    window.addEventListener('company-profile-updated', handler)
+    return () => window.removeEventListener('company-profile-updated', handler)
+  }, [refreshCompanyProfile])
+
+  useEffect(() => {
+    if (!editing?.client || !can(sessionRef.current, 'clients_view')) {
       setSelectedClientDetail(null)
       return undefined
     }
     let cancelled = false
     fetchClient(editing.client)
       .then((detail) => { if (!cancelled) setSelectedClientDetail(detail) })
-      .catch((err) => { if (!cancelled) { setSelectedClientDetail(null); notify(err.message) } })
+      .catch((err) => { if (!cancelled) { setSelectedClientDetail(null); notifyRef.current(err.message) } })
     return () => { cancelled = true }
-  }, [editing?.client, session, notify])
+  }, [editing?.client])
+
+  const closeView = () => {
+    setViewInvoice(null)
+    setViewClient(null)
+    viewFetchKeyRef.current = null
+    setViewLoading(false)
+    if (routeMode === 'view') {
+      navigate(pathForPage('Buyurtmalar'))
+    }
+  }
+
+  const openView = (row) => {
+    void loadInvoiceForView(row.id)
+  }
+
+  useEffect(() => {
+    if (routeMode !== 'view' || !invoiceId) return undefined
+    void loadInvoiceForView(invoiceId)
+    return undefined
+  }, [routeMode, invoiceId])
+
+  const openEditFromView = () => {
+    if (!viewInvoice?.id) return
+    const id = viewInvoice.id
+    setViewInvoice(null)
+    setViewClient(null)
+    navigate(invoiceEditPath(id))
+  }
+
+  const buyurtmaColumns = useMemo(() => {
+    const cols = [
+      { key: 'idx', label: '№', render: (row) => rows.findIndex((item) => item.id === row.id) + 1 },
+      { key: 'client', label: 'Mijoz', render: (row) => row.client_name || '—' },
+      { key: 'contract', label: 'Shartnoma', render: (row) => row.contract_number || '—' },
+      { key: 'product', label: 'Mahsulot', render: (row) => invoiceProductsLabel(row) },
+      { key: 'qty', label: 'Soni', render: (row) => money(invoiceTotalQuantity(row)) },
+    ]
+    if (showPrices) {
+      cols.push({
+        key: 'total',
+        label: 'Jami summa',
+        render: (row) => (row.grand_total != null ? `${moneyDecimal(row.grand_total)} so'm` : '—'),
+      })
+    }
+    cols.push({
+      key: 'date',
+      label: 'Muddat',
+      render: (row) => formatDateUz(row.contract_date) || '—',
+    })
+    cols.push({
+      key: 'type',
+      label: 'Turi',
+      render: (row) => row.document_type_display || documentTypeLabel(row.document_type),
+    })
+    return cols
+  }, [showPrices, rows])
 
   const closeEditor = () => {
     setContractNumberEdited(false)
@@ -4348,26 +4869,10 @@ function BuyurtmalarPage({ notify, session, initialInvoiceId = null, prefillClie
     setValidatedOnce(false)
     setPreviewOpen(false)
     setEditing(null)
-    if (initialInvoiceId) navigate(pathForPage('Buyurtmalar'))
+    navigate(pathForPage('Buyurtmalar'))
   }
 
-
-  useEffect(() => {
-    if (!editing || editing.id || contractNumberEdited || !editing.contract_date) return
-    let cancelled = false
-    api.nextContractNumber({ contract_date: editing.contract_date })
-      .then((data) => {
-        if (!cancelled) {
-          setEditing((current) => (
-            current && !current.id ? { ...current, contract_number: data.contract_number || '' } : current
-          ))
-        }
-      })
-      .catch((err) => notify(err.message))
-    return () => { cancelled = true }
-  }, [editing?.id, contractNumberEdited, editing?.contract_date, notify])
-
-  const openNew = (clientId = '') => {
+  const initNewEditor = (clientId = '') => {
     setContractNumberEdited(false)
     setErrors({})
     setValidatedOnce(false)
@@ -4388,9 +4893,13 @@ function BuyurtmalarPage({ notify, session, initialInvoiceId = null, prefillClie
     })
   }
 
-  const openEdit = async (row) => {
+  const loadEditor = async (id) => {
     try {
-      const detail = await api.invoice(row.id)
+      const [detail, profile] = await Promise.all([
+        api.invoice(id),
+        api.companyProfile(),
+      ])
+      setCompany(profile)
       setContractNumberEdited(true)
       setErrors({})
       setValidatedOnce(false)
@@ -4398,7 +4907,7 @@ function BuyurtmalarPage({ notify, session, initialInvoiceId = null, prefillClie
       setEditing({
         ...detail,
         client: detail.client || '',
-        lines: (detail.lines?.length ? detail.lines : [emptyInvoiceLine()]).map((line, i) => ({
+        lines: (detail.lines?.length ? detail.lines : [emptyInvoiceLine()]).map((line) => ({
           ...line,
           product: line.product || '',
           quantity: String(line.quantity ?? 1),
@@ -4407,20 +4916,59 @@ function BuyurtmalarPage({ notify, session, initialInvoiceId = null, prefillClie
       })
     } catch (err) {
       notify(err.message)
+      navigate(pathForPage('Buyurtmalar'))
     }
   }
 
   useEffect(() => {
-    if (routeBootstrapped.current) return
-    routeBootstrapped.current = true
-    if (initialInvoiceId) {
-      openEdit({ id: initialInvoiceId })
-    } else if (startNew && canManage) {
-      openNew(prefillClientId)
-      navigate(pathForPage('Buyurtmalar'), { replace: true, state: {} })
+    const key = `${routeMode}:${invoiceId || ''}:${prefillClientId || ''}`
+    if (routeBootstrapped.current === key) return
+    routeBootstrapped.current = key
+
+    if (routeMode === 'new') {
+      if (!canManage) {
+        notify('Bu amalni bajarish uchun ruxsatingiz yo‘q.')
+        navigate(pathForPage('Buyurtmalar'))
+        return
+      }
+      initNewEditor(prefillClientId || '')
+      return
+    }
+    if (routeMode === 'edit' && invoiceId) {
+      if (!canManage) {
+        notify('Bu amalni bajarish uchun ruxsatingiz yo‘q.')
+        navigate(pathForPage('Buyurtmalar'))
+        return
+      }
+      loadEditor(invoiceId)
+      return
+    }
+    if (routeMode === 'list') {
+      setEditing(null)
+      setViewInvoice(null)
+      setViewClient(null)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialInvoiceId, startNew, prefillClientId, canManage])
+  }, [routeMode, invoiceId, prefillClientId, canManage])
+
+  useEffect(() => {
+    if (!editing || editing.id || contractNumberEdited || !editing.contract_date) return
+    let cancelled = false
+    api.nextContractNumber({ contract_date: editing.contract_date })
+      .then((data) => {
+        if (!cancelled) {
+          setEditing((current) => (
+            current && !current.id ? { ...current, contract_number: data.contract_number || '' } : current
+          ))
+        }
+      })
+      .catch((err) => notify(err.message))
+    return () => { cancelled = true }
+  }, [editing?.id, contractNumberEdited, editing?.contract_date, notify])
+
+  const openEdit = (row) => {
+    navigate(invoiceEditPath(row.id))
+  }
 
   const updateLine = (index, patch) => {
     clearLineErrors()
@@ -4491,11 +5039,13 @@ function BuyurtmalarPage({ notify, session, initialInvoiceId = null, prefillClie
     }), { delivery: 0, vat: 0, grand: 0 })
   }, [editing?.lines])
 
-  const handlePreview = () => {
-    const nextErrors = runValidation()
+  const handlePreview = async () => {
+    const profile = await refreshCompanyProfile()
+    const nextErrors = validateEInvoice(editing, { showPrices, company: profile })
+    setErrors(nextErrors)
+    setValidatedOnce(true)
     if (Object.keys(nextErrors).length) {
-      notify('Hujjatni ko‘rsatishdan oldin qizil maydonlarni to‘ldiring.', 'warning')
-      document.querySelector('.e-invoice-form .field-error, .e-invoice-form .input-invalid, .e-invoice-form .field-invalid')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      scrollToFirstEInvoiceError()
       return
     }
     setPreviewOpen(true)
@@ -4510,7 +5060,10 @@ function BuyurtmalarPage({ notify, session, initialInvoiceId = null, prefillClie
     event.preventDefault()
     if (!canManage) return notify('Bu amalni bajarish uchun ruxsatingiz yo‘q.')
     const nextErrors = runValidation()
-    if (Object.keys(nextErrors).length) return
+    if (Object.keys(nextErrors).length) {
+      scrollToFirstEInvoiceError()
+      return
+    }
     setSaving(true)
     try {
       const payload = {
@@ -4559,32 +5112,52 @@ function BuyurtmalarPage({ notify, session, initialInvoiceId = null, prefillClie
   const selectedClient = selectedClientDetail
 
   return (
-    <div className="page e-invoice-page">
+    <div className={`page e-invoice-page${isEditorPage ? ' e-invoice-page--editor' : ''}`}>
       <div className="page-heading">
         <div>
           <p className="eyebrow">MODUL</p>
-          <h1>Buyurtmalar</h1>
+          <h1>{isEditorPage ? (routeMode === 'new' ? 'Yangi buyurtma' : 'Buyurtmani tahrirlash') : 'Buyurtmalar'}</h1>
         </div>
-        {canManage && !editing && (
-          <button className="primary-button" onClick={() => openNew()}><Plus size={20} />Yangi buyurtma</button>
+        {canManage && isListPage && (
+          <button className="primary-button" type="button" onClick={() => navigate(invoiceNewPath())}><Plus size={20} />Yangi buyurtma</button>
         )}
       </div>
 
-      {!editing ? (
-        <section className="data-panel">
-          <div className="panel-head"><div><p className="eyebrow">RO‘YXAT</p><h3>{rows.length} ta hujjat</h3></div></div>
-          {loading ? <SkeletonRows /> : !rows.length ? <Empty label="Hali buyurtma yo‘q." /> : (
-            <ul className="product-list">
-              {rows.map((row) => (
-                <li key={row.id} className="product-row product-row-clickable" onClick={() => navigate(`/buyurtmalar/${row.id}`)} role="button" tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); navigate(`/buyurtmalar/${row.id}`) } }}>
-                  <div><b>{row.contract_number || row.name || `#${row.id}`}</b><small>{row.document_type_display} • {row.client_name || '—'} • {row.contract_date || '—'}</small></div>
-                  <div>{showPrices ? `${money(row.grand_total)} UZS` : `${row.lines?.length || 0} qator`}</div>
-                </li>
-              ))}
-            </ul>
+      {isListPage ? (
+        <section className="data-panel buyurtmalar-panel">
+          <div className="panel-head">
+            <div>
+              <p className="eyebrow">RO‘YXAT</p>
+              <h3>{rows.length} ta hujjat</h3>
+            </div>
+          </div>
+          {viewLoading && !viewInvoice ? (
+            <div className="buyurtmalar-loading"><SpinnerGap size={28} className="spin" /></div>
+          ) : (
+            <DataTable
+              columns={buyurtmaColumns}
+              rows={rows}
+              rowKey={(row) => row.id}
+              loading={loading}
+              emptyLabel="Hali buyurtma yo‘q."
+              emptyCta={canManage ? { label: 'Hali buyurtma yo‘q.', ctaLabel: 'Yangi buyurtma', onCta: () => navigate(invoiceNewPath()) } : undefined}
+              onRowClick={(row) => openView(row)}
+              renderActions={(row) => (
+                <>
+                  <button type="button" className="row-action" aria-label="Shartnomani ko‘rish" onClick={(event) => { event.stopPropagation(); openView(row) }}>
+                    <Eye size={18} />
+                  </button>
+                  {canManage && (
+                    <button type="button" className="row-action" aria-label="Tahrirlash" onClick={(event) => { event.stopPropagation(); openEdit(row) }}>
+                      <PencilSimple size={18} />
+                    </button>
+                  )}
+                </>
+              )}
+            />
           )}
         </section>
-      ) : (
+      ) : isEditorPage && editing ? (
         <form className="e-invoice-form" onSubmit={submit}>
           <div className="e-invoice-toolbar">
             <button type="button" className="secondary-button" onClick={closeEditor}>Orqaga</button>
@@ -4645,57 +5218,52 @@ function BuyurtmalarPage({ notify, session, initialInvoiceId = null, prefillClie
             </div>
           </section>
 
-          <section className="e-invoice-section">
-            <h3>Sizning ma’lumotlaringiz</h3>
-            {errors.company ? <EInvoiceFieldError message={errors.company} /> : null}
-            <div className="info-grid">
-              <div><dt>STIR</dt><dd>{company?.stir || '—'}</dd></div>
-              <div><dt>Nomi</dt><dd>{company?.name || '—'}</dd></div>
-              <div><dt>JSHSHIR</dt><dd>{company?.director_jshshr || '—'}</dd></div>
-              <div><dt>F.I.Sh.</dt><dd>{company?.director_fish || '—'}</dd></div>
-              <div><dt>MFO</dt><dd>{company?.mfo || '—'}</dd></div>
-              <div><dt>Bank</dt><dd>{company?.bank_name || '—'}</dd></div>
-              <div><dt>OKED</dt><dd>{company?.oked || '—'}</dd></div>
-              <div><dt>Hisob raqami</dt><dd>{company?.bank_account || '—'}</dd></div>
-              <div><dt>Manzil</dt><dd>{company?.address || '—'}</dd></div>
-              <div><dt>Telefon</dt><dd>{company?.phone || '—'}</dd></div>
+          <section className="e-invoice-section e-invoice-parties-section">
+            <div className="e-invoice-parties-row">
+              <div className="e-invoice-party-panel">
+                <h3>Sizning ma’lumotlaringiz</h3>
+                {errors.company ? <EInvoiceFieldError message={errors.company} /> : null}
+                <PartyInfoGrid data={companyPartyData(company)} />
+              </div>
+              <div className="e-invoice-party-panel">
+                <div className="e-invoice-party-panel-head">
+                  <h3>Hamkorning ma’lumotlari</h3>
+                  {can(session, 'clients_manage') && (
+                    <button
+                      type="button"
+                      className="icon-button e-invoice-party-add"
+                      onClick={() => setClientQuickAddOpen(true)}
+                      aria-label="Yangi hamkor qo‘shish"
+                      title="Yangi hamkor qo‘shish"
+                    >
+                      <Plus size={18} weight="bold" />
+                    </button>
+                  )}
+                </div>
+                <SearchableCombobox
+                  id="e-invoice-client"
+                  label="Mijoz"
+                  value={editing.client || ''}
+                  onChange={(value) => { clearFieldError('client'); setEditing({ ...editing, client: value }) }}
+                  options={[]}
+                  selectedOption={selectedClientDetail}
+                  onSearch={can(session, 'clients_view') ? searchClients : undefined}
+                  getLabel={clientOptionLabel}
+                  getSearchText={clientSearchText}
+                  placeholder="F.I.Sh, INN/STIR, JSHSHIR, passport, kompaniya, email..."
+                  error={errors.client}
+                  required
+                />
+                {selectedClient && <PartyInfoGrid data={clientPartyData(selectedClient)} />}
+              </div>
             </div>
           </section>
 
           <section className="e-invoice-section">
-            <h3>Hamkorning ma’lumotlari</h3>
-            <SearchableCombobox
-              id="e-invoice-client"
-              label="Mijoz"
-              value={editing.client || ''}
-              onChange={(value) => { clearFieldError('client'); setEditing({ ...editing, client: value }) }}
-              options={[]}
-              selectedOption={selectedClientDetail}
-              onSearch={can(session, 'clients_view') ? searchClients : undefined}
-              getLabel={clientOptionLabel}
-              getSearchText={clientSearchText}
-              placeholder="F.I.Sh, INN/STIR, JSHSHIR, passport, kompaniya, email..."
-              error={errors.client}
-              required
-            />
-            {selectedClient && (
-              <div className="info-grid">
-                <div><dt>STIR/INN</dt><dd>{selectedClient.inn || '—'}</dd></div>
-                <div><dt>Nomi</dt><dd>{selectedClient.company_name || selectedClient.full_name || '—'}</dd></div>
-                <div><dt>JSHSHIR</dt><dd>{selectedClient.director_jshshr || selectedClient.pinfl || '—'}</dd></div>
-                <div><dt>F.I.Sh.</dt><dd>{selectedClient.director_fish || selectedClient.full_name || '—'}</dd></div>
-                <div><dt>MFO</dt><dd>{selectedClient.mfo || '—'}</dd></div>
-                <div><dt>Bank</dt><dd>{selectedClient.bank_name || '—'}</dd></div>
-                <div><dt>OKED</dt><dd>{selectedClient.oked || '—'}</dd></div>
-                <div><dt>Hisob raqami</dt><dd>{selectedClient.bank_account || '—'}</dd></div>
-                <div><dt>Manzil</dt><dd>{selectedClient.address || '—'}</dd></div>
-                <div><dt>Telefon</dt><dd>{selectedClient.phone || '—'}</dd></div>
-              </div>
-            )}
-          </section>
-
-          <section className="e-invoice-section">
             <h3>Mahsulot qatorlari</h3>
+            <p className="muted e-invoice-lines-note">
+              Shartnomalar reestriga tushishi uchun tovar ombordagi mahsulot bilan mos kelishi kerak (nom yoki identifikatsiya kodi).
+            </p>
             {errors.lines ? <EInvoiceFieldError message={errors.lines} /> : null}
             <div className="e-invoice-lines">
               <div className="e-invoice-lines-toolbar">
@@ -4736,16 +5304,27 @@ function BuyurtmalarPage({ notify, session, initialInvoiceId = null, prefillClie
                       <tr key={index}>
                         <td className="e-invoice-num">{index + 1}</td>
                         <td className="e-invoice-product">
-                          <input
-                            list={`einv-product-${index}`}
-                            value={line.product_name || ''}
-                            onChange={(e) => updateLineProductName(index, e.target.value)}
-                            onBlur={handleFieldBlur}
-                            placeholder="Tovar nomi"
-                            aria-label="Tovar nomi"
-                            aria-invalid={Boolean(errors[`lines.${index}.product_name`])}
-                            className={errors[`lines.${index}.product_name`] ? 'input-invalid' : ''}
-                          />
+                          <div className="e-invoice-product-field">
+                            <input
+                              list={`einv-product-${index}`}
+                              value={line.product_name || ''}
+                              onChange={(e) => updateLineProductName(index, e.target.value)}
+                              onBlur={handleFieldBlur}
+                              placeholder="Tovar nomi"
+                              aria-label="Tovar nomi"
+                              aria-invalid={Boolean(errors[`lines.${index}.product_name`])}
+                              className={errors[`lines.${index}.product_name`] ? 'input-invalid' : ''}
+                            />
+                            <button
+                              type="button"
+                              className="icon-button e-invoice-product-pick"
+                              onClick={() => setProductPickerLineIndex(index)}
+                              aria-label="Ombordan tovar tanlash"
+                              title="Ombordan tanlash"
+                            >
+                              <Package size={16} />
+                            </button>
+                          </div>
                           <datalist id={`einv-product-${index}`}>
                             {products.map((p) => <option value={p.name} key={p.id} />)}
                           </datalist>
@@ -4896,7 +5475,9 @@ function BuyurtmalarPage({ notify, session, initialInvoiceId = null, prefillClie
             </div>
           </section>
         </form>
-      )}
+      ) : isEditorPage ? (
+        <div className="buyurtmalar-loading"><SpinnerGap size={28} className="spin" /></div>
+      ) : null}
 
       {previewOpen && editing && (
         <DocumentPreviewModal
@@ -4906,6 +5487,48 @@ function BuyurtmalarPage({ notify, session, initialInvoiceId = null, prefillClie
           totals={totals}
           showPrices={showPrices}
           onClose={() => setPreviewOpen(false)}
+        />
+      )}
+
+      {viewInvoice && (
+        <InvoiceContractModal
+          invoice={viewInvoice}
+          company={company}
+          client={viewClient}
+          showPrices={showPrices}
+          onClose={closeView}
+          onEdit={canManage ? openEditFromView : null}
+          canEdit={canManage}
+        />
+      )}
+
+      {clientQuickAddOpen && can(session, 'clients_manage') && (
+        <Editor
+          title="Mijozlar"
+          item={{ client_type: 'legal' }}
+          path="/clients/"
+          close={() => setClientQuickAddOpen(false)}
+          done={(created) => {
+            setClientQuickAddOpen(false)
+            if (created?.id) {
+              clearFieldError('client')
+              setEditing((current) => (current ? { ...current, client: created.id } : current))
+              setSelectedClientDetail(created)
+            }
+          }}
+          notify={notify}
+          session={session}
+        />
+      )}
+
+      {productPickerLineIndex !== null && (
+        <ProductPickerModal
+          products={products}
+          onClose={() => setProductPickerLineIndex(null)}
+          onSelect={(product) => {
+            updateLine(productPickerLineIndex, { product: product.id })
+            setProductPickerLineIndex(null)
+          }}
         />
       )}
     </div>
