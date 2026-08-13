@@ -199,6 +199,7 @@ Timeout: **8 soniya**. Xato klassi: `ApiError(message, status, fields?)` — `fi
 | `createOrderZakaz(id, payload)` | POST | `/orders/{id}/create-zakaz/` | zakaz body |
 | `zakaz(params)` | GET | `/orders/zakaz/` | `page_size=30`, `status`, `product`, `order`, `contract_number` |
 | `zakazBulk(payload)` | POST | `/orders/zakaz/bulk/` | bulk zakaz body |
+| `zakazBatch(id)` | GET | `/orders/zakaz/{id}/batch/` | import guruhi (tahrir) |
 | `contracts(params)` | GET | `/orders/contracts/` | `page_size=30`, `product`, `contract_number`, `source_type`, `order`, `zakaz` |
 | `productContracts(id)` | GET | `/warehouse/products/{id}/contracts/` | — |
 | `categories(params)` | GET | `/warehouse/categories/` | `page_size=30`, `search` |
@@ -593,7 +594,7 @@ Chiqimlar kassa jurnalida `kind=out`, `source=import` ko‘rinadi. Excel export:
 }
 ```
 
-`product` va `new_product` bir vaqtda bo‘lmaydi. `unit_price` faqat Management uchun majburiy (mustaqil import).
+`product` va `new_product` **bitta qator** ichida bir vaqtda bo‘lmaydi. Bir importda bir nechta qator bo‘lsa, qatorlar orasida aralash mumkin: biri `product` (ombordan), boshqasi `new_product` (yangi mahsulot) — `POST /orders/zakaz/bulk/` orqali.
 
 **Serializer javobi:** `ZakazOperatorSerializer` `new_product` maydonini qaytaradi (write-only emas, read uchun).
 
@@ -1551,13 +1552,16 @@ POST /api/v1/orders/zakaz/
 POST /api/v1/orders/zakaz/bulk/
 ```
 
-Bir nechta mahsulot uchun zakaz yaratadi. Har bir `items` qatori mavjud `product` id yoki `new_product` (yangi mahsulot) qabul qiladi — ikkalasi bir vaqtda emas.
+Bir nechta mahsulot uchun zakaz yaratadi. Har bir `items` qatori mavjud `product` id yoki `new_product` (yangi mahsulot) qabul qiladi — **bitta qator** ichida ikkalasi bir vaqtda emas, lekin **turli qatorlarda aralash** bo‘lishi mumkin (ombordan + yangi mahsulot bir importda).
 
 ```json
 {
   "supplier": "Xitoy",
   "contract_number": "13/1108",
   "contract_date": "2026-08-13",
+  "currency": "UZS",
+  "payment_status": "partial",
+  "paid_amount": "500000.00",
   "items": [
     { "product": 12, "quantity": 5, "unit_price": "100000.00" },
     {
@@ -1573,9 +1577,15 @@ Bir nechta mahsulot uchun zakaz yaratadi. Har bir `items` qatori mavjud `product
 }
 ```
 
+`payment_status` / `paid_amount` / `currency` bulk so‘rovda umumiy maydon — barcha qatorlarga qo‘llanadi. `partial` bo‘lganda `paid_amount` qatorlar jami summasiga proporsional taqsimlanadi; **`paid_amount` jami summadan oshmasligi** va **narx (unit_price) bo‘lmasa qisman to‘lov qabul qilinmaydi**. To‘lov maydonlarini faqat **Management** yoki **Buxgalter** (`prices_manage` / `cash_manage`) yuboradi — Operator API orqali ham yubora olmaydi.
+
+Har bir bulk yaratishda barcha qatorlarga bir xil **`import_batch`** (UUID) yoziladi — jadvalda guruhlash va tahrir uchun.
+
+**Import guruhi (tahrir):** `GET /orders/zakaz/{id}/batch/` — `import_batch` yoki `contract_number` + `contract_date` + `supplier` bo‘yicha sibling qatorlar. `api.zakazBatch(id)`.
+
 Mahsulot dropdown formati: `{name} · raqam: {serial_number}` — bu identifikator, import miqdori emas (`quantity` alohida maydonda). `productOptionLabel()` (`App.jsx`).
 
-> **Bulk cheklov:** ko‘p qatorli yaratish (`POST /orders/zakaz/bulk/`) faqat `supplier`, `contract_number`, `contract_date`, `expected_date`, `items[]` yuboradi. **`payment_status` / `paid_amount` / `currency` bulk da yuborilmaydi** — to‘lov holati faqat bitta qatorli `POST /orders/zakaz/` da (`importRows.length === 1`). Ko‘p qator + to‘lov holati kerak bo‘lsa, har bir zakazni alohida yarating yoki backend kengaytiring.
+> **Bulk yaratish:** ko‘p qatorli import har doim `POST /orders/zakaz/bulk/` orqali yuboriladi (1 yoki ko‘p qator). **`payment_status` / `paid_amount` / `currency`** bulk da qo‘llab-quvvatlanadi. Tahrirda guruh ko‘rinishi uchun **shartnoma raqami** (`contract_number`) kiritilgan bo‘lishi kerak.
 
 ---
 
@@ -1591,7 +1601,7 @@ Komponent: `ResourcePage` (`App.jsx`, `title="Import"`). Grid: `GRID_PAGES`, `pa
 | Sarlavha (H1) | `Import` |
 | Asosiy tugma | **`+ Yangi qo‘shish`** — `procurement_manage` bo‘lsa; `ZakazEditor` modali ochiladi (`setEditing({})`) |
 | Panel eyebrow | `RO‘YXAT` |
-| Panel sarlavha | `{N} ta yozuv` (`totalCount`) |
+| Panel sarlavha | **`{N} ta import · {M} qator`** — guruhlangan import soni + API qatorlari (`displayRows` / `totalCount`) |
 | Qidiruv | placeholder: **`Qidirish`**; submit → `search` query param |
 
 #### Bulk amallar (`BulkActionsBar`, tanlangan qatorlar)
@@ -1605,17 +1615,17 @@ Komponent: `ResourcePage` (`App.jsx`, `title="Import"`). Grid: `GRID_PAGES`, `pa
 
 | Ustun | Label | Maydon / render |
 |---|---|---|
-| ID | `ID` | `id` |
-| Mahsulot | `Mahsulot` | `product_name` |
-| Tur | `Tur` | `zakaz_type`: **`Mustaqil`** (`manual`) yoki **`Backorder`** |
+| ID | `ID` | `id` yoki guruhda `5–6` |
+| Mahsulot | `Mahsulot` | `product_name` yoki guruhda **`2 ta mahsulot`** (hover: ro‘yxat) |
+| Tur | `Tur` | `zakaz_type`: **`Mustaqil`** / **`Backorder`** |
 | Shartnoma | `Shart.` | `contract_number` |
-| Miqdor | `Zak.` | `quantity` |
-| Summa | `Summa` | `total` + `currency` — faqat `prices_view` |
-| To‘lov | `To‘lov` | `payment_status` badge: **`To‘lanmagan`** / **`Qisman`** / **`To‘langan`** |
-| Qabul | `Qabul` | `received_qty` |
+| Miqdor | `Zak.` | `quantity` — guruhda **yig‘indi** |
+| Summa | `Summa` | `total` + `currency` — faqat `prices_view`; guruhda jami |
+| To‘lov | `To‘lov` | **`To‘lanmagan`** / **`Qisman · {summa}`** / **`To‘langan`** / **`Aralash`** |
+| Qabul | `Qabul` | `received_qty` — guruhda yig‘indi |
 | Yetkazuvchi | `Etkaz.` | `supplier` |
 | Kutilgan sana | `Kutil.` | `expected_date` |
-| Holati | `Holati` | `status` — inline `InlineStatusSelect` (`order_status_manage`) |
+| Holati | `Holati` | inline status; guruhda farq qilsa **`Aralash`** |
 | Yaratuvchi | `Yaratdi` | `created_by_name` |
 
 Sort (`GRID_SORT_FIELDS`): `id`, `product`→`created_at`, `created_at`, `status`, `supplier`, `expected_date`.
@@ -1632,7 +1642,8 @@ Sort (`GRID_SORT_FIELDS`): `id`, `product`→`created_at`, `created_at`, `status
 | Element | Matn |
 |---|---|
 | Eyebrow | **`IMPORT TARIXI`** |
-| Sarlavha | `{product_name}` yoki `Import #{id}` |
+| Sarlavha | `{product_name}` / guruhda **`{N} ta mahsulot — import tarixi`** |
+| Guruh | Har bir mahsulot uchun alohida tarix bloklari (`_batchHistory`) |
 | Bo‘sh holat | **`Tarix yozuvlari yo‘q.`** |
 | Har yozuv | `action_display`, `{old_status} → {new_status}`, `asos`, sana/vaqt |
 
@@ -1681,9 +1692,11 @@ Ability kalitlari:
 
 | Ability | Ta’sir |
 |---|---|
-| `prices_manage` | Narx, valyuta, to‘lov statusi, yangi mahsulot narxi |
-| `prices_view` | Gridda summa ustuni (editor narx kiritish emas) |
+| `prices_manage` | Narx, valyuta, yangi mahsulot narxi (Management) |
+| `cash_manage` | To‘lov statusi va qisman summa (Buxgalter) — `showPayment` |
+| `prices_view` | Gridda summa ustuni |
 | `order_status_manage` | Status select, `received_qty` |
+| Operator (`procurement_manage` only) | Import yaratadi/tahrirlaydi; to‘lov maydonlari **ko‘rinmaydi** (hint matn) |
 
 #### 9b.1. MAHSULOTLAR bloki (faqat yangi mustaqil import)
 
@@ -1733,8 +1746,9 @@ Frontend validatsiya (toast xato):
 
 | Label | Maydon | Eslatma |
 |---|---|---|
-| Valyuta | `<select>` | **`UZS`** / **`USD`** — faqat `prices_manage` va backorder emas |
-| To‘lov statusi | `<select>` | **`To‘lanmagan`** / **`Qisman`** / **`To‘langan`** |
+| Valyuta | `<select>` | **`UZS`** / **`USD`** — `showPayment` (`prices_manage` \|\| `cash_manage`) |
+| To‘lov statusi | `<select>` | **`To‘lanmagan`** / **`Qisman`** / **`To‘langan`** — `showPayment` |
+| Operator hint | **`To‘lov holati (qisman / to‘langan) faqat boshqaruv yoki buxgalter tomonidan belgilanadi.`** | `!showPayment` |
 | Qisman to‘langan summa | `number` | faqat `partial`; placeholder: **`Masalan, 500000`** |
 | Hint (partial) | **`Kiritilgan summa saqlangach kassadan chiqim (xarajat) sifatida yoziladi.`** | |
 | Hint (unpaid) | **`To‘lanmagan import summasi kassadan chiqim sifatida yoziladi.`** | |
@@ -1754,10 +1768,9 @@ USD tanlanganda: **`FxRatePanel`** (`compact`) — Import editor ichida kurs.
 
 | Holat | Chaqiruv |
 |---|---|
-| 1 qator, `existing` | `POST /orders/zakaz/` — `product`, `quantity`, umumiy maydonlar, ixtiyoriy `payment_status` / `paid_amount` |
-| 1 qator, `new` | `POST /orders/zakaz/` — `new_product`, `quantity`, … |
-| 2+ qator | `POST /orders/zakaz/bulk/` — faqat `items[]` + shartnoma/yetkazuvchi (to‘lov maydonlari **yo‘q**) |
-| Mavjud yozuv | `PATCH /orders/zakaz/{id}/` |
+| Yangi import (1+ qator, aralash manba) | `POST /orders/zakaz/bulk/` — `items[]` + umumiy maydonlar + ixtiyoriy `payment_status` / `paid_amount` / `currency` |
+| Mavjud import (guruh) | `GET /orders/zakaz/{id}/batch/` → barcha qatorlar; saqlash — har bir qator uchun `PATCH /orders/zakaz/{id}/` |
+| Mavjud import (yagona) | `PATCH /orders/zakaz/{id}/` |
 
 Muvaffaqiyat toast: **`Import yaratildi.`** / **`Import yangilandi.`**
 
@@ -1767,9 +1780,10 @@ Operator (`prices_manage` yo‘q): payload dan `unit_price`, `currency`, `paymen
 
 **Frontend (`ZakazEditor`) — qisqa xulosa:**
 
-- Har qator **`Manba`** dropdown: **`Ombordan tanlash`** yoki **`Yangi mahsulot`**.
+- Har qator **`Manba`** dropdown: **`Ombordan tanlash`** yoki **`Yangi mahsulot`** — bir importda ikkala tur **aralash** qatorlar bo‘lishi mumkin.
 - **`+ Qator qo‘shish`** — yangi import qatori.
-- 1 qator → `POST /orders/zakaz/`; 2+ → `POST /orders/zakaz/bulk/` (to‘lovsiz).
+- Yaratish → har doim `POST /orders/zakaz/bulk/` (`items[]` + to‘lov maydonlari).
+- Tahrir (qalamcha) → `GET /orders/zakaz/{id}/batch/` orqali shu shartnomadagi **barcha** mahsulot qatorlari ko‘rsatiladi.
 - Ombordan tanlanganda **Narx** avtomatik `purchase_price` (`prices_manage`).
 - `serial_number` bo‘sh bo‘lsa backend `IMP-{timestamp}` (`ensure_product_serial_number`).
 
@@ -2826,7 +2840,8 @@ notifications: 30s
 - USD kurs: `preferred_rate_source` (`infinbank` \| `manual` \| `bank`), `preferred_bank_code`, `preferred_bank_side`; `latest` javobidagi `mb_rate`, `market_rates`, `infinbank`/`manual`.
 - `FxRatePanel`: topbar — `header` (bank dropdown + kurs); editorlar — `compact` (dropdown + Qo‘lda). FX boshqaruv — `users_manage`.
 - Import grid status (inline + bulk) — `order_status_manage`, `procurement_manage` emas.
-- Import yangi modal: **`+ Qator qo‘shish`**, **`Manba`** → **`Ombordan tanlash`** / **`Yangi mahsulot`** — §9b; bulk da to‘lov maydonlari yuborilmaydi.
+- Import yangi modal: **`+ Qator qo‘shish`**, **`Manba`**, bulk **`POST /orders/zakaz/bulk/`** (to‘lov: Management/Buxgalter), jadval **guruhlangan** qatorlar — §9a–9b.
+- `import_batch` migratsiyasi: `orders.0007_zakaz_import_batch_*` — deploy da `migrate` majburiy.
 - `ZakazEditor` / Import grid barcha UI label matnlari §9a–9b da — yangi label qo‘shilsa hujjat yangilansin.
 - `SaleEditor`, `BuyurtmalarPage`: `api.products()` doim; mijoz qidiruv — `searchClients()` + `fetchClient()` faqat `clients_view`.
 - `DataTable` Amallar ustuni: `.row-actions` flex wrapper; grid da `flex-wrap: nowrap`, tugmalar 36px balandlik.
