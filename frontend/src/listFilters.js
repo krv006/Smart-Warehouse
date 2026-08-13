@@ -6,6 +6,7 @@ export const MODULE_STATUS_OPTIONS = {
   Import: [
     { value: 'new', label: 'Yangi' },
     { value: 'confirmed', label: 'Tasdiqlandi' },
+    { value: 'ordered', label: 'Etkazuvchiga yuborildi' },
     { value: 'received', label: 'Qabul qilindi' },
     { value: 'cancelled', label: 'Bekor qilindi' },
   ],

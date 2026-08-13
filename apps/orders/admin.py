@@ -144,6 +144,7 @@ class ZakazAdmin(admin.ModelAdmin):
     _STATUS_COLORS = {
         Zakaz.NEW:       ('#0d6efd', 'Yangi'),
         Zakaz.CONFIRMED: ('#6610f2', 'Tasdiqlandi'),
+        Zakaz.ORDERED:   ('#fd7e14', 'Yuborildi'),
         Zakaz.RECEIVED:  ('#198754', 'Qabul qilindi'),
         Zakaz.CANCELLED: ('#6c757d', 'Bekor'),
     }

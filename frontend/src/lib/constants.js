@@ -66,6 +66,7 @@ export const ORDER_STATUS_BADGES = {
   cancelled: { label: 'Bekor', tone: 'danger' },
   new: { label: 'Yangi', tone: 'info' },
   confirmed: { label: 'Tasdiqlandi', tone: 'info' },
+  ordered: { label: 'Etkazuvchiga yuborildi', tone: 'info' },
   received: { label: 'Qabul qilindi', tone: 'success' },
   paid: { label: 'To‘langan', tone: 'success' },
   overdue: { label: 'Muddati o‘tgan', tone: 'danger' },

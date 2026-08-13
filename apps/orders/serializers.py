@@ -753,8 +753,15 @@ class ZakazSerializer(ModelSerializer):
     # Har bir status o'zgarishi → reestrga qaysi turda yozilishi
     _CONTRACT_SOURCE = {
         Zakaz.CONFIRMED: ProductContract.ZAKAZ_CONFIRMED,
+        Zakaz.ORDERED:   ProductContract.ZAKAZ_ORDERED,
         Zakaz.RECEIVED:  ProductContract.ZAKAZ_RECEIVED,
         Zakaz.CANCELLED: ProductContract.ZAKAZ_CANCELLED,
+    }
+
+    _STATUS_TRANSITIONS = {
+        Zakaz.NEW:       (Zakaz.CONFIRMED, Zakaz.CANCELLED),
+        Zakaz.CONFIRMED: (Zakaz.ORDERED, Zakaz.CANCELLED),
+        Zakaz.ORDERED:   (Zakaz.RECEIVED, Zakaz.CANCELLED),
     }
 
     @transaction.atomic
@@ -778,6 +785,16 @@ class ZakazSerializer(ModelSerializer):
                     f'"{instance.get_status_display()}" statusidagi zakazni o\'zgartirib bo\'lmaydi.'
                 )
 
+            allowed = self._STATUS_TRANSITIONS.get(instance.status, ())
+            if new_status not in allowed:
+                raise ValidationError({
+                    'status': (
+                        f'"{instance.get_status_display()}" holatidan '
+                        f'"{dict(Zakaz.STATUS_CHOICES).get(new_status, new_status)}" '
+                        f'holatiga o\'tib bo\'lmaydi.'
+                    ),
+                })
+
             errors = {}
 
             # HAR BIR holat o'zgarishida ASOS majburiy (aynan shu o'tish uchun)
@@ -785,8 +802,8 @@ class ZakazSerializer(ModelSerializer):
                 errors['asos'] = (f'"{dict(Zakaz.STATUS_CHOICES).get(new_status, new_status)}" '
                                   f'holatiga o\'tish uchun asos kiritilishi shart.')
 
-            # HAR BIR ish holati (tasdiqlash/qabul) uchun SHARTNOMA majburiy
-            if new_status in (Zakaz.CONFIRMED, Zakaz.RECEIVED):
+            # HAR BIR ish holati (tasdiqlash/yuborish/qabul) uchun SHARTNOMA majburiy
+            if new_status in (Zakaz.CONFIRMED, Zakaz.ORDERED, Zakaz.RECEIVED):
                 contract = validated_data.get('contract_number') or instance.contract_number
                 if not contract:
                     errors['contract_number'] = (

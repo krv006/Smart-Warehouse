@@ -176,12 +176,15 @@ class BackorderZakazFlowTests(TestCase):
                                   'contract_number': 'SH-2026/900',
                                   'asos': 'Tasdiqlandi'}, format='json')
         self.assertEqual(r1.status_code, 200, r1.data)
-        # confirmed → received (faktura majburiy)
-        r2 = self.api.patch(url, {'status': 'received', 'received_qty': 3,
-                                  'contract_number': 'SH-2026/900',
+        # confirmed → ordered
+        r2 = self.api.patch(url, {'status': 'ordered',
+                                  'asos': 'Etkazuvchiga yuborildi'}, format='json')
+        self.assertEqual(r2.status_code, 200, r2.data)
+        # ordered → received (faktura majburiy)
+        r3 = self.api.patch(url, {'status': 'received', 'received_qty': 3,
                                   'faktura': 'F-900', 'asos': 'Qabul qilindi'},
                             format='json')
-        self.assertEqual(r2.status_code, 200, r2.data)
+        self.assertEqual(r3.status_code, 200, r3.data)
         # Ombor to'ldi, buyurtma to'liq bronlandi
         self.order.refresh_from_db()
         self.assertEqual(self.order.reserved_qty, 5)

@@ -5,6 +5,7 @@ import FieldError from './FieldError'
 const IMPORT_STATUS_LABELS = {
   new: 'Yangi',
   confirmed: 'Tasdiqlandi',
+  ordered: 'Etkazuvchiga yuborildi',
   received: 'Qabul qilindi',
   cancelled: 'Bekor qilindi',
 }
@@ -38,7 +39,7 @@ export default function StatusChangeModal({
     ? IMPORT_STATUS_LABELS[targetStatus] || targetStatus
     : ORDER_ACTION_LABELS[targetStatus] || targetStatus
 
-  const needsContract = isImport && ['confirmed', 'received'].includes(targetStatus)
+  const needsContract = isImport && ['confirmed', 'ordered', 'received'].includes(targetStatus)
   const needsFaktura = isImport && targetStatus === 'received'
   const needsReceivedQty = isImport && targetStatus === 'received'
 
@@ -96,6 +97,7 @@ export default function StatusChangeModal({
               Yangi status
               <select value={targetStatus} onChange={(event) => setTargetStatus(event.target.value)}>
                 <option value="confirmed">Tasdiqlandi</option>
+                <option value="ordered">Etkazuvchiga yuborildi</option>
                 <option value="received">Qabul qilindi</option>
                 <option value="cancelled">Bekor qilindi</option>
               </select>

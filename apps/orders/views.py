@@ -420,6 +420,8 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
             "kiritilmaguncha tasdiqlab BO'LMAYDI. Shartnoma sanasi bo'sh bo'lsa "
             "avtomatik bugungi kun (Tashkent) qo'yiladi; buyurtmadan kelgan "
             "shartnomada o'sha kun saqlanadi. `confirmed_at` — aniq sana/vaqt.\n\n"
+            "**Yuborildi (`ordered`):** `asos` MAJBURIY; shartnoma raqami zakazda "
+            "mavjud bo'lishi kerak (tasdiqlashda kiritilgan).\n\n"
             "**Qabul qilish (`received`):** `asos` va `faktura` MAJBURIY. "
             "`received_qty` ombor qoldig'iga qo'shiladi va pending buyurtmalarga "
             "avtomatik bron ajratiladi.\n\n"

@@ -489,23 +489,25 @@ class Zakaz(TimeStampedModel):
           mumkin; MANUAL zakazda umumiy summa avtomatik qayta hisoblanadi.
 
     Holat oqimi:
-        new → confirmed → received → (avtomatik ombor to'ldiriladi)
+        new → confirmed → ordered → received → (avtomatik ombor to'ldiriladi)
         har qanday → cancelled
     """
     NEW       = 'new'
     CONFIRMED = 'confirmed'
+    ORDERED   = 'ordered'
     RECEIVED  = 'received'
     CANCELLED = 'cancelled'
 
     STATUS_CHOICES = (
         (NEW,       'Yangi'),
         (CONFIRMED, 'Tasdiqlandi'),
+        (ORDERED,   'Etkazuvchiga yuborildi'),
         (RECEIVED,  'Qabul qilindi'),
         (CANCELLED, 'Bekor qilindi'),
     )
 
     # Faol (yakunlanmagan) holatlar — takror zakaz bermaslik uchun
-    ACTIVE_STATUSES = (NEW, CONFIRMED)
+    ACTIVE_STATUSES = (NEW, CONFIRMED, ORDERED)
 
     # ── Zakaz turi ────────────────────────────────────────────────────────────
     BACKORDER = 'backorder'

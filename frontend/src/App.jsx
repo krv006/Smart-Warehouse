@@ -2482,7 +2482,7 @@ const ORDER_STATUS_BADGES = {
   cancelled: { label: 'Bekor', tone: 'danger' },
   new: { label: 'Yangi', tone: 'info' },
   confirmed: { label: 'Tasdiqlandi', tone: 'info' },
-  ordered: { label: 'Buyurtma berildi', tone: 'info' },
+  ordered: { label: 'Etkazuvchiga yuborildi', tone: 'info' },
   received: { label: 'Qabul qilindi', tone: 'success' },
   paid: { label: 'To‘langan', tone: 'success' },
   overdue: { label: 'Muddati o‘tgan', tone: 'danger' },
@@ -2910,7 +2910,8 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
         const locked = ['received', 'cancelled'].includes(row.status)
         const transitions = {
           new: ['new', 'confirmed', 'cancelled'],
-          confirmed: ['confirmed', 'received', 'cancelled'],
+          confirmed: ['confirmed', 'ordered', 'cancelled'],
+          ordered: ['ordered', 'received', 'cancelled'],
           received: ['received'],
           cancelled: ['cancelled'],
         }
@@ -4070,7 +4071,7 @@ function ZakazEditor({ close, done, notify, item = null, session }) {
           {form.currency === 'USD' && showPrices && !isBackorder && (
             <div className="full-width"><FxRatePanel session={session} notify={notify} compact /></div>
           )}
-          {isManagement && <label>Status<select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value })}><option value="new">Yangi</option><option value="confirmed">Tasdiqlandi</option><option value="received">Qabul qilindi</option><option value="cancelled">Bekor qilindi</option></select></label>}
+          {isManagement && <label>Status<select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value })}><option value="new">Yangi</option><option value="confirmed">Tasdiqlandi</option><option value="ordered">Etkazuvchiga yuborildi</option><option value="received">Qabul qilindi</option><option value="cancelled">Bekor qilindi</option></select></label>}
           <label>Yetkazuvchi<input value={form.supplier} onChange={(event) => setForm({ ...form, supplier: event.target.value })} /></label>
           <label>Shartnoma raqami<input value={form.contract_number} onChange={(event) => setForm({ ...form, contract_number: event.target.value.replace(/[^\d/]/g, '') })} placeholder="12/1108" /></label>
           <label>Shartnoma sanasi<input type="date" value={form.contract_date} onChange={(event) => setForm({ ...form, contract_date: event.target.value })} /></label>

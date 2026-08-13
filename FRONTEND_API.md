@@ -1058,7 +1058,7 @@ Frontend menyuni `abilities` bo‘yicha ko‘rsatadi. Ruxsat yo‘q menu UI’da
 | `dashboard` | bosh sahifa statistikasi | Accountant, Management |
 | `orders_view` | eski buyurtmalar API (`/orders/`) — UI da ishlatilmaydi | — |
 | `orders_manage` | eski buyurtmalar CRUD — UI da ishlatilmaydi | — |
-| `order_status_manage` | import status (`confirmed`/`received`/…) — inline va bulk | Management |
+| `order_status_manage` | import status (`confirmed`/`ordered`/`received`/…) — inline va bulk | Management |
 | `warehouse_view` | mahsulotlarni ko‘rish | Operator, Accountant, Management |
 | `warehouse_create` | mahsulot qo‘shish (narxsiz) | Operator, Management |
 | `warehouse_manage` | mahsulot/kirim boshqarish | Operator, Management |
@@ -1087,7 +1087,7 @@ Frontend menyuni `abilities` bo‘yicha ko‘rsatadi. Ruxsat yo‘q menu UI’da
 **Muhim farqlar:**
 
 - `procurement_manage` — import **yaratish/tahrirlash**; status o‘zgartirish emas.
-- `order_status_manage` — import gridda inline status va bulk status (`confirmed` → `received` …).
+- `order_status_manage` — import gridda inline status va bulk status (`confirmed` → `ordered` → `received` …).
 - `clients_view` — `SaleEditor`, `BuyurtmalarPage` da `searchClients()` / `fetchClient()` (`clients_view` bo‘lmasa combobox o‘chiriladi).
 - `users_manage` — `FxRatePanel` tab almashtirish, qo‘lda saqlash, Infinbank ↻ yangilash.
 - `prices_view` — invoice qator narxlari va `total_delivery` / `total_vat` / `grand_total`.
@@ -1510,15 +1510,21 @@ Base:
 GET /api/v1/orders/zakaz/?page_size=30&status=new&zakaz_type=manual&payment_status=unpaid&product=1&order=5&contract_number=12/1108&search=monitor
 ```
 
-Status oqimi:
+Status oqimi (backend qat’iy ketma-ketlik):
 
 ```text
-new
-confirmed
-ordered
-received
-cancelled
+new → confirmed → ordered → received
+har qanday faol holat → cancelled
 ```
+
+| Holat | Keyingi ruxsat etilgan | Majburiy maydonlar |
+|-------|----------------------|-------------------|
+| `new` | `confirmed`, `cancelled` | `asos` |
+| `confirmed` | `ordered`, `cancelled` | `asos`, `contract_number` |
+| `ordered` | `received`, `cancelled` | `asos`, shartnoma (zakazda mavjud) |
+| `received` / `cancelled` | o‘zgartirish yo‘q | — |
+
+> **`ordered` (`Etkazuvchiga yuborildi`)** — tasdiqlashdan keyin, qabul qilishdan oldin. Reestrga `zakaz_ordered` yozuvi tushadi.
 
 ### Yangi zakaz
 
@@ -1581,9 +1587,9 @@ Mahsulot dropdown formati: `{name} · raqam: {serial_number}` — bu identifikat
 PATCH /api/v1/orders/zakaz/{id}/
 ```
 
-Backend: status o‘zgartirish (`confirmed`, `ordered`, `received`, `cancelled`) — **Management** roli talab qilinadi.
+Backend: status o‘zgartirish (`confirmed`, `ordered`, `received`, `cancelled`) — **Management** roli talab qilinadi. Ketma-ketlik buzilsa **400** (`confirmed` → `received` to‘g‘ridan-to‘g‘ri ishlamaydi).
 
-Frontend: Import gridda inline status va bulk status faqat `order_status_manage` ability bo‘lsa ko‘rinadi (`procurement_manage` yetarli emas).
+Frontend: Import gridda inline status va bulk status faqat `order_status_manage` ability bo‘lsa ko‘rinadi (`procurement_manage` yetarli emas). Inline o‘tishlar: `new→confirmed→ordered→received`.
 
 Tasdiqlash:
 
@@ -1595,7 +1601,7 @@ Tasdiqlash:
 }
 ```
 
-Buyurtma berildi:
+Buyurtma berildi (`ordered` — shartnoma tasdiqlashda kiritilgan bo‘lishi kerak):
 
 ```json
 {
@@ -2652,7 +2658,7 @@ Regressiya testlari: `apps/common/tests/test_role_matrix.py`.
 | 7 | Kassa/xarajat | Operator faqat GET; summalar yashirin |
 | 8 | Buyurtma yaratish | Operator ✅, Accountant ❌, Management ✅ |
 | 9 | Import yaratish | Barcha rollar ✅ |
-| 10 | Import status | Faqat Management (`confirmed`, `received`, …) — frontend: `order_status_manage` |
+| 10 | Import status | Faqat Management (`confirmed`, `ordered`, `received`, …) — frontend: `order_status_manage` |
 | 11 | Hisobotlar | Operator ❌, Accountant/Management ✅ |
 
 Frontend `abilities` (`warehouse_create`, `order_status_manage`, `prices_view`, `prices_manage`, `einvoice_view`, …) shu qoidalarga mos menyu va maydonlarni yashiradi.
