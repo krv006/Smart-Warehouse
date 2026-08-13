@@ -291,6 +291,18 @@ class ZakazReceivedQtyGuardTests(TestCase):
                              {'received_qty': 2}, format='json')
         self.assertEqual(res.status_code, 403, res.data)
 
+    def test_operator_patch_ignores_payment_fields(self):
+        self.api.force_authenticate(self.operator)
+        res = self.api.patch(
+            f'{self.ZAKAZ_URL}{self.zakaz.pk}/',
+            {'payment_status': 'partial', 'paid_amount': '500000'},
+            format='json',
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        self.zakaz.refresh_from_db()
+        self.assertEqual(self.zakaz.payment_status, Zakaz.UNPAID)
+        self.assertEqual(self.zakaz.paid_amount, Decimal('0'))
+
 
 class ZakazBulkCreateTests(TestCase):
     BULK_URL = '/api/v1/orders/zakaz/bulk/'
@@ -354,6 +366,52 @@ class ZakazBulkCreateTests(TestCase):
         paid_sum = sum(Decimal(z['paid_amount']) for z in zakazlar)
         self.assertEqual(paid_sum, Decimal('500000.00'))
         self.assertTrue(all(z['payment_status'] == 'partial' for z in zakazlar))
+
+    def test_bulk_partial_payment_rounding_remainder_on_last_line(self):
+        body = {
+            'payment_status': 'partial',
+            'paid_amount': '100.00',
+            'items': [
+                {'product': self.product_a.pk, 'quantity': 1,
+                 'unit_price': '100.00'},
+                {'product': self.product_b.pk, 'quantity': 1,
+                 'unit_price': '100.00'},
+                {'product': self.product_a.pk, 'quantity': 1,
+                 'unit_price': '100.00'},
+            ],
+        }
+        res = self._bulk(self.manager, body)
+        self.assertEqual(res.status_code, 201, res.data)
+        paid_sum = sum(Decimal(z['paid_amount']) for z in res.data['zakazlar'])
+        self.assertEqual(paid_sum, Decimal('100.00'))
+
+    def test_bulk_append_to_existing_import_batch(self):
+        batch_id = __import__('uuid').uuid4()
+        body = {
+            'import_batch': str(batch_id),
+            'supplier': 'Append test',
+            'items': [
+                {'product': self.product_a.pk, 'quantity': 2,
+                 'unit_price': '100000.00'},
+            ],
+        }
+        res = self._bulk(self.manager, body)
+        self.assertEqual(res.status_code, 201, res.data)
+        zakaz = Zakaz.objects.get(pk=res.data['zakazlar'][0]['id'])
+        self.assertEqual(zakaz.import_batch, batch_id)
+
+    def test_create_with_import_batch(self):
+        batch_id = __import__('uuid').uuid4()
+        self.api.force_authenticate(self.manager)
+        res = self.api.post('/api/v1/orders/zakaz/', {
+            'product': self.product_a.pk,
+            'quantity': 3,
+            'unit_price': '100000.00',
+            'import_batch': str(batch_id),
+        }, format='json')
+        self.assertEqual(res.status_code, 201, res.data)
+        zakaz = Zakaz.objects.get(pk=res.data['id'])
+        self.assertEqual(zakaz.import_batch, batch_id)
 
     def test_bulk_partial_rejects_without_prices(self):
         body = {
