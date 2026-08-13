@@ -110,6 +110,24 @@ Umumiy xato:
 
 HTML qaytsa, backend/proxy noto‘g‘ri ishlayapti. Frontend buni JSON deb parse qilmasligi kerak.
 
+**429 (rate limit):**
+
+```json
+{ "detail": "Request was throttled. Expected available in 14 seconds." }
+```
+
+Frontend `request()` buni o‘zbekcha matnga aylantiradi va **bir marta** qayta urinadi (§2). Asosiy sabab — UI ketma-ket ko‘p so‘rov yuborganida backend cheklovi.
+
+**Backend throttle (`root/drf_settings.py`, `root/settings.py`):**
+
+| Sozlam | Qiymat |
+|---|---|
+| Global `DEFAULT_THROTTLE_CLASSES` | `[]` (olib tashlangan — faqat login alohida himoyalangan) |
+| Login | `LoginRateThrottle` — `10/min` (`POST /auth/login/`) |
+| `DEBUG=True` | Global throttle butunlay o‘chiriladi (lokal dev) |
+
+Production da token refresh va boshqa ochiq endpointlar uchun alohida scoped throttle qo‘shish tavsiya etiladi; hozir frontend `viewFetchKeyRef` va debounce bilan dublikat so‘rovlarni kamaytiradi.
+
 ### Sana formatlari
 
 Sana:
@@ -283,10 +301,24 @@ await api.remove('/auth/users/', id)
 
 | Fayl | Vazifa |
 |---|---|
-| `frontend/src/routes.js` | `PAGE_PATHS`, `parseAppPath()`, `clientDetailPath()`, `invoiceDetailPath()`, `CLIENT_TABS` |
+| `frontend/src/routes.js` | `PAGE_PATHS`, `parseAppPath()`, path helperlar, `crumbFromPath()` |
 | `frontend/src/routes.jsx` | `AppRoutes` — URL → `ClientDetailPage`, `ResourcePage`, dashboard, hisobotlar |
 | `frontend/src/pages/LoginPage.jsx` | JWT login (`api.login` → `saveSession`) |
 | `frontend/src/main.jsx` | `BrowserRouter` |
+
+**Path helperlar (`routes.js`):**
+
+| Funksiya | Natija | `parseAppPath` → `kind` |
+|---|---|---|
+| `pathForPage('Buyurtmalar')` | `/buyurtmalar` | `page` |
+| `invoiceNewPath()` | `/buyurtmalar/yangi` | `invoice-new` |
+| `invoiceEditPath(uuid)` | `/buyurtmalar/{uuid}/tahrir` | `invoice-edit` |
+| `invoiceDetailPath(uuid)` | `/buyurtmalar/{uuid}` | `invoice-detail` |
+| `clientDetailPath(uuid, tab?)` | `/mijozlar/{uuid}[/{tab}]` | `client-detail` |
+| `crumbFromPath(pathname)` | Topbar breadcrumb matni | — |
+| `pageFromPath(pathname)` | Sahifa nomi yoki `null` | — |
+
+`crumbFromPath` buyurtma URL lari uchun: `Buyurtmalar / Yangi`, `Buyurtmalar / Tahrir / c076aae7…`, `Buyurtmalar / c076aae7…` (ko‘rish).
 
 Asosiy URL lar (react-router):
 
@@ -593,7 +625,23 @@ Celery beat: `refresh_infinbank_usd_rate` har **1 soat** (`root/celery.py`). `au
 
 Singleton (`pk=1`). Buyurtmalar previewda «Bajaruvchi» sifatida ishlatiladi.
 
-**Validatsiya (backend + frontend):** STIR — 9 raqam; JSHSHIR — 14; MFO — 5; OKED — raqam; telefon — `+998…`; bank hisob — 20 raqam. Xatoliklar maydon ostida qizil matn (`FieldError` / `ApiError.fields`); forma validatsiyasida toast ishlatilmaydi. Frontend: `frontend/src/lib/uzValidators.js`, `CompanyProfileModal`.
+**Validatsiya (backend + frontend):** STIR — 9 raqam; JSHSHIR — 14; MFO — 5; OKED — 5; telefon — `+998…`; bank hisob — 20 raqam. Xatoliklar maydon ostida qizil matn (`FieldError` / `ApiError.fields`); forma validatsiyasida toast ishlatilmaydi. Frontend: `frontend/src/lib/uzValidators.js` → `validateCompanyProfile()` (`CompanyProfileModal`).
+
+**Mijozlar editor validatsiyasi** (`Editor`, title=`Mijozlar`) — `validateClientFields()` (`uzValidators.js`), saqlashdan oldin client-side; backend `ClientSerializer` alohida UZ regex qo‘llamaydi.
+
+| Tur | Maydon | Qoidalar |
+|---|---|---|
+| Yuridik | `company_name` | Majburiy |
+| Yuridik | `phone` | Majburiy, `validateUzPhone` |
+| Yuridik | `inn` | Ixtiyoriy; to‘ldirilsa STIR 9 raqam |
+| Yuridik | `mfo` | Ixtiyoriy; to‘ldirilsa 5 raqam |
+| Jismoniy | `full_name` | Majburiy |
+| Jismoniy | `pinfl` | Majburiy, JSHSHIR 14 raqam + kontrol |
+| Jismoniy | `passport_number` | Majburiy |
+| Jismoniy | `phone` | Majburiy, `validateUzPhone` |
+| Ikkala | `email` | Ixtiyoriy; format tekshiruvi |
+
+Buyurtmalar editoridagi **+** (yangi hamkor) shu `Editor` ni ochadi; saqlangach `done(created)` orqali yangi mijoz tanlanadi (`POST /clients/`).
 
 ### Buyurtmalar (invoices) — `/api/v1/invoices/`
 
@@ -730,7 +778,44 @@ Backend mahsulotdan `product_name`, `barcode`, `identification_code`, `unit`, na
 
 **Validatsiya:** `validateEInvoice()` — xatoliklar input ostida; «Hujjatni ko‘rsatish» / «Saqlash» da toast o‘rniga scroll birinchi qizil maydonga.
 
-**Shartnomalar reestri:** SK (`document_type=contract_sk`) saqlanganda backend `ProductContract` ga `INVOICE_CREATED` / `INVOICE_EDITED` yozuvi qo‘shadi (tovar `product` FK bilan mos bo‘lsa).
+**`validateEInvoice()` maydonlari** (`App.jsx`):
+
+| Maydon | Qoidalar |
+|---|---|
+| `contract_number` | Majburiy; regex `^\d+/\d{4}$` (masalan `12/1108`) |
+| `place_signed` | Majburiy |
+| `contract_date` | Majburiy |
+| `valid_until` | Majburiy; `>= contract_date` |
+| `client` | Majburiy (mijoz tanlangan) |
+| `content_title` | Majburiy |
+| `content_body` | Majburiy |
+| `company` | Korxona profilida `name` va `stir` bo‘lishi kerak |
+| `lines[].product_name` | Har qator — majburiy |
+| `lines[].identification_code` | Har qator — majburiy |
+| `lines[].quantity` | Kamida 1 |
+| `lines[].unit_price` | Faqat `prices_view` + `reverse_calculation=false` bo‘lsa majburiy |
+| `lines` (umumiy) | Kamida bitta to‘liq qator (`product_name` + `quantity` + `identification_code`) |
+
+Xato kalitlari: `contract_number`, `client`, `lines.0.product_name` va hokazo. Komponent: `EInvoiceFieldError`.
+
+### Buyurtmalar ro‘yxati (`DataTable`)
+
+`BuyurtmalarPage` — `/buyurtmalar` da `DataTable` ustunlari:
+
+| Ustun | Manba (`row`) | Eslatma |
+|---|---|---|
+| № | Indeks + 1 | — |
+| Mijoz | `client_name` | — |
+| Shartnoma | `contract_number` | — |
+| Mahsulot | `invoiceProductsLabel(row)` | Birinchi qator nomi yoki «N ta mahsulot» |
+| Soni | `invoiceTotalQuantity(row)` | Qatorlar miqdori yig‘indisi |
+| Jami summa | `grand_total` | Faqat `prices_view` bo‘lsa |
+| Muddat | `contract_date` | `formatDateUz` |
+| Turi | `document_type_display` | SK / Hisob-faktura / Dalolatnoma |
+
+Amallar: **ko‘z** (ko‘rish modali), **qalam** (tahrir — `einvoice_manage`). Qator bosilganda ham ko‘rish ochiladi.
+
+**Shartnomalar reestri:** SK (`document_type=contract_sk`) saqlanganda backend `ProductContract` ga `invoice_created` / `invoice_edited` yozuvi qo‘shadi (tovar `product` FK bilan mos bo‘lsa). §10 `source_type` ro‘yxatiga qarang.
 
 Korxona profili (`GET/PATCH /company-profile/`) «Bajaruvchi» blokida ishlatiladi; profil yangilanganda `company-profile-updated` eventi editorlarni yangilaydi.
 
@@ -1436,7 +1521,11 @@ zakaz_ordered
 zakaz_received
 zakaz_cancelled
 stock_in
+invoice_created
+invoice_edited
 ```
+
+**Buyurtma (SK) dan reestr:** `POST` / `PATCH /api/v1/invoices/` (`document_type=contract_sk`, qatorlarda `product` FK mos) — backend `sync_invoice_contract_registry()` orqali `invoice_created` / `invoice_edited` yozuvlarini qo‘shadi (`apps/invoices/services.py`). Filtrlash: `GET /orders/contracts/?source_type=invoice_created`.
 
 ## 11. Ombor
 
@@ -2167,6 +2256,8 @@ notifications: 30s
 - Buyurtma ko‘rish: bir invoice uchun takroriy `GET /invoices/{id}/` yuborilmasin (`viewFetchKeyRef`).
 - Korxona profili / invoice forma validatsiyasi — inline `FieldError`, toast emas.
 - `ApiError.fields` — PATCH xatoliklarini maydon bo‘yicha ko‘rsatish.
+- `validateClientFields()` — Mijozlar editorida saqlashdan oldin.
+- `invoiceNewPath()` / `invoiceEditPath()` — navigatsiya helperlari.
 
 ## 21. Rol matritsasi (11 qoida)
 
@@ -2190,10 +2281,13 @@ Frontend `abilities` (`warehouse_create`, `order_status_manage`, `prices_view`, 
 
 ## 22. Hali backendda yo‘q (kelajak modullar)
 
-Buyurtmalar moduli (`/api/v1/invoices/`) — mazmun, qatorlar, preview, teskari hisob. Quyidagilar hali yo‘q:
+Buyurtmalar moduli (`/api/v1/invoices/`) — **mavjud:** mazmun, qatorlar, alohida yangi/tahrir sahifalari, preview/ko‘rish modali, teskari hisob, hamkor/tovar tanlash, inline validatsiya, SK → shartnomalar reestri sinx (`invoice_created` / `invoice_edited`).
+
+**Hali yo‘q:**
 
 - hamkor STIR/JSHSHIR lookup (tashqi Soliq API);
 - MXIK/IKPU katalog lookup (frontend faqat tasnif.soliq.uz havolasi);
 - shablon saqlash;
 - ERI/imzolash;
-- Didox/Soliq real integratsiya.
+- Didox/Soliq real integratsiya;
+- mijozlar backend UZ validatsiyasi (`ClientSerializer` — faqat frontend `validateClientFields`).
