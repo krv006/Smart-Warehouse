@@ -1,5 +1,6 @@
 import json
 import re
+from decimal import Decimal
 
 from django.db import transaction
 from django.utils import timezone
@@ -582,7 +583,7 @@ class ZakazSerializer(ModelSerializer):
             'product', 'product_name', 'new_product',
             'quantity', 'received_qty',
             'unit_price', 'currency', 'total',
-            'payment_status', 'payment_status_display',
+            'payment_status', 'payment_status_display', 'paid_amount',
             'supplier', 'status', 'status_display',
             'contract_number', 'contract_date', 'confirmed_at',
             'asos', 'faktura',
@@ -632,20 +633,8 @@ class ZakazSerializer(ModelSerializer):
         return value
 
     def _create_inline_product(self, data):
-        serial = (data.get('serial_number') or '').strip()
-        if not serial:
-            serial = f'IMP-{timezone.now().strftime("%Y%m%d%H%M%S%f")}'
-        while Product.objects.filter(serial_number=serial).exists():
-            serial = f'{serial}-{Product.objects.count() + 1}'
-        return Product.objects.create(
-            name=data['name'].strip(),
-            serial_number=serial,
-            barcode=(data.get('barcode') or '').strip() or None,
-            unit=data.get('unit') or 'piece',
-            vat_percent=data.get('vat_percent') or 'none',
-            purchase_price=data.get('purchase_price'),
-            delivery_price=data.get('delivery_price'),
-        )
+        from apps.warehouse.product_utils import create_import_product
+        return create_import_product(data)
 
     def validate(self, attrs):
         # Yaratish: mustaqil (manual) import uchun narx faqat Management kiritadi.
@@ -705,6 +694,33 @@ class ZakazSerializer(ModelSerializer):
             raise ValidationError({
                 'received_qty': (f'Qabul qilingan miqdor ({received}) zakaz '
                                  f'miqdoridan ({quantity}) oshib ketmasligi kerak.')})
+
+        payment_status = attrs.get(
+            'payment_status',
+            getattr(self.instance, 'payment_status', None) if self.instance else Zakaz.UNPAID,
+        )
+        paid_amount = attrs.get(
+            'paid_amount',
+            getattr(self.instance, 'paid_amount', None) if self.instance else None,
+        )
+        if payment_status == Zakaz.PARTIAL:
+            if paid_amount in (None, '') or Decimal(str(paid_amount or 0)) <= 0:
+                raise ValidationError({
+                    'paid_amount': 'Qisman to\'lov uchun to\'langan miqdorni kiriting.'})
+        elif payment_status == Zakaz.UNPAID:
+            attrs['paid_amount'] = Decimal('0')
+        elif payment_status == Zakaz.PAID:
+            qty = attrs.get(
+                'quantity',
+                getattr(self.instance, 'quantity', None) if self.instance else None,
+            )
+            unit_price = attrs.get(
+                'unit_price',
+                getattr(self.instance, 'unit_price', None) if self.instance else None,
+            )
+            if unit_price is not None and qty:
+                attrs['paid_amount'] = Decimal(str(unit_price)) * Decimal(str(qty))
+
         return attrs
 
     def create(self, validated_data):
@@ -729,6 +745,9 @@ class ZakazSerializer(ModelSerializer):
             contract_date=zakaz.contract_date,
             asos='Zakaz yaratildi.', zakaz=zakaz, user=zakaz.created_by,
         )
+        if zakaz.zakaz_type == Zakaz.MANUAL and zakaz.total:
+            from apps.orders.zakaz_payment import sync_zakaz_expense
+            sync_zakaz_expense(zakaz, user=zakaz.created_by)
         return zakaz
 
     # Har bir status o'zgarishi → reestrga qaysi turda yozilishi
@@ -835,6 +854,10 @@ class ZakazSerializer(ModelSerializer):
         if zakaz.status == Zakaz.RECEIVED and not was_received:
             zakaz.receive(user=user)
 
+        if zakaz.zakaz_type == Zakaz.MANUAL and zakaz.total:
+            from apps.orders.zakaz_payment import sync_zakaz_expense
+            sync_zakaz_expense(zakaz, user=user)
+
         return zakaz
 
 
@@ -858,14 +881,39 @@ class ZakazOperatorSerializer(ZakazSerializer):
 
 class ZakazItemSerializer(Serializer):
     """Bulk zakaz ichidagi bitta mahsulot qatori (mustaqil zakaz)."""
-    product       = PrimaryKeyRelatedField(queryset=Product.objects.all())
+    product       = PrimaryKeyRelatedField(queryset=Product.objects.all(),
+                                           required=False, allow_null=True)
+    new_product   = ZakazInlineProductSerializer(required=False)
     quantity      = IntegerField(min_value=1)
     unit_price    = DecimalField(max_digits=14, decimal_places=2,
-                                 min_value=0)  # narx majburiy
+                                 min_value=0, required=False, allow_null=True)
     currency      = CharField(required=False, allow_blank=True, allow_null=True)
     supplier      = CharField(required=False, allow_blank=True, allow_null=True)
     expected_date = DateField(required=False, allow_null=True)
     comment       = CharField(required=False, allow_blank=True, allow_null=True)
+
+    def validate(self, attrs):
+        product = attrs.get('product')
+        new_product = attrs.get('new_product')
+        if not product and not new_product:
+            raise ValidationError(
+                'Mahsulotni tanlang yoki yangi mahsulot ma\'lumotlarini kiriting.')
+        if product and new_product:
+            raise ValidationError(
+                'Mahsulotni tanlash va yangi mahsulot kiritish bir vaqtda bo\'lmaydi.')
+        user = self.context['request'].user
+        if _can_manage_prices(user):
+            if attrs.get('unit_price') in (None, ''):
+                raise ValidationError({
+                    'unit_price': 'Import uchun narx (unit_price) kiritilishi shart.'})
+        else:
+            attrs.pop('unit_price', None)
+        if new_product and not _can_manage_prices(user):
+            attrs['new_product'] = {
+                k: v for k, v in new_product.items()
+                if k not in ('purchase_price', 'delivery_price')
+            }
+        return attrs
 
 
 class ZakazBulkCreateSerializer(Serializer):
@@ -893,10 +941,11 @@ class ZakazBulkCreateSerializer(Serializer):
     def validate_items(self, value):
         if not value:
             raise ValidationError('Kamida bitta mahsulot kiritilishi kerak.')
-        # Faol zakaz bor mahsulotга takror zakaz bermaslik
         errors = []
         for item in value:
-            product = item['product']
+            product = item.get('product')
+            if not product:
+                continue
             has_active = product.zakazlar.filter(
                 status__in=Zakaz.ACTIVE_STATUSES
             ).exists()
@@ -909,6 +958,8 @@ class ZakazBulkCreateSerializer(Serializer):
         return value
 
     def create(self, validated_data):
+        from apps.warehouse.product_utils import create_import_product
+
         common_supplier = validated_data.get('supplier')
         common_expected = validated_data.get('expected_date')
         contract_number = validated_data.get('contract_number')
@@ -918,11 +969,14 @@ class ZakazBulkCreateSerializer(Serializer):
 
         created = []
         for item in items:
+            product = item.get('product')
+            if not product:
+                product = create_import_product(item['new_product'])
             zakaz = Zakaz.objects.create(
-                product=item['product'],
+                product=product,
                 zakaz_type=Zakaz.MANUAL,
                 quantity=item['quantity'],
-                unit_price=item['unit_price'],
+                unit_price=item.get('unit_price'),
                 currency=item.get('currency') or Zakaz.UZS,
                 supplier=item.get('supplier') or common_supplier,
                 expected_date=item.get('expected_date') or common_expected,
@@ -944,6 +998,9 @@ class ZakazBulkCreateSerializer(Serializer):
                 asos='Bulk zakaz yaratildi.', zakaz=zakaz,
                 user=zakaz.created_by,
             )
+            if zakaz.total:
+                from apps.orders.zakaz_payment import sync_zakaz_expense
+                sync_zakaz_expense(zakaz, user=zakaz.created_by)
             created.append(zakaz)
         return created
 

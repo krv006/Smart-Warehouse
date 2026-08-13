@@ -7,6 +7,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
+from apps.cash.ledger import build_ledger_entries, ledger_totals
 from apps.cash.models import ExchangeRate, ExchangeRateSettings, Payment
 from apps.cash.serializers import (ExchangeRateSerializer, ExchangeRateSettingsSerializer,
                                    PaymentSerializer, PaymentOperatorSerializer,
@@ -136,13 +137,14 @@ class PaymentViewSet(ModelViewSet):
     filterset_fields    = ('status', 'client', 'currency', 'due_date',
                            'order', 'sale')
     search_fields       = ('sale__product__name', 'order__items__product__name',
-                           'order__contract_number', 'client__company_name',
+                           'order__contract_number', 'zakaz__product__name',
+                           'zakaz__supplier', 'client__company_name',
                            'comment')
     ordering_fields     = ('due_date', 'created_at', 'total_amount')
 
     def get_queryset(self):
         qs = Payment.objects.select_related(
-            'sale__product', 'order', 'client',
+            'sale__product', 'order', 'zakaz__product', 'client',
         ).prefetch_related(
             'transactions__received_by',
             'order__items__product',
@@ -233,13 +235,12 @@ class PaymentViewSet(ModelViewSet):
             'total_partial':       qs.filter(status=Payment.PARTIAL).count(),
             'total_paid':          qs.filter(status=Payment.PAID).count(),
             'total_overdue':       overdue_qs.count(),
-            # paid_amount — real olingan pul; PARTIAL to'lovlarning
-            # qismi ham kassaga kirgan, shuning uchun status filtrsiz
-            'sum_paid_uzs':        qs.filter(currency=Payment.UZS).aggregate(
+            # paid_amount — faqat tushumlar (import Payment emas)
+            'sum_paid_uzs':        qs.filter(currency=Payment.UZS, zakaz__isnull=True).aggregate(
                                        s=Sum('paid_amount'))['s'] or 0,
-            'sum_paid_usd':        qs.filter(currency=Payment.USD).aggregate(
+            'sum_paid_usd':        qs.filter(currency=Payment.USD, zakaz__isnull=True).aggregate(
                                        s=Sum('paid_amount'))['s'] or 0,
-            'total_commission_uzs': qs.filter(currency=Payment.UZS).aggregate(
+            'total_commission_uzs': qs.filter(currency=Payment.UZS, zakaz__isnull=True).aggregate(
                                         s=Sum('commission'))['s'] or 0,
 
             # Buyurtma to'lovlari (oldindan to'lovlar) — alohida ko'rinadi
@@ -254,4 +255,36 @@ class PaymentViewSet(ModelViewSet):
                                                 currency=Payment.UZS).aggregate(
                                           s=Sum(F('total_amount') - F('paid_amount')))['s'] or 0,
         }
+        data.update(ledger_totals())
         return Response(data)
+
+    @extend_schema(
+        summary="Kassa harakatlari (tushum + import chiqim)",
+        description=(
+            'Birlashgan kassa jurnali: sotuv/buyurtma tushumlari (`in`) va '
+            'import chiqimlari (`out`).'
+        ),
+        tags=["Cash / Kassa"],
+    )
+    @action(detail=False, methods=['get'], url_path='ledger',
+            permission_classes=[IsAccountantWithManagementRead])
+    def ledger(self, request):
+        search = (request.query_params.get('search') or '').strip() or None
+        source = (request.query_params.get('source') or '').strip() or None
+        kind = (request.query_params.get('kind') or '').strip() or None
+        try:
+            page = max(1, int(request.query_params.get('page', 1)))
+        except (TypeError, ValueError):
+            page = 1
+        try:
+            page_size = min(100, max(1, int(request.query_params.get('page_size', 25))))
+        except (TypeError, ValueError):
+            page_size = 25
+
+        entries = build_ledger_entries(search=search, source=source, kind=kind)
+        total = len(entries)
+        start = (page - 1) * page_size
+        return Response({
+            'count': total,
+            'results': entries[start:start + page_size],
+        })

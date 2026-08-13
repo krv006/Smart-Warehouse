@@ -24,6 +24,8 @@ export default function DataTable({
   selectable = false,
   selectedIds = [],
   onSelectionChange,
+  wrapClassName = '',
+  rowClassName,
 }) {
   const allSelected = rows.length > 0 && rows.every((row, index) => selectedIds.includes(rowKey(row, index)))
   const someSelected = rows.some((row, index) => selectedIds.includes(rowKey(row, index)))
@@ -42,7 +44,7 @@ export default function DataTable({
 
   if (loading && !rows.length) {
     return (
-      <div className="data-table-wrap">
+      <div className={`data-table-wrap ${wrapClassName}`.trim()}>
         <div className="data-table-skeleton"><i /><i /><i /><i /></div>
       </div>
     )
@@ -62,7 +64,7 @@ export default function DataTable({
   }
 
   return (
-    <div className="data-table-wrap">
+    <div className={`data-table-wrap ${wrapClassName}`.trim()}>
       <table className="data-table">
         <thead>
           <tr>
@@ -99,6 +101,7 @@ export default function DataTable({
           {rows.map((row, index) => {
             const id = rowKey(row, index)
             const checked = selectedIds.includes(id)
+            const extraRowClass = typeof rowClassName === 'function' ? rowClassName(row) : rowClassName
             return (
               <tr
                 key={id}
@@ -106,6 +109,7 @@ export default function DataTable({
                   'data-table-row',
                   onRowClick ? 'is-clickable' : '',
                   checked ? 'is-selected' : '',
+                  extraRowClass || '',
                 ].filter(Boolean).join(' ')}
                 onClick={onRowClick ? () => onRowClick(row) : undefined}
                 onKeyDown={onRowClick ? (event) => {

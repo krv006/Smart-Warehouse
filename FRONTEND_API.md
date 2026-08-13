@@ -24,8 +24,10 @@ Production override: `VITE_API_BASE_URL` (masalan `https://api.example.com/api/v
 | 6 | Role, `abilities` va **UI gating** |
 | 7 | Valyuta kursi (backend + `FxRatePanel`) |
 | 8–16 | Modul bo‘yicha batafsil (buyurtma, zakaz, ombor, …) |
-| 17 | Hisobotlar |
+| 17 | Hisobotlar va Excel export |
 | 17a | Buyurtmalar — `/invoices/` (batafsil) |
+| 17b | Excel export UI — `ReportExportPanel`, `FilterDateRangeCalendar` |
+| 17c | Kassa jurnali va avtomatik moliyaviy sinxron |
 | 18–22 | Yangi endpoint qo‘shish, performance, checklist, rol matritsasi |
 
 ---
@@ -171,7 +173,7 @@ Manba: `frontend/src/api.js`.
 | `setAuthFailureHandler(fn)` | 401 refresh muvaffaqiyatsiz bo‘lsa chaqiriladi |
 | `refreshAccessToken()` | `POST /auth/token/refresh/` |
 | `request(path, options)` | JWT bilan so‘rov; 401 da bir marta refresh + retry |
-| `download(path, filename)` | Blob yuklab olish (Excel export) |
+| `download(path, filename)` | Blob yuklab olish (Excel export); JWT bilan `fetch`, 401 da refresh yo‘q — faqat joriy token |
 
 Timeout: **8 soniya**. Xato klassi: `ApiError(message, status, fields?)` — `fields` maydon xatoliklari (`company_name`, `inn`, …) uchun; forma ostida qizil matn ko‘rsatishda ishlatiladi.
 
@@ -207,6 +209,7 @@ Timeout: **8 soniya**. Xato klassi: `ApiError(message, status, fields?)` — `fi
 | `salesBulk(payload)` | POST | `/sales/bulk/` | bulk sales body |
 | `payments(params)` | GET | `/cash/payments/` | `page_size=30`, `status`, `order`, `sale`, `client`, `currency`, `include_paid`, `search`, `ordering`, `page` |
 | `paymentsSummary()` | GET | `/cash/payments/summary/` | — |
+| `kassaLedger(params)` | GET | `/cash/payments/ledger/` | `page`, `page_size`, `search`, `source` (`sale`\|`order`\|`import`) |
 | `pay(id, payload)` | POST | `/cash/payments/{id}/pay/` | `{ amount, comment }` |
 | `exchangeRateLatest(refresh)` | GET | `/cash/exchange-rates/latest/` | `refresh=true\|false` |
 | `exchangeRateSettings()` | GET | `/cash/exchange-rates/settings/` | — |
@@ -225,10 +228,13 @@ Timeout: **8 soniya**. Xato klassi: `ApiError(message, status, fields?)` — `fi
 | `notifications(params)` | GET | `/notifications/` | `page_size=30`, `is_read` |
 | `notificationsMarkRead(id)` | POST | `/notifications/{id}/mark_read/` | — |
 | `notificationsMarkAllRead()` | POST | `/notifications/mark_all_read/` | — |
-| `exportSales()` | GET | `/reports/excel/sales/` | blob → `sales.xlsx` |
-| `exportStock()` | GET | `/reports/excel/stock/` | blob → `stock.xlsx` |
-| `exportExpenses()` | GET | `/reports/excel/expenses/` | blob → `expenses.xlsx` |
-| `exportPayments()` | GET | `/reports/excel/payments/` | blob → `payments.xlsx` |
+| `exportReport(type, params)` | GET | `/reports/excel/{type}/` | Birlashtirilgan Excel yuklab olish (qarang §17b) |
+| `exportSales(params)` | GET | `/reports/excel/sales/` | `date_from`, `date_to` → `sotuvlar.xlsx` |
+| `exportStock(params)` | GET | `/reports/excel/stock/` | davrsiz → `ombor.xlsx` |
+| `exportExpenses(params)` | GET | `/reports/excel/expenses/` | `date_from`, `date_to` → `xarajatlar.xlsx` |
+| `exportKassa(params)` | GET | `/reports/excel/kassa/` | `date_from`, `date_to` → `kassa.xlsx` |
+| `exportPayments(params)` | GET | `/reports/excel/payments/` | `exportKassa` bilan bir xil backend |
+| `exportImports(params)` | GET | `/reports/excel/imports/` | `date_from`, `date_to` → `import.xlsx` |
 | `retrieve(path, id)` | GET | `{path}{id}/` | — |
 | `create(path, payload)` | POST | `path` | JSON body |
 | `createForm(path, payload)` | POST | `path` | `FormData` yoki JSON |
@@ -270,7 +276,46 @@ await api.updateForm('/expenses/expenses/', id, formData)
 await api.remove('/auth/users/', id)
 ```
 
-`list()` helperi (`App.jsx`) pagination `results` yoki oddiy arrayni qaytaradi.
+`list()` helperi (`frontend/src/lib/utils.js` yoki `App.jsx` dagi lokal nusxa) pagination `results` yoki oddiy arrayni qaytaradi.
+
+### `api.exportReport(type, params)` — birlashtirilgan Excel export
+
+Manba: `frontend/src/api.js`. Hisobotlar → **Excel** tabi (`ReportExportPanel`) shu metoddan foydalanadi.
+
+| `type` | Backend path | Fayl prefiksi | Davr (`date_from` / `date_to`) |
+|---|---|---|---|
+| `sales` | `/reports/excel/sales/` | `sotuvlar` | ✅ — `sold_date` bo‘yicha |
+| `kassa` | `/reports/excel/kassa/` | `kassa` | ✅ — jurnal sanasi bo‘yicha |
+| `payments` | `/reports/excel/payments/` | `kassa` | ✅ — `kassa` bilan bir xil |
+| `import` | `/reports/excel/imports/` | `import` | ✅ — `created_at` bo‘yicha |
+| `expenses` | `/reports/excel/expenses/` | `xarajatlar` | ✅ — `date` bo‘yicha |
+| `stock` | `/reports/excel/stock/` | `ombor` | ❌ — joriy qoldiqlar snapshot |
+
+```javascript
+await api.exportReport('sales', { date_from: '2026-08-01', date_to: '2026-08-31' })
+// → sotuvlar_2026-08-01.xlsx (yoki date_to / bugun)
+```
+
+Parametrlar bo‘sh bo‘lsa (`Barcha davr`) `{}` yuboriladi — backend barcha yozuvlarni oladi (stock bundan mustasno).
+
+Legacy metodlar (`exportSales`, `exportKassa`, …) ham saqlangan; yangi UI faqat `exportReport` ishlatadi.
+
+### Frontend komponentlar (asosiy)
+
+| Komponent | Fayl | Vazifa |
+|---|---|---|
+| `ReportExportPanel` | `components/ReportExportPanel.jsx` | Hisobotlar → Excel tab: tur tanlash, davr, yuklab olish |
+| `FilterDateRangeCalendar` | `components/FilterDateRangeCalendar.jsx` | Oraliq tanlash kalendari (dashboard filtr, export, grid filtr) |
+| `KassaPage` | `components/KassaPage.jsx` | Kassa jurnali, metrikalar, to‘lov qabul qilish |
+| `BuyurtmalarPage` | `App.jsx` | Invoice CRUD, preview, editor |
+| `ClientDetailPage` | `components/ClientDetailPage.jsx` | Mijoz kartasi tablari |
+| `DataTable` | `components/DataTable.jsx` | Grid, sort, bulk, amallar ustuni |
+| `ListFiltersPanel` | `components/ListFiltersPanel.jsx` | Grid filtrlari + kalendardan sana |
+| `GlobalSearch` | `components/GlobalSearch.jsx` | Ctrl+K qidiruv |
+| `SearchableCombobox` | `components/SearchableCombobox.jsx` | Server qidiruvli dropdown |
+| `FxRatePanel` | `App.jsx` | Valyuta kursi (header / compact) |
+
+Yordamchi kutubxonalar: `lib/utils.js` (`money`, `todayValue`, `formatDateUz`, `list`), `lib/permissions.js` (`can`), `lib/clients.js`, `lib/uzValidators.js`, `listFilters.js`, `routes.js`.
 
 ---
 
@@ -279,9 +324,9 @@ await api.remove('/auth/users/', id)
 | UI sahifa | `api.js` | Backend path | Eslatma |
 |---|---|---|---|
 | Bosh sahifa | `reports`, `monthlyTrend` | `/reports/*` | Filtrli |
-| Hisobotlar | `reports`, `expensesSummary`, `paymentsSummary`, `export*` | `/reports/*`, `/expenses/summary/`, `/cash/payments/summary/` | Filtrsiz reports |
+| Hisobotlar | `reports`, `expensesSummary`, `paymentsSummary`, `exportReport` | `/reports/*`, `/expenses/summary/`, `/cash/payments/summary/` | Tablar: Moliyaviy, Ombor, Sotuvlar, Xarajatlar, **Excel** (`ReportExportPanel`) |
 | Buyurtmalar | `invoices`, `invoice`, `createInvoice`, `updateInvoice`, `removeInvoice`, `nextContractNumber`, `companyProfile`, `clients` (qidiruv/qo‘shish) | `/invoices/`, `/company-profile/`, `/clients/` | `BuyurtmalarPage` — ro‘yxat, ko‘rish modali, alohida editor sahifalari (§17a) |
-| Import | `zakaz`, `create`, `update` | `/orders/zakaz/` | `new_product` inline (manual import); inline/bulk status — faqat `order_status_manage` |
+| Import | `zakaz`, `zakazBulk`, `create`, `update` | `/orders/zakaz/`, `/orders/zakaz/bulk/` | Ko‘p qatorli import; `payment_status` / `paid_amount` → kassadan chiqim (§17c); grid ustunlari: To‘lov, Summa |
 | Shartnomalar | `contracts`, `retrieve` | `/orders/contracts/` | Read-only |
 | Korxona profili | `companyProfile`, `updateCompanyProfile` | `/company-profile/` | Profil dropdown |
 | Ombor | `products`, `create`, `update`, `addStock`, `productContracts` | `/warehouse/products/` | `warehouse_create` ability |
@@ -289,8 +334,8 @@ await api.remove('/auth/users/', id)
 | Qoldiqlar | `stocks` | `/warehouse/stocks/` | |
 | Mijozlar (ro‘yxat) | `clients`, `create`, `update`, `remove` | `/clients/` | Grid + filtr; qator → mijoz kartasi |
 | Mijoz kartasi | `retrieve`, `orders`, `sales`, `payments`, `invoices` | `/clients/{uuid}/`, `/orders/`, … | URL: `/mijozlar/{id}[/{tab}]` — `ClientDetailPage` |
-| Sotuvlar | `sales`, `salesBulk`, `create`, `update` | `/sales/` | |
-| Kassa | `payments`, `pay` | `/cash/payments/` | Paid yashirin |
+| Sotuvlar | `sales`, `salesBulk`, `create`, `update` | `/sales/` | Yaratilganda avtomatik kassaga tushum (`sync_sale_payment`, §17c) |
+| Kassa | `kassaLedger`, `paymentsSummary`, `pay`, `create` | `/cash/payments/ledger/`, `/cash/payments/summary/` | **`KassaPage`** (alohida sahifa, `/moliya/kassa`); `ResourcePage` emas |
 | Xarajatlar | `expenses`, `expenseTypes`, `expenseSubtypes`, `createForm`, `updateForm` | `/expenses/expenses/` | Multipart |
 | Foydalanuvchilar | `users`, `registerUser`, `update`, `remove` | `/auth/users/`, `/auth/register/` | |
 | Bildirishnomalar | `notifications`, `notificationsMarkRead`, `notificationsMarkAllRead` | `/notifications/` | 30s polling |
@@ -325,6 +370,8 @@ Asosiy URL lar (react-router):
 | Path | Ko‘rinish |
 |---|---|
 | `/`, `/buyurtmalar`, `/import`, … | `PAGE_PATHS` dagi ro‘yxat sahifalari |
+| `/moliya/kassa` | Kassa (`KassaPage`) |
+| `/moliya/xarajatlar` | Xarajatlar grid |
 | `/mijozlar/{uuid}` | Mijoz kartasi, tab `umumiy` |
 | `/mijozlar/{uuid}/{tab}` | `buyurtmalar`, `sotuvlar`, `tolovlar` |
 | `/buyurtmalar/yangi` | Yangi buyurtma (to‘liq sahifa editor) |
@@ -347,7 +394,7 @@ Ro‘yxatdan **ko‘z** ikonkasi URL o‘zgartirmaydi — `loadInvoiceForView(id
 
 ### Grid ro‘yxatlar, filtr, pagination (`ResourcePage` + `listFilters.js`)
 
-**Grid sahifalar** (`GRID_PAGES` — `App.jsx`): Mijozlar, Sotuvlar, Import, Ombor, Kassa, Xarajatlar. **Buyurtmalar** alohida `BuyurtmalarPage` (`/invoices/`).
+**Grid sahifalar** (`GRID_PAGES` — `App.jsx`): Mijozlar, Sotuvlar, Import, Ombor, Xarajatlar. **Kassa** va **Buyurtmalar** alohida: `KassaPage` (`/moliya/kassa`), `BuyurtmalarPage` (`/invoices/`).
 
 | Parametr | Qiymat |
 |---|---|
@@ -363,7 +410,7 @@ Filtr paneli: `ListFiltersPanel` + `frontend/src/listFilters.js`.
 | Sotuvlar | — | ✅ | ✅ |
 | Import | `status` | — | ✅ |
 | Ombor | — | — | — |
-| Kassa | `status` | ✅ | ✅ (UI) |
+| Kassa | `status` | ✅ | ✅ (UI yuboradi; backend `/cash/payments/` hozircha e’tiborsiz) |
 | Xarajatlar | — | — | ✅ |
 
 `buildListQueryParams(title, filters)` → API query: `status` yoki `is_active`, `client`, `date_from`, `date_to`.
@@ -425,7 +472,7 @@ Shifrlangan maydonlar serverda ochiladi. Kamida **2** belgi; debounce **400 ms**
 
 **Buyurtmalar — korxona tanlash modali (`ClientPickerModal`):** «Bajaruvchi korxona» yoki «Mijoz» maydoniga bosilganda modal ochiladi (tovar tanlashdagi `ProductPickerModal` kabi). Qidiruv `searchClients()`; pastda **Yangi korxona qo‘shish** — `clients_manage` bo‘lsa yuridik mijoz editori ochiladi va saqlangach tanlangan tomonga (`client` yoki `executor_client`) biriktiriladi.
 
-**Buyurtma qatorlari — tovar tanlash:** «Tovar nomi» maydoni qo‘lda yoki datalist orqali; yonidagi **quti** ikonkasi `ProductPickerModal` ochadi (`products` ro‘yxatidan qidiruv). Tanlanganda `product`, `identification_code`, `barcode`, `unit`, narx maydonlari to‘ldiriladi.
+**Buyurtma qatorlari — tovar tanlash:** «Tovar nomi» maydoni qo‘lda yoki datalist orqali; yonidagi **quti** ikonkasi `ProductPickerModal` ochadi. Ombor maydoni `serial_number` buyurtma qatorida `identification_code` (UI: **Seriya raqami**). Ombordan tanlanganda FK + maydonlar sinxron; qo‘lda o‘zgartirsangiz frontend `reconcileLineWithProducts()` orqali qayta bog‘laydi yoki FK ni uzadi; saqlashda backend `product` FK bo‘lsa ombordan majburiy sinxron qiladi.
 
 ### `FxRatePanel` rejimlari (`App.jsx`)
 
@@ -465,7 +512,7 @@ Tablar `abilities` bo‘yicha yashirin (`einvoice_view`, `sales_view`, `cash_vie
 
 ## 4. Barcha endpointlar — to‘liq jadval
 
-Jami **~91** HTTP endpoint (custom actionlar bilan). ✅ = `api.js` da wrapper bor.
+Jami **~95** HTTP endpoint (custom actionlar bilan). ✅ = `api.js` da wrapper bor.
 
 ### Auth — `/api/v1/auth/`
 
@@ -508,7 +555,17 @@ DELETE yo‘q — bekor qilish `/cancel/` orqali.
 | PATCH | `/{id}/` | status, received_qty, supplier… | Auth; status o‘zgartirish — Management (`order_status_manage`) | ✅ `update` |
 | POST | `/bulk/` | bulk zakaz body | Auth | ✅ `zakazBulk` |
 
-`zakaz_type`: `auto` (buyurtmadan / backorder) \| `manual`. `payment_status`: `unpaid` \| `partial` \| `paid`.
+`zakaz_type`: `auto` (buyurtmadan / backorder) \| `manual`. `payment_status`: `unpaid` \| `partial` \| `paid`. `partial` bo‘lganda `paid_amount` majburiy.
+
+**Import → kassadan chiqim (`sync_zakaz_expense`):** faqat `zakaz_type=manual` uchun. Import yaratilganda/yangilanganda backend `Expense` yozuvini yaratadi/yangilaydi (`expenses.Expense.zakaz` FK). Eski xato `Payment(zakaz=…)` yozuvlari o‘chiriladi — import **kirim emas, chiqim**.
+
+| `payment_status` | Chiqim summasi (`Expense.amount`) |
+|---|---|
+| `paid` | Jami import summasi (`total`) |
+| `partial` | `paid_amount` (0 dan katta bo‘lishi shart) |
+| `unpaid` | Jami import summasi (`total`) — to‘lanmagan bo‘lsa ham kassadan chiqim sifatida qayd etiladi |
+
+Chiqimlar kassa jurnalida `kind=out`, `source=import` ko‘rinadi. Excel export: `GET /reports/excel/kassa/` (jurnal) yoki `GET /reports/excel/imports/` (zakaz ro‘yxati).
 
 **Manual import — `new_product` inline** (POST body, `product` o‘rniga):
 
@@ -520,6 +577,9 @@ DELETE yo‘q — bekor qilish `/cancel/` orqali.
   "contract_date": "2026-08-11",
   "expected_date": "2026-08-25",
   "unit_price": "1500000",
+  "payment_status": "partial",
+  "paid_amount": "500000",
+  "currency": "UZS",
   "new_product": {
     "name": "Yangi tovar",
     "serial_number": "SN-001",
@@ -589,6 +649,8 @@ List faqat root node + `children` daraxti.
 
 FIFO ombordan ayiradi. Operator uchun narx/foyda yashirilishi mumkin.
 
+**Sotuv → kassaga tushum (`sync_sale_payment`):** `POST /sales/` (yagona, bulk, operator) yaratilganda/yangilanganda backend `Payment` + `PaymentTransaction` yozadi — to‘liq sotuv summasi kassaga **tushum** sifatida tushadi. Jurnalda `kind=in`, `source=sale`.
+
 ### Kassa — `/api/v1/cash/`
 
 **To‘lovlar** `/payments/`
@@ -601,6 +663,7 @@ FIFO ombordan ayiradi. Operator uchun narx/foyda yashirilishi mumkin.
 | DELETE | `/{id}/` | — | Management | ✅ `remove` |
 | POST | `/{id}/pay/` | `{ amount, comment }` | Accountant/Management | ✅ `pay` |
 | GET | `/summary/` | — | Accountant/Management | ✅ `paymentsSummary` |
+| GET | `/ledger/` | `page`, `page_size`, `search`, `source`, `kind` | Accountant/Management read | ✅ `kassaLedger` |
 
 **Ro‘yxatda `paid` yashirin** — `?status=paid` yoki `?include_paid=true`.
 
@@ -637,6 +700,7 @@ Singleton (`pk=1`). Buyurtmalar editorida bajaruvchi **«Korxona profili (biznin
 | Yuridik | `phone` | Majburiy, `validateUzPhone` |
 | Yuridik | `inn` | Ixtiyoriy; to‘ldirilsa STIR 9 raqam |
 | Yuridik | `mfo` | Ixtiyoriy; to‘ldirilsa 5 raqam |
+| Yuridik | `director_jshshr` | Ixtiyoriy; to‘ldirilsa JSHSHIR 14 raqam, 1-raqam 1–6 |
 | Jismoniy | `full_name` | Majburiy |
 | Jismoniy | `pinfl` | Majburiy, JSHSHIR 14 raqam, 1-raqam 1–6 |
 | Jismoniy | `passport_number` | Majburiy |
@@ -710,10 +774,12 @@ Primary key — **UUID**. Maxfiy maydonlar bazada shifrlanadi.
 | GET | `/expenses/` | `date_from`, `date_to` | Accountant/Management | ❌ |
 | GET | `/top-products/` | `limit`, dashboard filtrlari | Accountant/Management | ✅ `reports` |
 | GET | `/monthly-trend/` | `months`, dashboard filtrlari | Accountant/Management | ✅ `monthlyTrend` |
-| GET | `/excel/sales/` | `date_from`, `date_to` | Accountant/Management | ✅ `exportSales` |
-| GET | `/excel/stock/` | — | Accountant/Management | ✅ `exportStock` |
-| GET | `/excel/expenses/` | `date_from`, `date_to` | Accountant/Management | ✅ `exportExpenses` |
-| GET | `/excel/payments/` | — | Accountant/Management | ✅ `exportPayments` |
+| GET | `/excel/sales/` | `date_from`, `date_to` | Accountant/Management | ✅ `exportSales` / `exportReport('sales')` |
+| GET | `/excel/stock/` | — | Accountant/Management | ✅ `exportStock` / `exportReport('stock')` |
+| GET | `/excel/expenses/` | `date_from`, `date_to` | Accountant/Management | ✅ `exportExpenses` / `exportReport('expenses')` |
+| GET | `/excel/kassa/` | `date_from`, `date_to` | Accountant/Management | ✅ `exportKassa` / `exportReport('kassa')` |
+| GET | `/excel/payments/` | `date_from`, `date_to` | Accountant/Management | ✅ `exportPayments` (kassa alias) |
+| GET | `/excel/imports/` | `date_from`, `date_to` | Accountant/Management | ✅ `exportImports` / `exportReport('import')` |
 
 ### Bildirishnomalar — `/api/v1/notifications/`
 
@@ -735,6 +801,7 @@ Javob `mark_all_read`: `{ "status": "ok", "marked_read": 5 }`.
 | `GET /cash/exchange-rates/` (list) | Hozircha UI da kerak emas |
 | `PATCH /cash/exchange-rates/{id}/` | Qo‘lda kurs — faqat POST ishlatiladi |
 | `POST /expenses/expense-subtypes/` | Admin/accountant; UI da yo‘q |
+| `GET /cash/payments/ledger/?date_from=` | Backend `build_ledger_entries` davrni qo‘llab-quvvatlaydi, lekin ViewSet hozircha query parametr yubormaydi — faqat `search`, `source`, `kind` |
 
 ---
 
@@ -827,7 +894,7 @@ Ko‘rish — `InvoiceContractModal` (jadval + mazmun + «2. Tomonlarni yuridik 
 | `valid_until` | Majburiy; `>= contract_date` |
 | `client` | Majburiy (buyurtmachi / hamkor tanlangan) |
 | `executor_type` | `company_profile` yoki `client` |
-| `executor_client` | `executor_type=client` bo‘lsa majburiy |
+| `executor_client` | `executor_type=client` bo‘lsa majburiy; `client` bilan bir xil bo‘lmasin |
 | `company` | Faqat `executor_type=company_profile` — korxona profilida `name` va `stir` |
 | `content_title` | Majburiy |
 | `content_body` | Majburiy |
@@ -1051,6 +1118,8 @@ Operator uchun narx/foyda maydonlari ayrim javoblarda qaytmaydi. Frontend bunday
 | Invoice jami / qator narxlari | `prices_view` | `BuyurtmalarPage`, backend serializer |
 | FX tab / qo‘lda saqlash / ↻ | `users_manage` | `FxRatePanel` |
 | Foydalanuvchilar sahifasi | `users_view` (ko‘rish), `users_manage` (CRUD) | `HIDDEN_PAGES` |
+| Hisobotlar → Excel export | `reports_view` | `ReportExportPanel` |
+| Kassa jurnali / balans | `cash_view` + `prices_view` (summalar) | `KassaPage` |
 
 `manageAbilities` (`ResourcePage`):
 
@@ -1475,7 +1544,36 @@ POST /api/v1/orders/zakaz/
 POST /api/v1/orders/zakaz/bulk/
 ```
 
-Bir nechta mahsulot uchun zakaz yaratadi.
+Bir nechta mahsulot uchun zakaz yaratadi. Har bir `items` qatori mavjud `product` id yoki `new_product` (yangi mahsulot) qabul qiladi — ikkalasi bir vaqtda emas.
+
+```json
+{
+  "supplier": "Xitoy",
+  "contract_number": "13/1108",
+  "contract_date": "2026-08-13",
+  "items": [
+    { "product": 12, "quantity": 5, "unit_price": "100000.00" },
+    {
+      "new_product": {
+        "name": "AMD CHIP",
+        "serial_number": "1234",
+        "unit": "piece"
+      },
+      "quantity": 10,
+      "unit_price": "50000.00"
+    }
+  ]
+}
+```
+
+Mahsulot dropdown formati: `{name} · raqam: {serial_number}` — bu identifikator, import miqdori emas (`quantity` alohida maydonda).
+
+**Frontend (`ZakazEditor`, yangi import):**
+
+- Bir nechta qator: har biri **Ombordan tanlash** yoki **Yangi mahsulot** (`new_product`).
+- 1 ta qator → `POST /orders/zakaz/`; 2+ qator → `POST /orders/zakaz/bulk/`.
+- Ombordan mahsulot tanlanganda **Narx** maydoni avtomatik `purchase_price` dan to‘ldiriladi (`prices_manage` bo‘lsa).
+- `POST /warehouse/products/` — `serial_number` bo‘sh bo‘lsa backend `IMP-{timestamp}` beradi (`apps/warehouse/product_utils.ensure_product_serial_number`).
 
 ### Status PATCH
 
@@ -1735,7 +1833,17 @@ Jismoniy shaxs (`client_type: "individual"`):
 }
 ```
 
-`full_name`, `pinfl`, `inn`, `passport_number`, `phone`, `director_jshshr`, `director_fish`, `bank_account` bazada shifrlanadi. Javobda ochiq matn qaytadi.
+`full_name`, `pinfl`, `inn`, `passport_number`, `phone`, `director_jshshr`, `director_fish`, `bank_account` bazada **Fernet** bilan shifrlanadi (`FERNET_KEY` env). Serializer saqlashda bir marta shifrlaydi, `GET`/`PATCH` javobida `to_representation` orqali **ochiq matn** qaytaradi — frontend hech qachon `gAAAAA...` ko‘rmaydi.
+
+| Qatlam | Ko‘rinish |
+|---|---|
+| PostgreSQL (bazada) | Shifrlangan (`gAAAAA...`) |
+| `GET/PATCH /clients/{uuid}/` JSON | Ochiq matn (`KImdir`, `+998...`) |
+| Frontend (`Editor`, `ClientPickerModal`, `PartyInfoGrid`) | API javobidagi ochiq matn |
+
+Shifrlanmaydigan maydonlar: `company_name`, `email`, `address`, `comment`, `mfo`, `oked`, `bank_name`, `client_type`, `is_active`.
+
+`FERNET_KEY` bo‘lmasa va `DEBUG=True` bo‘lsa, ma’lumotlar vaqtincha ochiq saqlanadi (faqat dev). Production (`DEBUG=False`) da kalit **majburiy**.
 
 Hozir Soliq/DIDox kabi external auto-fill endpoint yo‘q. Rejalangan to‘g‘ri arxitektura:
 
@@ -1755,6 +1863,8 @@ PATCH /api/v1/sales/{id}/
 DELETE /api/v1/sales/{id}/
 POST /api/v1/sales/bulk/
 ```
+
+Sotuv yaratilganda to‘liq summa avtomatik **kassaga tushum** sifatida yoziladi (`Payment` + tranzaksiya, 15% komissiya bilan). Backend: `apps/sales/sale_payment.sync_sale_payment` — har `POST/PATCH` dan keyin chaqiriladi (`apps/sales/serializers.py`).
 
 Bitta sotuv:
 
@@ -1817,7 +1927,88 @@ GET /api/v1/cash/payments/?include_paid=true
 | `currency` | `UZS` yoki `USD` |
 | `order`, `sale` | Bog‘langan buyurtma/sotuv ID |
 
-Frontend Kassa sahifasi: `api.payments()` — default holatda faol to‘lovlar.
+Frontend Kassa sahifasi: `KassaPage` — `api.kassaLedger()` + `api.paymentsSummary()`. Jadval **tushum** (sotuv/buyurtma tranzaksiyalari) va **chiqim** (import xarajatlari) harakatlarini birlashtirilgan jurnalda ko‘rsatadi.
+
+**Kassa jurnali (`GET /cash/payments/ledger/`):**
+
+| Query | Qiymat |
+|---|---|
+| `page`, `page_size` | Pagination (default `page_size=25`, max 100) |
+| `search` | Izoh, mijoz, shartnoma, mahsulot nomi |
+| `source` | `sale` \| `order` \| `import` |
+| `kind` | `in` \| `out` |
+
+Javob (pagination):
+
+```json
+{
+  "count": 42,
+  "results": [
+    {
+      "id": "in-15",
+      "kind": "in",
+      "source": "sale",
+      "amount": "5200000",
+      "currency": "UZS",
+      "label": "Sotuv #7",
+      "client_name": "Samarqand Med Texnika MChJ",
+      "date": "2026-08-11",
+      "created_at": "2026-08-11T14:30:00+05:00",
+      "payment_id": 12,
+      "remaining": "0",
+      "status": "paid"
+    },
+    {
+      "id": "out-3",
+      "kind": "out",
+      "source": "import",
+      "amount": "15000000",
+      "currency": "UZS",
+      "label": "Import #5 — Monitor (Guangzhou)",
+      "client_name": "Guangzhou Medical Supply",
+      "date": "2026-08-10",
+      "created_at": "2026-08-10T09:00:00+05:00",
+      "zakaz_id": 5
+    }
+  ]
+}
+```
+
+**`paymentsSummary` qo‘shimcha maydonlar** (`ledger_totals()`):
+
+```json
+{
+  "sum_in_uzs": "50000000",
+  "sum_in_usd": "0",
+  "sum_import_uzs": "20000000",
+  "sum_import_usd": "0",
+  "net_balance_uzs": "30000000",
+  "net_balance_usd": "0"
+}
+```
+
+**Kassa balansi** = `net_balance_uzs` = tushumlar − import chiqimlari.
+
+**`KassaPage` UI (`prices_view` bo‘lsa):**
+
+- Metrikalar: Tushum, Import chiqim, Kassa balansi, Komissiya
+- Filtrlar: qidiruv, manba (`sale` / `order` / `import`)
+- Qolgan to‘lov bo‘lsa tushum qatorida **to‘lov qabul qilish** (`api.pay`) — faqat `cash_manage`
+- **Yangi to‘lov** modali — qo‘lda `POST /cash/payments/` (sotuvga bog‘lash)
+
+**Yangi to‘lov modali** (`cash_manage`):
+
+```json
+{
+  "sale": 7,
+  "client": "<uuid>",
+  "paid_amount": "0",
+  "currency": "UZS",
+  "due_date": "2026-08-20"
+}
+```
+
+Jami va 15% komissiya backend sotuv asosida avtomatik hisoblanadi.
 
 Payment sotuv yoki orderga bog‘lanadi, ikkalasiga bir vaqtda emas.
 
@@ -1827,10 +2018,15 @@ Javobda:
 source
 sale_info
 order_info
+zakaz
 client_name
 remaining
 transactions
 ```
+
+`source`: `sale` \| `order` (faqat **tushumlar**). Import chiqimlari `Payment` emas — `Expense(zakaz)` orqali jurnalda `source=import`, `kind=out`.
+
+Sotuv yaratilganda to‘liq summa avtomatik kassaga yoziladi (`sync_sale_payment`, §17c). Import yaratilganda/yangilanganda chiqim yoziladi (`sync_zakaz_expense`).
 
 ### Qo‘shimcha to‘lov
 
@@ -1980,6 +2176,8 @@ Bosh sahifa `api.reports(params)` va `api.monthlyTrend(6, params)` chaqiradi. Um
 | `payment_status` | string | `pending`, `partial`, `paid`, `overdue` |
 
 Default bosh sahifa filtri: bugungi sana (`date_from` = `date_to` = bugun).
+
+**Frontend UI:** `Dashboard` — `Filtrlar` + `Yangi buyurtma` (`einvoice_manage`). Mobilda (`≤768px`) tugma qator ichida ixcham (`dashboard-toolbar`): filtr chapda kengayadi, tugma o‘ngda `width: auto`; juda tor ekranda (`≤420px`) faqat `+` ikonka (`aria-label="Yangi buyurtma"`).
 
 Misol:
 
@@ -2141,18 +2339,126 @@ GET /api/v1/reports/expenses/?date_from=2026-08-01&date_to=2026-08-31
 | Sahifa | Chaqiriqlar |
 |---|---|
 | Bosh sahifa | `api.reports(params)` + `api.monthlyTrend(6, params)` — filtrli |
-| Hisobotlar | `api.reports()` filtrsiz + `api.expensesSummary()` + `api.paymentsSummary()` |
+| Hisobotlar (tablar) | Moliyaviy/Ombor/Sotuvlar/Xarajatlar: `api.reports()` filtrsiz + `api.expensesSummary()` + `api.paymentsSummary()` |
+| Hisobotlar → **Excel** | `api.exportReport(type, params)` — `ReportExportPanel` (§17b) |
 
-Excel export:
+### Excel export (backend)
 
-```http
-GET /api/v1/reports/excel/sales/?date_from=2026-08-01&date_to=2026-08-31
-GET /api/v1/reports/excel/stock/
-GET /api/v1/reports/excel/expenses/?date_from=2026-08-01&date_to=2026-08-31
-GET /api/v1/reports/excel/payments/
-```
+Ruxsat: `IsAccountantOrManagement`. Operator uchun `403`.
 
-Frontend: `api.exportSales()`, `api.exportStock()`, `api.exportExpenses()`, `api.exportPayments()` — blob download. Operator uchun `403`.
+| Endpoint | Davr | Ma’lumot |
+|---|---|---|
+| `GET /reports/excel/sales/?date_from=&date_to=` | `sold_date` | Sotuvlar jadvali + meta sarlavha |
+| `GET /reports/excel/kassa/?date_from=&date_to=` | tranzaksiya / expense sanasi | Tushum + import chiqim jurnali |
+| `GET /reports/excel/payments/` | xuddi `kassa` | Alias (bir xil `PaymentsExportView`) |
+| `GET /reports/excel/imports/?date_from=&date_to=` | `created_at` | Mustaqil import (manual zakaz) ro‘yxati |
+| `GET /reports/excel/expenses/?date_from=&date_to=` | `date` | Barcha xarajatlar (import chiqimlari ham) |
+| `GET /reports/excel/stock/` | — | Joriy qoldiqlar (snapshot) |
+
+Frontend: `api.exportReport(type, params)` yoki alohida `exportSales` / `exportKassa` / … — blob download (`download()` helper).
+
+---
+
+## 17b. Excel export UI — `ReportExportPanel` va kalendari
+
+Joylashuv: **Hisobotlar** → **Excel** tab (`App.jsx` → `ReportsPage` → `ReportExportPanel`).
+
+### Hisobot turlari
+
+| `type` (`exportReport`) | UI yorlig‘i | Davr kerakmi | Sana maydoni |
+|---|---|---|---|
+| `sales` | Sotuvlar | ✅ | `sold_date` |
+| `kassa` | Kassa | ✅ | jurnal `date` |
+| `import` | Import | ✅ | zakaz `created_at` |
+| `expenses` | Xarajatlar | ✅ | expense `date` |
+| `stock` | Ombor holati | ❌ | snapshot |
+
+### Tez tanlov (preset)
+
+| Preset | `resolvePeriod` natijasi |
+|---|---|
+| Barcha davr | `{}` — parametrsiz so‘rov |
+| Joriy oy | `date_from` = oy boshi, `date_to` = oy oxiri |
+| O‘tgan oy | Oldingi oy oralig‘i |
+| Joriy yil | `YYYY-01-01` … bugun |
+| Boshqa davr | Kalendardan tanlangan `date_from` / `date_to` |
+
+Kalendardan sana tanlanganda preset avtomatik **`custom`** ga o‘tadi.
+
+### UI tuzilishi
+
+- **Chap:** hisobot turi kartalari (ikon + yorliq), tez tanlov chip’lari, hint matn
+- **O‘ng:** `FilterDateRangeCalendar` — davr oralig‘i (`label="Davr oralig‘i"`)
+- **Past:** tanlangan tur + davr xulosasi, **Excel yuklab olish** tugmasi
+- **Barcha davr** tanlanganda kalendar `disabled` (vizual o‘chirilgan)
+
+### `FilterDateRangeCalendar`
+
+Fayl: `frontend/src/components/FilterDateRangeCalendar.jsx`.
+
+Ishlatiladi:
+
+- `ReportExportPanel` — export davri
+- `App.jsx` — bosh sahifa dashboard davr filtri (`period-filter-menu` → `period-filter-body`)
+
+Props:
+
+| Prop | Turi | Default | Tavsif |
+|---|---|---|---|
+| `dateFrom` | `YYYY-MM-DD` | — | Oraliq boshi |
+| `dateTo` | `YYYY-MM-DD` | — | Oraliq oxiri |
+| `onChange` | `({ date_from, date_to }) => void` | — | Sana tanlanganda |
+| `label` | string | `'Davr'` | Sarlavha |
+| `className` | string | `''` | Qo‘shimcha CSS klass |
+| `disabled` | boolean | `false` | `true` bo‘lsa tugmalar o‘chiriladi |
+
+Interaksiya: birinchi bosish — bosh sana; ikkinchi bosish — tugash sana (teskari tartib avtomatik tuzatiladi). Oy/yil navigatsiyasi va yil dropdown mavjud.
+
+CSS: `.filter-calendar-*`, `.filter-date-range-calendar`, export uchun `.report-export-calendar-aside`.
+
+---
+
+## 17c. Kassa jurnali va avtomatik moliyaviy sinxron
+
+Biznes qoida (frontend ko‘rsatish):
+
+| Operatsiya | Yo‘nalish | Backend | Jurnal |
+|---|---|---|---|
+| **Sotuv** | Kassaga **tushum** | `apps/sales/sale_payment.py` → `sync_sale_payment` | `kind=in`, `source=sale` |
+| **Import (manual zakaz)** | Kassadan **chiqim** | `apps/orders/zakaz_payment.py` → `sync_zakaz_expense` | `kind=out`, `source=import` |
+| **Buyurtma oldindan to‘lov** | Kassaga tushum | `Payment` + tranzaksiya | `kind=in`, `source=order` |
+
+**Kassa balansi** = barcha tushum tranzaksiyalari − barcha import `Expense` summalari (`ledger_totals()`).
+
+### Import grid ustunlari (`ResourcePage`, title=`Import`)
+
+| Ustun | Maydon | Eslatma |
+|---|---|---|
+| ID | `id` | |
+| Mahsulot | `product_name` | |
+| Tur | `zakaz_type` | Mustaqil / Backorder |
+| Shart. | `contract_number` | |
+| Zak. | `quantity` | |
+| Summa | `total` | `prices_view` |
+| To‘lov | `payment_status` | `unpaid` / `partial` / `paid` badge |
+| Qabul | `received_qty` | |
+| Etkaz. | `supplier` | |
+| Kutil. | `expected_date` | |
+| Holati | `status` | inline — `order_status_manage` |
+| Yaratdi | `created_by_name` | |
+
+Tarix tugmasi: zakaz `history` modal.
+
+### Backend fayllar (frontend dasturchi uchun)
+
+| Fayl | Vazifa |
+|---|---|
+| `apps/cash/ledger.py` | `build_ledger_entries`, `ledger_totals` |
+| `apps/reports/excel.py` | Excel generatsiya, meta sarlavhalar, `export_kassa_ledger`, `export_imports` |
+| `apps/sales/sale_payment.py` | Sotuv → Payment |
+| `apps/orders/zakaz_payment.py` | Import → Expense |
+
+---
 
 ## 18. Frontendga yangi endpoint qo‘shish
 
@@ -2279,7 +2585,10 @@ notifications: 30s
 - Kassa payment qabul qilinganda payment summary refetch qilinsin.
 - Order tahrirlanganda payments va reports refetch qilinsin.
 - File uploadda `FormData` ishlatilsin.
-- Excel exportda blob download ishlatilsin.
+- Excel exportda `api.exportReport(type, params)` yoki `download()` ishlatilsin; Hisobotlar → Excel — `ReportExportPanel`.
+- Kassa sahifasi `KassaPage` — `kassaLedger` + `paymentsSummary`; import chiqim `kind=out`.
+- Sotuv/import yaratilganda avtomatik kassa sinxroni (`sync_sale_payment`, `sync_zakaz_expense`) — qo‘lda Payment yaratish shart emas.
+- `FilterDateRangeCalendar` — dashboard, export va filtrlarda bir xil oralik tanlash UX.
 - Bosh sahifa dashboard filtrlari `api.reports()` va `api.monthlyTrend()` ga uzatilsin.
 - Kassa ro‘yxatida `paid` default yashirin; kerak bo‘lsa `?status=paid` yoki `?include_paid=true`.
 - Buyurtma yaratishda `api.nextContractNumber({ contract_date })` bilan raqam olinadi.

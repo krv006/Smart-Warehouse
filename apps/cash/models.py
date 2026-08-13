@@ -60,6 +60,9 @@ class Payment(TimeStampedModel):
     order       = ForeignKey('orders.Order', on_delete=PROTECT,
                              null=True, blank=True, related_name='payments',
                              help_text='Buyurtma to\'lovi (oldindan to\'lov kassada ko\'rinadi)')
+    zakaz       = ForeignKey('orders.Zakaz', on_delete=PROTECT,
+                             null=True, blank=True, related_name='payments',
+                             help_text='Import (zakaz) etkazuvchiga to\'lov')
     client      = ForeignKey('clients.Client', on_delete=SET_NULL,
                              null=True, blank=True, related_name='payments')
     total_amount = DecimalField(max_digits=14, decimal_places=2,
@@ -86,6 +89,12 @@ class Payment(TimeStampedModel):
             if not self.pk:
                 self.total_amount = self.sale.sold_price * self.sale.quantity
                 self.commission   = (self.total_amount * self.COMMISSION_RATE).quantize(Decimal('0.01'))
+        elif self.zakaz_id:
+            if not self.pk:
+                z = self.zakaz
+                if z.total is not None:
+                    self.total_amount = z.total
+                self.commission = Decimal('0')
         elif self.order_id:
             # Buyurtma to'lovi — summa buyurtmadan olinadi, buyurtma
             # tahrirlanganda kassa ham yangilanadi. Komissiya sotuvga tegishli,

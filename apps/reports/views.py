@@ -16,7 +16,8 @@ from apps.common.permissions import IsAccountantOrManagement
 from apps.expenses.models import Expense
 from apps.orders.models import Zakaz
 from apps.reports.excel import (export_sales, export_stock,
-                                 export_expenses, export_payments)
+                                 export_expenses, export_payments,
+                                 export_kassa_ledger, export_imports)
 from apps.sales.models import Sale
 from apps.warehouse.models import Stock, Product
 
@@ -106,7 +107,7 @@ def _sales_revenue(date_from=None, date_to=None, category_id=None,
 
 def _kassa_collected(date_from=None, date_to=None, currency=None,
                      client_id=None, payment_status=None, **_):
-    qs = PaymentTransaction.objects.all()
+    qs = PaymentTransaction.objects.filter(payment__zakaz__isnull=True)
     if currency:
         qs = qs.filter(payment__currency=currency)
     if client_id:
@@ -129,48 +130,32 @@ def _kassa_collected(date_from=None, date_to=None, currency=None,
 
 def _import_paid_totals(date_from=None, date_to=None, currency=None,
                         category_id=None, product_id=None, supplier=None, **_):
-    """To'langan importlar (MANUAL zakaz) — tanlangan davr bo'yicha."""
+    """Import bo'yicha kassadan chiqqan summalar (Expense, zakaz bog'langan)."""
     rate = get_active_mb_rate()
 
-    zakaz_qs = Zakaz.objects.filter(
-        zakaz_type=Zakaz.MANUAL,
-        payment_status__in=(Zakaz.PAID, Zakaz.PARTIAL),
-    ).exclude(unit_price__isnull=True)
-
+    qs = Expense.objects.filter(zakaz__isnull=False).select_related('zakaz__product')
     if category_id:
-        zakaz_qs = zakaz_qs.filter(product__category_id=category_id)
+        qs = qs.filter(zakaz__product__category_id=category_id)
     if product_id:
-        zakaz_qs = zakaz_qs.filter(product_id=product_id)
+        qs = qs.filter(zakaz__product_id=product_id)
     if supplier:
-        zakaz_qs = zakaz_qs.filter(supplier__icontains=supplier)
-
+        qs = qs.filter(zakaz__supplier__icontains=supplier)
     if currency:
-        zakaz_qs = zakaz_qs.filter(currency=currency)
-
-    if date_from and date_to and date_from == date_to:
-        zakaz_qs = zakaz_qs.filter(
-            Q(created_at__date=date_from) | Q(contract_date=date_from),
-        )
-    else:
-        if date_from:
-            zakaz_qs = zakaz_qs.filter(
-                Q(created_at__date__gte=date_from) | Q(contract_date__gte=date_from),
-            )
-        if date_to:
-            zakaz_qs = zakaz_qs.filter(
-                Q(created_at__date__lte=date_to) | Q(contract_date__lte=date_to),
-            )
+        qs = qs.filter(currency=currency)
+    if date_from:
+        qs = qs.filter(date__gte=date_from)
+    if date_to:
+        qs = qs.filter(date__lte=date_to)
 
     total_uzs = Decimal('0')
     total_usd = Decimal('0')
-    for zakaz in zakaz_qs:
-        line_total = zakaz.unit_price * zakaz.quantity
-        if zakaz.currency == Zakaz.USD:
-            total_usd += line_total
+    for expense in qs:
+        if expense.currency == Zakaz.USD:
+            total_usd += expense.amount
             if currency != Zakaz.USD:
-                total_uzs += _usd_to_uzs(line_total, rate)
+                total_uzs += _usd_to_uzs(expense.amount, rate)
         else:
-            total_uzs += line_total
+            total_uzs += expense.amount
 
     return total_uzs, total_usd, rate
 
@@ -209,7 +194,7 @@ class SalesExportView(APIView):
             qs = qs.filter(sold_date__gte=date_from)
         if date_to:
             qs = qs.filter(sold_date__lte=date_to)
-        return export_sales(qs)
+        return export_sales(qs, date_from=date_from, date_to=date_to)
 
 
 class StockExportView(APIView):
@@ -243,16 +228,47 @@ class ExpensesExportView(APIView):
             qs = qs.filter(date__gte=date_from)
         if date_to:
             qs = qs.filter(date__lte=date_to)
-        return export_expenses(qs)
+        return export_expenses(qs, date_from=date_from, date_to=date_to)
 
 
 class PaymentsExportView(APIView):
     permission_classes = (IsAccountantOrManagement,)
 
-    @extend_schema(summary="Kassa — Excel yuklash", tags=["Reports / Excel"])
+    @extend_schema(
+        summary="Kassa — Excel yuklash (tushum + import chiqim)",
+        parameters=[
+            OpenApiParameter('date_from', str, description='YYYY-MM-DD'),
+            OpenApiParameter('date_to',   str, description='YYYY-MM-DD'),
+        ],
+        tags=["Reports / Excel"],
+    )
     def get(self, request):
-        qs = Payment.objects.select_related('sale__product', 'client').order_by('-created_at')
-        return export_payments(qs)
+        date_from, date_to = _parse_period(request)
+        return export_kassa_ledger(date_from=date_from, date_to=date_to)
+
+
+class ImportsExportView(APIView):
+    permission_classes = (IsAccountantOrManagement,)
+
+    @extend_schema(
+        summary="Import (zakaz) — Excel yuklash",
+        parameters=[
+            OpenApiParameter('date_from', str, description='YYYY-MM-DD'),
+            OpenApiParameter('date_to',   str, description='YYYY-MM-DD'),
+        ],
+        tags=["Reports / Excel"],
+    )
+    def get(self, request):
+        from apps.orders.models import Zakaz
+        qs = Zakaz.objects.filter(zakaz_type=Zakaz.MANUAL).select_related(
+            'product',
+        ).order_by('-created_at')
+        date_from, date_to = _parse_period(request)
+        if date_from:
+            qs = qs.filter(created_at__date__gte=date_from)
+        if date_to:
+            qs = qs.filter(created_at__date__lte=date_to)
+        return export_imports(qs, date_from=date_from, date_to=date_to)
 
 
 class FinancialSummaryView(APIView):

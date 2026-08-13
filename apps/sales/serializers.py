@@ -106,6 +106,8 @@ class SaleSerializer(ModelSerializer):
     def create(self, validated_data):
         sale = super().create(validated_data)
         _deplete_stock(sale.product, sale.quantity)
+        from apps.sales.sale_payment import sync_sale_payment
+        sync_sale_payment(sale, user=self.context['request'].user)
         return sale
 
     @transaction.atomic
@@ -139,6 +141,8 @@ class SaleOperatorSerializer(SaleSerializer):
         validated_data['sold_price'] = product.selling_price or 0
         sale = super(SaleSerializer, self).create(validated_data)
         _deplete_stock(sale.product, sale.quantity)
+        from apps.sales.sale_payment import sync_sale_payment
+        sync_sale_payment(sale, user=self.context['request'].user)
         return sale
 
     @transaction.atomic
@@ -224,6 +228,8 @@ class SaleBulkCreateSerializer(Serializer):
                 comment=item.get('comment'),
             )
             _deplete_stock(sale.product, sale.quantity)
+            from apps.sales.sale_payment import sync_sale_payment
+            sync_sale_payment(sale, user=self.context['request'].user)
             created.append(sale)
         return created
 

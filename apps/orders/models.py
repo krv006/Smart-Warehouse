@@ -543,7 +543,7 @@ class Zakaz(TimeStampedModel):
                              default=0,
                              help_text='Qabul qilingan miqdor (status=received da kiritiladi)')
 
-    # Narx / summa — faqat MANUAL zakaz uchun (kassaga yozilmaydi)
+    # Narx / summa — faqat MANUAL zakaz uchun (kassadan chiqim — Expense)
     unit_price         = DecimalField(max_digits=14, decimal_places=2,
                                       null=True, blank=True,
                                       help_text='Birlik narxi (mustaqil zakaz uchun)')
@@ -552,6 +552,8 @@ class Zakaz(TimeStampedModel):
     payment_status     = CharField(max_length=10, choices=PAYMENT_STATUS_CHOICES,
                                    default=UNPAID,
                                    help_text='Etkazuvchiga to\'lov holati (mustaqil zakaz)')
+    paid_amount        = DecimalField(max_digits=14, decimal_places=2, default=0,
+                                      help_text='Etkazuvchiga to\'langan summa (qisman to\'lov)')
 
     supplier           = CharField(max_length=255, blank=True, null=True,
                                    help_text='Etkazuvchi nomi / manzili')
@@ -636,7 +638,10 @@ class Zakaz(TimeStampedModel):
         stock.quantity = F('quantity') + qty
         stock.save(update_fields=['quantity'])
 
-        if self.unit_price is not None and self.quantity:
+        # Mustaqil import uchun chiqim sync_zakaz_expense orqali yoziladi —
+        # qabul paytida takrorlanmasin.
+        if (self.unit_price is not None and self.quantity
+                and self.zakaz_type != self.MANUAL):
             expense_type, _ = ExpenseType.objects.get_or_create(
                 code=ExpenseType.IMPORT,
                 defaults={'name': 'Import rasxod'},

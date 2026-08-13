@@ -3,6 +3,7 @@ from rest_framework.serializers import (ModelSerializer, ValidationError,
                                         IntegerField, CharField, SerializerMethodField)
 
 from apps.warehouse.models import Category, Product, Stock
+from apps.warehouse.product_utils import ensure_product_serial_number
 
 
 class CategorySerializer(ModelSerializer):
@@ -63,6 +64,9 @@ class ProductSerializer(ModelSerializer):
         location = validated_data.get('warehouse_location')
         validated_data.pop('quantity', None)
         validated_data.pop('warehouse_location', None)
+        validated_data['serial_number'] = ensure_product_serial_number(
+            validated_data.get('serial_number')
+        )
         product = super().create(validated_data)
         if quantity:
             Stock.objects.create(product=product, quantity=quantity, warehouse_location=location)
