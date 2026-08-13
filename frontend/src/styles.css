@@ -3925,6 +3925,29 @@ label.field-invalid textarea:focus,
   font-size: 15px;
 }
 
+.e-invoice-executor-type {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.e-invoice-executor-type select {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font: inherit;
+}
+
+.e-invoice-profile-hint {
+  margin: 12px 0 0;
+  font-size: 12px;
+}
+
 .e-invoice-party-panel-head {
   display: flex;
   align-items: center;
@@ -4009,6 +4032,99 @@ label.field-invalid textarea:focus,
   margin: 0;
   padding: 16px 4px;
   text-align: center;
+}
+
+.product-picker-item.is-selected,
+.client-picker-item.is-selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+}
+
+.client-picker-modal {
+  grid-template-rows: auto auto 1fr auto;
+}
+
+.client-picker-footer {
+  display: flex;
+  justify-content: flex-start;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.client-picker-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.client-picker-label {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.client-picker-trigger-wrap {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+}
+
+.client-picker-trigger {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  min-height: 42px;
+}
+
+.client-picker-trigger.is-empty .client-picker-trigger-text {
+  color: var(--muted);
+}
+
+.client-picker-trigger.input-invalid {
+  border-color: var(--danger);
+}
+
+.client-picker-trigger-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.client-picker-clear {
+  position: absolute;
+  right: 36px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.client-picker-clear:hover {
+  background: var(--bg);
+  color: var(--text);
+}
+
+.client-picker-field.has-error .client-picker-trigger {
+  border-color: var(--danger);
 }
 
 .product-picker-item {

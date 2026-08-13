@@ -4,7 +4,7 @@ from django.db import transaction
 from rest_framework.serializers import (ModelSerializer, ValidationError,
                                         SerializerMethodField)
 
-from apps.invoices.models import ElectronicInvoice, InvoiceLineItem, VatPercent
+from apps.invoices.models import ElectronicInvoice, ExecutorType, InvoiceLineItem, VatPercent
 from apps.invoices.services import sync_invoice_contract_registry
 from apps.warehouse.models import Product
 
@@ -33,6 +33,7 @@ class InvoiceLineItemSerializer(ModelSerializer):
 class ElectronicInvoiceSerializer(ModelSerializer):
     lines = InvoiceLineItemSerializer(many=True, required=False)
     client_name = SerializerMethodField()
+    executor_name = SerializerMethodField()
     document_type_display = SerializerMethodField()
     total_delivery = SerializerMethodField()
     total_vat = SerializerMethodField()
@@ -44,7 +45,8 @@ class ElectronicInvoiceSerializer(ModelSerializer):
         fields = (
             'id', 'document_type', 'document_type_display', 'name',
             'contract_number', 'place_signed', 'contract_date', 'valid_until',
-            'client', 'client_name', 'reverse_calculation',
+            'client', 'client_name', 'executor_type', 'executor_client', 'executor_name',
+            'reverse_calculation',
             'content_title', 'content_body', 'comment',
             'lines', 'total_delivery', 'total_vat', 'grand_total',
             'created_by', 'created_by_name', 'created_at', 'updated_at',
@@ -53,6 +55,26 @@ class ElectronicInvoiceSerializer(ModelSerializer):
 
     def get_client_name(self, obj):
         return str(obj.client) if obj.client else None
+
+    def get_executor_name(self, obj):
+        if obj.executor_type == ExecutorType.CLIENT and obj.executor_client:
+            return str(obj.executor_client)
+        return None
+
+    def validate(self, attrs):
+        executor_type = attrs.get(
+            'executor_type',
+            getattr(self.instance, 'executor_type', ExecutorType.COMPANY_PROFILE),
+        )
+        executor_client = attrs.get(
+            'executor_client',
+            getattr(self.instance, 'executor_client', None),
+        )
+        if executor_type == ExecutorType.CLIENT and not executor_client:
+            raise ValidationError({'executor_client': 'Bajaruvchi korxonani tanlang.'})
+        if executor_type == ExecutorType.COMPANY_PROFILE:
+            attrs['executor_client'] = None
+        return attrs
 
     def get_document_type_display(self, obj):
         return obj.get_document_type_display()

@@ -396,7 +396,7 @@ Forma editorlari mahsulotlarni **mustaqil** yuklaydi; mijozlar faqat `clients_vi
 | Komponent | Mahsulot | Mijoz |
 |---|---|---|
 | `SaleEditor` | `api.products({ page_size: 500 })` | `SearchableCombobox` + `searchClients()` (`onSearch`) |
-| `BuyurtmalarPage` | `api.products({ page_size: 200 })` | `SearchableCombobox` + `searchClients()`; tanlangan mijoz `fetchClient()`; **+** tugmasi — `clients_manage` bo‘lsa yangi yuridik hamkor (`Editor`, `POST /clients/`) |
+| `BuyurtmalarPage` | `api.products({ page_size: 200 })` | `ClientPickerModal` + `ClientPickerField` (bajaruvchi va hamkor); `searchClients()`; tanlangan mijoz `fetchClient()`; modal ichida **Yangi korxona qo‘shish** — `clients_manage` bo‘lsa `Editor` (`POST /clients/`) |
 
 `clients_view` yo‘q bo‘lsa mijoz combobox ishlamaydi; 403 xato chiqmasligi uchun `api.clients()` chaqirilmaydi.
 
@@ -421,7 +421,9 @@ Buyurtmalar editoridagi **Hamkorning ma’lumotlari** va **Sotuv** editoridagi m
 | Passport | `passport_number` |
 | Boshqa | `company_name`, `email` |
 
-Shifrlangan maydonlar serverda ochiladi. Kamida **2** belgi; debounce **400 ms** (`SearchableCombobox`). Tanlangan mijoz `GET /clients/{uuid}/` orqali to‘liq yuklanadi (STIR, bank, MFO, manzil va hokazo).
+Shifrlangan maydonlar serverda ochiladi. Kamida **2** belgi; debounce **400 ms** (`SearchableCombobox` yoki `ClientPickerModal`). Tanlangan mijoz `GET /clients/{uuid}/` orqali to‘liq yuklanadi (STIR, bank, MFO, manzil va hokazo).
+
+**Buyurtmalar — korxona tanlash modali (`ClientPickerModal`):** «Bajaruvchi korxona» yoki «Mijoz» maydoniga bosilganda modal ochiladi (tovar tanlashdagi `ProductPickerModal` kabi). Qidiruv `searchClients()`; pastda **Yangi korxona qo‘shish** — `clients_manage` bo‘lsa yuridik mijoz editori ochiladi va saqlangach tanlangan tomonga (`client` yoki `executor_client`) biriktiriladi.
 
 **Buyurtma qatorlari — tovar tanlash:** «Tovar nomi» maydoni qo‘lda yoki datalist orqali; yonidagi **quti** ikonkasi `ProductPickerModal` ochadi (`products` ro‘yxatidan qidiruv). Tanlanganda `product`, `identification_code`, `barcode`, `unit`, narx maydonlari to‘ldiriladi.
 
@@ -623,7 +625,7 @@ Celery beat: `refresh_infinbank_usd_rate` har **1 soat** (`root/celery.py`). `au
 | GET | `/` | — | Auth | ✅ `companyProfile` |
 | PATCH | `/` | `name`, `stir`, `director_jshshr`, `director_fish`, `mfo`, `bank_name`, `oked`, `bank_account`, `address`, `phone`, `email` | Management | ✅ `updateCompanyProfile` |
 
-Singleton (`pk=1`). Buyurtmalar previewda «Bajaruvchi» sifatida ishlatiladi.
+Singleton (`pk=1`). Buyurtmalar editorida bajaruvchi **«Korxona profili (bizning)»** tanlanganda «Bajaruvchi» bloki uchun ishlatiladi.
 
 **Validatsiya (backend + frontend):** STIR — 9 raqam; JSHSHIR — 14; MFO — 5; OKED — 5; telefon — `+998…`; bank hisob — 20 raqam. Xatoliklar maydon ostida qizil matn (`FieldError` / `ApiError.fields`); forma validatsiyasida toast ishlatilmaydi. Frontend: `frontend/src/lib/uzValidators.js` → `validateCompanyProfile()` (`CompanyProfileModal`).
 
@@ -641,7 +643,7 @@ Singleton (`pk=1`). Buyurtmalar previewda «Bajaruvchi» sifatida ishlatiladi.
 | Jismoniy | `phone` | Majburiy, `validateUzPhone` |
 | Ikkala | `email` | Ixtiyoriy; format tekshiruvi |
 
-Buyurtmalar editoridagi **+** (yangi hamkor) shu `Editor` ni ochadi; saqlangach `done(created)` orqali yangi mijoz tanlanadi (`POST /clients/`).
+Buyurtmalar editoridagi **Yangi korxona qo‘shish** (`ClientPickerModal` ichida) shu `Editor` ni ochadi; saqlangach `done(created)` orqali yangi mijoz tanlangan tomonga biriktiriladi (`client` yoki `executor_client`, `POST /clients/`).
 
 ### Buyurtmalar (invoices) — `/api/v1/invoices/`
 
@@ -654,6 +656,18 @@ Buyurtmalar editoridagi **+** (yangi hamkor) shu `Editor` ni ochadi; saqlangach 
 | DELETE | `/{uuid}/` | — | Management | ✅ `removeInvoice` |
 
 `document_type`: `contract_sk` \| `invoice` \| `act`.
+
+**Bajaruvchi (executor):**
+
+| Maydon | Turi | Tavsif |
+|---|---|---|
+| `executor_type` | `company_profile` \| `client` | Default: `company_profile` — korxona profili; `client` — mijozlar reestridan boshqa korxona |
+| `executor_client` | UUID \| `null` | `executor_type=client` bo‘lsa majburiy — `clients.Client` FK |
+| `executor_name` | string (read-only) | `executor_type=client` va `executor_client` bo‘lsa — mijoz nomi |
+
+Backend validatsiya: `executor_type=client` → `executor_client` majburiy; `company_profile` → `executor_client` saqlashda `null` qilinadi.
+
+**Buyurtmachi (hamkor):** `client` — majburiy FK (`clients.Client`).
 
 Qator (`lines[]`) maydonlari: `product`, `product_name`, `identification_code`, `barcode`, `unit`, `quantity`, `unit_price`, `delivery_amount`, `vat_percent`, `vat_amount`, `total_amount`. Backend `reverse_calculation=true` bo‘lsa teskari hisoblaydi.
 
@@ -747,6 +761,8 @@ POST /api/v1/invoices/
   "contract_date": "2026-08-11",
   "valid_until": "2026-12-31",
   "client": "<uuid>",
+  "executor_type": "company_profile",
+  "executor_client": null,
   "reverse_calculation": false,
   "content_title": "1.",
   "content_body": "1.1. Tomonlar shartnoma shartlariga rioya qiladi...",
@@ -763,6 +779,18 @@ POST /api/v1/invoices/
 
 Backend mahsulotdan `product_name`, `barcode`, `identification_code`, `unit`, narx va QQS ni to‘ldiradi; `delivery_amount`, `vat_amount`, `total_amount` hisoblanadi.
 
+**Boshqa korxona bajaruvchi sifatida:**
+
+```json
+{
+  "executor_type": "client",
+  "executor_client": "<uuid>",
+  "client": "<uuid>"
+}
+```
+
+`executor_client` va `client` turli mijozlar bo‘lishi mumkin (masalan, siz vositachi sifatida A korxonasi nomidan B ga shartnoma tuzasiz).
+
 **Narx ko‘rinishi:** `prices_view` yo‘q foydalanuvchilar uchun qator narxlari (`unit_price`, `delivery_amount`, `vat_amount`, `total_amount`) va invoice jami maydonlari (`total_delivery`, `total_vat`, `grand_total`) javobdan olib tashlanadi. Frontend `BuyurtmalarPage` da `can(session, 'prices_view')` bilan jami blokni yashiradi.
 
 ### UI oqimlari (`BuyurtmalarPage`)
@@ -770,11 +798,22 @@ Backend mahsulotdan `product_name`, `barcode`, `identification_code`, `unit`, na
 | Rejim | URL | API chaqiriqlari |
 |---|---|---|
 | Ro‘yxat | `/buyurtmalar` | `GET /invoices/`, `GET /warehouse/products/`, `GET /company-profile/` (sahifa ochilganda bir marta) |
-| Ko‘rish (modal) | Ro‘yxatda qoladi yoki `/buyurtmalar/{uuid}` | `GET /invoices/{uuid}/`, `GET /clients/{uuid}/` — **bir marta** (`viewFetchKeyRef` dublikatni bloklaydi) |
+| Ko‘rish (modal) | Ro‘yxatda qoladi yoki `/buyurtmalar/{uuid}` | `GET /invoices/{uuid}/`, `GET /clients/{uuid}/` (buyurtmachi), kerak bo‘lsa `GET /clients/{uuid}/` (bajaruvchi) — **bir marta** (`viewFetchKeyRef` dublikatni bloklaydi) |
 | Yangi | `/buyurtmalar/yangi` | Yuqoridagilar + `GET /orders/next-contract-number/` (sana o‘zgarganda) |
 | Tahrir | `/buyurtmalar/{uuid}/tahrir` | `GET /invoices/{uuid}/`, `GET /company-profile/` |
 
-**Layout:** «Sizning ma’lumotlaringiz» | «Hamkorning ma'lumotlari» yonma-yon (`PartyInfoGrid`). Ko‘rish — `InvoiceContractModal` (jadval + mazmun + «2. Tomonlarni yuridik manzillari va rekvizitlari»). Tahrir/yangi — `DocumentPreviewModal` («Hujjatni ko‘rsatish»).
+**Layout:** «Bajaruvchi ma’lumotlari» | «Hamkorning ma'lumotlari» yonma-yon (`PartyInfoGrid`).
+
+**Bajaruvchi paneli:**
+
+| Rejim | UI | Manba |
+|---|---|---|
+| `executor_type=company_profile` (default) | Korxona profili kartasi + «Profilni tahrirlash» hint | `GET /company-profile/` |
+| `executor_type=client` | `ClientPickerField` → `ClientPickerModal` — reestrdan qidiruv va qo‘shish | `GET /clients/?search=…`, saqlashda `executor_client` |
+
+**Hamkor paneli:** `ClientPickerField` → `ClientPickerModal` (xuddi shu oqim; saqlashda `client`).
+
+Ko‘rish — `InvoiceContractModal` (jadval + mazmun + «2. Tomonlarni yuridik manzillari va rekvizitlari»). Tahrir/yangi — `DocumentPreviewModal` («Hujjatni ko‘rsatish»). Preview/modalda bajaruvchi: `executorPartyData()` — profil yoki tanlangan `executor_client`.
 
 **Validatsiya:** `validateEInvoice()` — xatoliklar input ostida; «Hujjatni ko‘rsatish» / «Saqlash» da toast o‘rniga scroll birinchi qizil maydonga.
 
@@ -786,17 +825,19 @@ Backend mahsulotdan `product_name`, `barcode`, `identification_code`, `unit`, na
 | `place_signed` | Majburiy |
 | `contract_date` | Majburiy |
 | `valid_until` | Majburiy; `>= contract_date` |
-| `client` | Majburiy (mijoz tanlangan) |
+| `client` | Majburiy (buyurtmachi / hamkor tanlangan) |
+| `executor_type` | `company_profile` yoki `client` |
+| `executor_client` | `executor_type=client` bo‘lsa majburiy |
+| `company` | Faqat `executor_type=company_profile` — korxona profilida `name` va `stir` |
 | `content_title` | Majburiy |
 | `content_body` | Majburiy |
-| `company` | Korxona profilida `name` va `stir` bo‘lishi kerak |
 | `lines[].product_name` | Har qator — majburiy |
 | `lines[].identification_code` | Har qator — majburiy |
 | `lines[].quantity` | Kamida 1 |
 | `lines[].unit_price` | Faqat `prices_view` + `reverse_calculation=false` bo‘lsa majburiy |
 | `lines` (umumiy) | Kamida bitta to‘liq qator (`product_name` + `quantity` + `identification_code`) |
 
-Xato kalitlari: `contract_number`, `client`, `lines.0.product_name` va hokazo. Komponent: `EInvoiceFieldError`.
+Xato kalitlari: `contract_number`, `client`, `executor_client`, `company`, `lines.0.product_name` va hokazo. Komponent: `EInvoiceFieldError`.
 
 ### Buyurtmalar ro‘yxati (`DataTable`)
 
@@ -817,7 +858,7 @@ Amallar: **ko‘z** (ko‘rish modali), **qalam** (tahrir — `einvoice_manage`)
 
 **Shartnomalar reestri:** SK (`document_type=contract_sk`) saqlanganda backend `ProductContract` ga `invoice_created` / `invoice_edited` yozuvi qo‘shadi (tovar `product` FK bilan mos bo‘lsa). §10 `source_type` ro‘yxatiga qarang.
 
-Korxona profili (`GET/PATCH /company-profile/`) «Bajaruvchi» blokida ishlatiladi; profil yangilanganda `company-profile-updated` eventi editorlarni yangilaydi.
+Korxona profili (`GET/PATCH /company-profile/`) faqat `executor_type=company_profile` bo‘lganda bajaruvchi bloki uchun ishlatiladi; profil yangilanganda `company-profile-updated` eventi editorlarni yangilaydi.
 
 ---
 
@@ -1000,10 +1041,12 @@ Operator uchun narx/foyda maydonlari ayrim javoblarda qaytmaydi. Frontend bunday
 | Mijoz kartasi URL | `clients_view` | `routes.jsx`, `App.jsx` |
 | Global qidiruv — mijozlar | `clients_view` | `GlobalSearch.jsx` |
 | Global qidiruv — buyurtmalar | `einvoice_view` | `GlobalSearch.jsx` |
-| Hamkor / mijoz combobox (Buyurtmalar, Sotuv) | `clients_view` | `SearchableCombobox`, `lib/clients.js` |
-| Yangi hamkor (+) Buyurtmalar editorida | `clients_manage` | `Editor` → `POST /clients/` |
+| Hamkor / mijoz tanlash (Buyurtmalar) | `clients_view` | `ClientPickerModal`, `lib/clients.js` |
+| Mijoz combobox (Sotuv) | `clients_view` | `SearchableCombobox`, `lib/clients.js` |
+| Yangi korxona qo‘shish (Buyurtmalar modal) | `clients_manage` | `Editor` → `POST /clients/` |
 | Tovar tanlash (qator) | `einvoice_manage` (editor) | `ProductPickerModal` |
-| Editor mijoz combobox | `clients_view` | `SaleEditor`, `BuyurtmalarPage` |
+| Editor mijoz combobox | `clients_view` | `SaleEditor` |
+| Editor korxona tanlash | `clients_view` | `BuyurtmalarPage` — `ClientPickerModal` |
 | Editor mahsulot combobox | (ability shart emas) | `api.products()` doim chaqiriladi |
 | Invoice jami / qator narxlari | `prices_view` | `BuyurtmalarPage`, backend serializer |
 | FX tab / qo‘lda saqlash / ↻ | `users_manage` | `FxRatePanel` |

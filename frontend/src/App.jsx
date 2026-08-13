@@ -4218,16 +4218,21 @@ function validateEInvoice(editing, { showPrices, company } = {}) {
     errors.client = 'Mijozni tanlang'
   }
 
+  const executorType = editing.executor_type || 'company_profile'
+  if (executorType === 'company_profile') {
+    if (!company?.name?.trim() || !company?.stir?.trim()) {
+      errors.company = 'Korxona profilida nom va STIR to‘ldirilgan bo‘lishi kerak'
+    }
+  } else if (!editing.executor_client) {
+    errors.executor_client = 'Bajaruvchi korxonani tanlang'
+  }
+
   if (!trim(editing.content_title)) {
     errors.content_title = 'Sarlavhani yozing'
   }
 
   if (!trim(editing.content_body)) {
     errors.content_body = 'Mazmun matnini yozing'
-  }
-
-  if (!company?.name?.trim() || !company?.stir?.trim()) {
-    errors.company = 'Korxona profilida nom va STIR to‘ldirilgan bo‘lishi kerak'
   }
 
   const lines = editing.lines || []
@@ -4320,6 +4325,16 @@ function clientPartyData(client) {
   }
 }
 
+function executorPartyData(invoice, company, executorClient) {
+  const type = invoice?.executor_type || 'company_profile'
+  if (type === 'client') {
+    if (executorClient) return clientPartyData(executorClient)
+    if (invoice?.executor_name) return { name: invoice.executor_name }
+    return {}
+  }
+  return companyPartyData(company)
+}
+
 function PartyInfoGrid({ data }) {
   return (
     <dl className="party-info-grid">
@@ -4357,9 +4372,10 @@ function ContractPartyRequisites({ title, data }) {
   )
 }
 
-function InvoiceContractModal({ invoice, company, client, showPrices, onClose, onEdit, canEdit }) {
+function InvoiceContractModal({ invoice, company, client, executorClient, showPrices, onClose, onEdit, canEdit }) {
   const lines = (invoice.lines || []).map((line) => calcInvoiceLine(line, invoice.reverse_calculation))
   const totals = buildInvoiceTotals(invoice)
+  const executorData = executorPartyData(invoice, company, executorClient)
   const customerName = client?.company_name || client?.full_name || invoice.client_name || '—'
   const validRange = invoice.valid_until
     ? `${formatDateUz(invoice.contract_date)} — ${formatDateUz(invoice.valid_until)} gacha`
@@ -4382,7 +4398,7 @@ function InvoiceContractModal({ invoice, company, client, showPrices, onClose, o
         <div className="invoice-contract-parties">
           <div className="invoice-contract-party">
             <span className="invoice-contract-party-label">Bajaruvchi</span>
-            <strong>{company?.name || '—'}</strong>
+            <strong>{executorData.name || '—'}</strong>
           </div>
           <div className="invoice-contract-party">
             <span className="invoice-contract-party-label">Buyurtmachi</span>
@@ -4451,7 +4467,7 @@ function InvoiceContractModal({ invoice, company, client, showPrices, onClose, o
         <section className="invoice-contract-requisites-section">
           <h3>2. Tomonlarni yuridik manzillari va rekvizitlari</h3>
           <div className="invoice-contract-requisites-grid">
-            <ContractPartyRequisites title="Bajaruvchi" data={companyPartyData(company)} />
+            <ContractPartyRequisites title="Bajaruvchi" data={executorData} />
             <ContractPartyRequisites title="Buyurtmachi" data={clientPartyData(client) || { name: invoice.client_name }} />
           </div>
         </section>
@@ -4467,12 +4483,13 @@ function InvoiceContractModal({ invoice, company, client, showPrices, onClose, o
   )
 }
 
-function DocumentPreviewModal({ invoice, company, client, totals, showPrices, onClose }) {
+function DocumentPreviewModal({ invoice, company, client, executorClient, totals, showPrices, onClose }) {
   const lines = (invoice.lines || []).map((line) => calcInvoiceLine(line, invoice.reverse_calculation))
   const amountWords = numberToWordsUzbek(totals.grand)
   const docTitle = invoice.name || documentTypeLabel(invoice.document_type)
-  const executorName = company?.name || 'Bajaruvchi'
-  const executorDirector = company?.director_fish || executorName
+  const executorData = executorPartyData(invoice, company, executorClient)
+  const executorName = executorData.name || 'Bajaruvchi'
+  const executorDirector = executorData.director_fish || executorName
   const customerName = client?.company_name || client?.full_name || 'Buyurtmachi'
   const customerDirector = client?.director_fish || client?.full_name || customerName
 
@@ -4584,17 +4601,7 @@ function DocumentPreviewModal({ invoice, company, client, totals, showPrices, on
           <section className="document-preview-section">
             <h3>2. Tomonlarni yuridik manzillari va rekvizitlari</h3>
             <div className="document-preview-parties">
-              {partyBlock('Bajaruvchi', {
-                name: company?.name,
-                address: company?.address,
-                phone: company?.phone,
-                fax: company?.fax,
-                stir: company?.stir,
-                oked: company?.oked,
-                bank_account: company?.bank_account,
-                bank_name: company?.bank_name,
-                mfo: company?.mfo,
-              })}
+              {partyBlock('Bajaruvchi', executorData)}
               {partyBlock('Buyurtmachi', {
                 name: client?.company_name || client?.full_name,
                 address: client?.address,
@@ -4609,6 +4616,160 @@ function DocumentPreviewModal({ invoice, company, client, totals, showPrices, on
             </div>
           </section>
         </article>
+      </div>
+    </div>
+  )
+}
+
+function ClientPickerField({
+  id,
+  label,
+  value,
+  selectedOption,
+  onOpen,
+  onClear,
+  error,
+  required = false,
+  placeholder = 'Korxonani tanlang...',
+}) {
+  const display = selectedOption ? clientOptionLabel(selectedOption) : ''
+  return (
+    <div className={`client-picker-field${error ? ' has-error' : ''}`}>
+      {label && (
+        <label className="client-picker-label" htmlFor={id}>
+          {label}
+          {required && <span className="required-mark" aria-hidden="true"> *</span>}
+        </label>
+      )}
+      <div className="client-picker-trigger-wrap">
+        <button
+          type="button"
+          id={id}
+          className={`client-picker-trigger${!value ? ' is-empty' : ''}${error ? ' input-invalid' : ''}`}
+          onClick={onOpen}
+        >
+          <span className="client-picker-trigger-text">{display || placeholder}</span>
+          <MagnifyingGlass size={16} aria-hidden="true" />
+        </button>
+        {value && onClear && (
+          <button
+            type="button"
+            className="client-picker-clear"
+            onClick={(event) => {
+              event.stopPropagation()
+              onClear()
+            }}
+            aria-label="Tozalash"
+          >
+            <X size={14} />
+          </button>
+        )}
+      </div>
+      <FieldError message={error} />
+    </div>
+  )
+}
+
+function ClientPickerModal({
+  title = 'Korxonani tanlash',
+  eyebrow = 'MIJOZLAR REESTRI',
+  selectedId,
+  onSelect,
+  onClose,
+  onAddNew,
+  canSearch = true,
+  canAdd = false,
+}) {
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState([])
+  const [searching, setSearching] = useState(false)
+  const debounceRef = useRef(null)
+
+  useEffect(() => {
+    if (!canSearch) return undefined
+    const q = query.trim()
+    if (q.length < 2) {
+      setResults([])
+      setSearching(false)
+      return undefined
+    }
+    setSearching(true)
+    window.clearTimeout(debounceRef.current)
+    debounceRef.current = window.setTimeout(async () => {
+      try {
+        const data = await searchClients(q)
+        setResults(data)
+      } catch {
+        setResults([])
+      } finally {
+        setSearching(false)
+      }
+    }, 400)
+    return () => window.clearTimeout(debounceRef.current)
+  }, [query, canSearch])
+
+  const showMinLengthHint = canSearch && query.trim().length > 0 && query.trim().length < 2
+  const showEmpty = !searching && !showMinLengthHint && query.trim().length >= 2 && results.length === 0
+  const showPrompt = !query.trim() && !searching
+
+  return (
+    <div className="modal-backdrop product-picker-backdrop" role="presentation" onClick={onClose}>
+      <div
+        className="product-picker-modal client-picker-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="client-picker-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="product-picker-head">
+          <div>
+            <p className="eyebrow">{eyebrow}</p>
+            <h3 id="client-picker-title">{title}</h3>
+          </div>
+          <button type="button" className="icon-button" onClick={onClose} aria-label="Yopish"><X size={20} /></button>
+        </div>
+        {canSearch && (
+          <label className="product-picker-search">
+            <MagnifyingGlass size={18} />
+            <input
+              autoFocus
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="F.I.Sh, INN/STIR, JSHSHIR, passport, kompaniya, email..."
+            />
+            {searching && <SpinnerGap size={16} className="spin" aria-hidden="true" />}
+          </label>
+        )}
+        <div className="product-picker-list">
+          {showPrompt && (
+            <p className="muted product-picker-empty">Qidirish uchun kamida 2 ta belgi kiriting.</p>
+          )}
+          {showMinLengthHint && (
+            <p className="muted product-picker-empty">Kamida 2 ta belgi kiriting.</p>
+          )}
+          {showEmpty && (
+            <p className="muted product-picker-empty">Natija topilmadi.</p>
+          )}
+          {results.map((client) => (
+            <button
+              type="button"
+              key={client.id}
+              className={`product-picker-item client-picker-item${String(client.id) === String(selectedId) ? ' is-selected' : ''}`}
+              onClick={() => onSelect(client)}
+            >
+              <span className="product-picker-item-name">{clientOptionLabel(client)}</span>
+              {client.phone ? <span className="product-picker-item-code">{client.phone}</span> : null}
+            </button>
+          ))}
+        </div>
+        {canAdd && onAddNew && (
+          <div className="client-picker-footer">
+            <button type="button" className="secondary-button" onClick={onAddNew}>
+              <Plus size={16} />
+              Yangi korxona qo‘shish
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -4682,17 +4843,21 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState(null)
   const [selectedClientDetail, setSelectedClientDetail] = useState(null)
+  const [selectedExecutorClientDetail, setSelectedExecutorClientDetail] = useState(null)
   const [products, setProducts] = useState([])
   const [company, setCompany] = useState(null)
   const [saving, setSaving] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [viewInvoice, setViewInvoice] = useState(null)
   const [viewClient, setViewClient] = useState(null)
+  const [viewExecutorClient, setViewExecutorClient] = useState(null)
   const [viewLoading, setViewLoading] = useState(false)
   const [contractNumberEdited, setContractNumberEdited] = useState(false)
   const [errors, setErrors] = useState({})
   const [validatedOnce, setValidatedOnce] = useState(false)
   const [clientQuickAddOpen, setClientQuickAddOpen] = useState(false)
+  const [clientQuickAddTarget, setClientQuickAddTarget] = useState('client')
+  const [clientPickerTarget, setClientPickerTarget] = useState(null)
   const [productPickerLineIndex, setProductPickerLineIndex] = useState(null)
   const routeBootstrapped = useRef('')
   const notifyRef = useRef(notify)
@@ -4713,13 +4878,22 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
       if (viewFetchKeyRef.current !== fetchKey) return
 
       let clientDetail = null
+      let executorClientDetail = null
       if (detail.client && can(sessionRef.current, 'clients_view')) {
         clientDetail = await fetchClient(detail.client).catch(() => null)
+      }
+      if (
+        detail.executor_type === 'client'
+        && detail.executor_client
+        && can(sessionRef.current, 'clients_view')
+      ) {
+        executorClientDetail = await fetchClient(detail.executor_client).catch(() => null)
       }
       if (viewFetchKeyRef.current !== fetchKey) return
 
       setViewInvoice(detail)
       setViewClient(clientDetail)
+      setViewExecutorClient(executorClientDetail)
     } catch (err) {
       if (viewFetchKeyRef.current === fetchKey) {
         viewFetchKeyRef.current = null
@@ -4807,9 +4981,28 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
     return () => { cancelled = true }
   }, [editing?.client])
 
+  useEffect(() => {
+    const executorType = editing?.executor_type || 'company_profile'
+    if (executorType !== 'client' || !editing?.executor_client || !can(sessionRef.current, 'clients_view')) {
+      setSelectedExecutorClientDetail(null)
+      return undefined
+    }
+    let cancelled = false
+    fetchClient(editing.executor_client)
+      .then((detail) => { if (!cancelled) setSelectedExecutorClientDetail(detail) })
+      .catch((err) => {
+        if (!cancelled) {
+          setSelectedExecutorClientDetail(null)
+          notifyRef.current(err.message)
+        }
+      })
+    return () => { cancelled = true }
+  }, [editing?.executor_type, editing?.executor_client])
+
   const closeView = () => {
     setViewInvoice(null)
     setViewClient(null)
+    setViewExecutorClient(null)
     viewFetchKeyRef.current = null
     setViewLoading(false)
     if (routeMode === 'view') {
@@ -4832,6 +5025,7 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
     const id = viewInvoice.id
     setViewInvoice(null)
     setViewClient(null)
+    setViewExecutorClient(null)
     navigate(invoiceEditPath(id))
   }
 
@@ -4863,6 +5057,25 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
     return cols
   }, [showPrices, rows])
 
+  const openClientQuickAdd = (target) => {
+    setClientQuickAddTarget(target)
+    setClientPickerTarget(null)
+    setClientQuickAddOpen(true)
+  }
+
+  const handleClientPickerSelect = (target, client) => {
+    if (target === 'executor') {
+      clearFieldError('executor_client')
+      setEditing((current) => (current ? { ...current, executor_client: client.id } : current))
+      setSelectedExecutorClientDetail(client)
+    } else {
+      clearFieldError('client')
+      setEditing((current) => (current ? { ...current, client: client.id } : current))
+      setSelectedClientDetail(client)
+    }
+    setClientPickerTarget(null)
+  }
+
   const closeEditor = () => {
     setContractNumberEdited(false)
     setErrors({})
@@ -4885,6 +5098,8 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
       contract_date: todayValue(),
       valid_until: currentYearEndValue(),
       client: clientId ? String(clientId) : '',
+      executor_type: 'company_profile',
+      executor_client: '',
       reverse_calculation: false,
       comment: '',
       content_title: '1.',
@@ -4907,6 +5122,8 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
       setEditing({
         ...detail,
         client: detail.client || '',
+        executor_type: detail.executor_type || 'company_profile',
+        executor_client: detail.executor_client || '',
         lines: (detail.lines?.length ? detail.lines : [emptyInvoiceLine()]).map((line) => ({
           ...line,
           product: line.product || '',
@@ -4947,6 +5164,7 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
       setEditing(null)
       setViewInvoice(null)
       setViewClient(null)
+      setViewExecutorClient(null)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routeMode, invoiceId, prefillClientId, canManage])
@@ -5074,6 +5292,10 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
         contract_date: editing.contract_date || null,
         valid_until: editing.valid_until || null,
         client: editing.client || null,
+        executor_type: editing.executor_type || 'company_profile',
+        executor_client: (editing.executor_type || 'company_profile') === 'client'
+          ? (editing.executor_client || null)
+          : null,
         reverse_calculation: editing.reverse_calculation,
         comment: editing.comment || '',
         content_title: editing.content_title || '',
@@ -5110,6 +5332,8 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
   }
 
   const selectedClient = selectedClientDetail
+  const selectedExecutorClient = selectedExecutorClientDetail
+  const executorType = editing?.executor_type || 'company_profile'
 
   return (
     <div className={`page e-invoice-page${isEditorPage ? ' e-invoice-page--editor' : ''}`}>
@@ -5221,38 +5445,83 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
           <section className="e-invoice-section e-invoice-parties-section">
             <div className="e-invoice-parties-row">
               <div className="e-invoice-party-panel">
-                <h3>Sizning ma’lumotlaringiz</h3>
-                {errors.company ? <EInvoiceFieldError message={errors.company} /> : null}
-                <PartyInfoGrid data={companyPartyData(company)} />
+                <h3>Bajaruvchi ma’lumotlari</h3>
+                <label className="e-invoice-executor-type">
+                  Bajaruvchi manbasi
+                  <select
+                    value={executorType}
+                    onChange={(e) => {
+                      const value = e.target.value
+                      clearFieldError('company')
+                      clearFieldError('executor_client')
+                      setEditing({
+                        ...editing,
+                        executor_type: value,
+                        executor_client: value === 'company_profile' ? '' : editing.executor_client,
+                      })
+                    }}
+                  >
+                    <option value="company_profile">Korxona profili (bizning)</option>
+                    <option value="client">Boshqa korxona (reestrdan)</option>
+                  </select>
+                </label>
+                {executorType === 'company_profile' ? (
+                  <>
+                    {errors.company ? <EInvoiceFieldError message={errors.company} /> : null}
+                    <PartyInfoGrid data={companyPartyData(company)} />
+                    <p className="muted e-invoice-profile-hint">Profilni tahrirlash: menyudan «Korxona profili».</p>
+                  </>
+                ) : (
+                  <>
+                    <ClientPickerField
+                      id="e-invoice-executor"
+                      label="Bajaruvchi korxona"
+                      value={editing.executor_client || ''}
+                      selectedOption={selectedExecutorClientDetail}
+                      onOpen={() => {
+                        if (!can(session, 'clients_view')) {
+                          notify('Mijozlar reestrini ko‘rish ruxsati yo‘q.')
+                          return
+                        }
+                        setClientPickerTarget('executor')
+                      }}
+                      onClear={() => {
+                        clearFieldError('executor_client')
+                        setEditing({ ...editing, executor_client: '' })
+                        setSelectedExecutorClientDetail(null)
+                      }}
+                      error={errors.executor_client}
+                      required
+                      placeholder="Korxonani tanlang..."
+                    />
+                    {selectedExecutorClient && (
+                      <PartyInfoGrid data={clientPartyData(selectedExecutorClient)} />
+                    )}
+                  </>
+                )}
               </div>
               <div className="e-invoice-party-panel">
-                <div className="e-invoice-party-panel-head">
-                  <h3>Hamkorning ma’lumotlari</h3>
-                  {can(session, 'clients_manage') && (
-                    <button
-                      type="button"
-                      className="icon-button e-invoice-party-add"
-                      onClick={() => setClientQuickAddOpen(true)}
-                      aria-label="Yangi hamkor qo‘shish"
-                      title="Yangi hamkor qo‘shish"
-                    >
-                      <Plus size={18} weight="bold" />
-                    </button>
-                  )}
-                </div>
-                <SearchableCombobox
+                <h3>Hamkorning ma’lumotlari</h3>
+                <ClientPickerField
                   id="e-invoice-client"
                   label="Mijoz"
                   value={editing.client || ''}
-                  onChange={(value) => { clearFieldError('client'); setEditing({ ...editing, client: value }) }}
-                  options={[]}
                   selectedOption={selectedClientDetail}
-                  onSearch={can(session, 'clients_view') ? searchClients : undefined}
-                  getLabel={clientOptionLabel}
-                  getSearchText={clientSearchText}
-                  placeholder="F.I.Sh, INN/STIR, JSHSHIR, passport, kompaniya, email..."
+                  onOpen={() => {
+                    if (!can(session, 'clients_view')) {
+                      notify('Mijozlar reestrini ko‘rish ruxsati yo‘q.')
+                      return
+                    }
+                    setClientPickerTarget('client')
+                  }}
+                  onClear={() => {
+                    clearFieldError('client')
+                    setEditing({ ...editing, client: '' })
+                    setSelectedClientDetail(null)
+                  }}
                   error={errors.client}
                   required
+                  placeholder="Hamkorni tanlang..."
                 />
                 {selectedClient && <PartyInfoGrid data={clientPartyData(selectedClient)} />}
               </div>
@@ -5484,6 +5753,7 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
           invoice={editing}
           company={company}
           client={selectedClient}
+          executorClient={selectedExecutorClient}
           totals={totals}
           showPrices={showPrices}
           onClose={() => setPreviewOpen(false)}
@@ -5495,10 +5765,23 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
           invoice={viewInvoice}
           company={company}
           client={viewClient}
+          executorClient={viewExecutorClient}
           showPrices={showPrices}
           onClose={closeView}
           onEdit={canManage ? openEditFromView : null}
           canEdit={canManage}
+        />
+      )}
+
+      {clientPickerTarget && can(session, 'clients_view') && (
+        <ClientPickerModal
+          title={clientPickerTarget === 'executor' ? 'Bajaruvchi korxonani tanlash' : 'Hamkorni tanlash'}
+          selectedId={clientPickerTarget === 'executor' ? editing?.executor_client : editing?.client}
+          canSearch={can(session, 'clients_view')}
+          canAdd={can(session, 'clients_manage')}
+          onClose={() => setClientPickerTarget(null)}
+          onSelect={(client) => handleClientPickerSelect(clientPickerTarget, client)}
+          onAddNew={() => openClientQuickAdd(clientPickerTarget)}
         />
       )}
 
@@ -5511,9 +5794,15 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
           done={(created) => {
             setClientQuickAddOpen(false)
             if (created?.id) {
-              clearFieldError('client')
-              setEditing((current) => (current ? { ...current, client: created.id } : current))
-              setSelectedClientDetail(created)
+              if (clientQuickAddTarget === 'executor') {
+                clearFieldError('executor_client')
+                setEditing((current) => (current ? { ...current, executor_client: created.id } : current))
+                setSelectedExecutorClientDetail(created)
+              } else {
+                clearFieldError('client')
+                setEditing((current) => (current ? { ...current, client: created.id } : current))
+                setSelectedClientDetail(created)
+              }
             }
           }}
           notify={notify}

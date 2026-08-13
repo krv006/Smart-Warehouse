@@ -34,6 +34,11 @@ class DocumentType(models.TextChoices):
     ACT = 'act', 'Dalolatnoma'
 
 
+class ExecutorType(models.TextChoices):
+    COMPANY_PROFILE = 'company_profile', 'Korxona profili'
+    CLIENT = 'client', 'Boshqa korxona'
+
+
 class ElectronicInvoice(TimeStampedModel):
     id = UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     document_type = CharField(max_length=32, choices=DocumentType.choices,
@@ -49,6 +54,13 @@ class ElectronicInvoice(TimeStampedModel):
                             verbose_name='Amal qilish muddati')
     client = ForeignKey('clients.Client', on_delete=SET_NULL,
                         null=True, blank=True, related_name='invoices')
+    executor_type = CharField(max_length=32, choices=ExecutorType.choices,
+                              default=ExecutorType.COMPANY_PROFILE,
+                              verbose_name='Bajaruvchi turi')
+    executor_client = ForeignKey('clients.Client', on_delete=SET_NULL,
+                                 null=True, blank=True,
+                                 related_name='executed_invoices',
+                                 verbose_name='Bajaruvchi (korxona)')
     reverse_calculation = BooleanField(default=False,
                                        verbose_name='Teskari hisob')
     content_title = CharField(max_length=512, blank=True, default='',
