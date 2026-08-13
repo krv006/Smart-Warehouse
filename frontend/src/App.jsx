@@ -3860,6 +3860,24 @@ const zakazToImportRow = (zakaz) => ({
   manual: emptyManualImportLine(),
 })
 
+function splitPartialPayment(totalPaid, lineTotals) {
+  const grandTotal = lineTotals.reduce((sum, value) => sum + value, 0)
+  if (grandTotal <= 0) return lineTotals.map(() => 0)
+  const paid = Number(totalPaid)
+  const splits = []
+  let allocated = 0
+  lineTotals.forEach((lineTotal, index) => {
+    if (index === lineTotals.length - 1) {
+      splits.push(Math.round((paid - allocated) * 100) / 100)
+    } else {
+      const share = Math.round((paid * lineTotal / grandTotal) * 100) / 100
+      splits.push(share)
+      allocated += share
+    }
+  })
+  return splits
+}
+
 function ZakazEditor({ close, done, notify, item = null, session }) {
   const showPrices = can(session, 'prices_manage')
   const showPayment = showPrices || can(session, 'cash_manage')
@@ -3871,6 +3889,7 @@ function ZakazEditor({ close, done, notify, item = null, session }) {
   const [products, setProducts] = useState([])
   const [saving, setSaving] = useState(false)
   const [batchLoading, setBatchLoading] = useState(Boolean(item?.id && canMultiLine))
+  const [importBatchId, setImportBatchId] = useState(item?.import_batch || null)
   const [importRows, setImportRows] = useState([emptyImportRow()])
   const [form, setForm] = useState(() => ({
     product: item?.product || '',
@@ -3905,6 +3924,7 @@ function ZakazEditor({ close, done, notify, item = null, session }) {
       .then((data) => {
         if (cancelled) return
         const items = data?.items?.length ? data.items : [item]
+        setImportBatchId(items[0]?.import_batch || item.import_batch || null)
         setImportRows(items.map(zakazToImportRow))
         const anchor = items[0] || item
         const batchPaid = items.reduce((sum, row) => sum + Number(row.paid_amount || 0), 0)
@@ -4077,6 +4097,7 @@ function ZakazEditor({ close, done, notify, item = null, session }) {
 
   const submit = async (event) => {
     event.preventDefault()
+    if (batchLoading) return
     setSaving(true)
     try {
       if (canMultiLine && (isNew || importRows.some((row) => row.zakazId))) {
@@ -4115,7 +4136,9 @@ function ZakazEditor({ close, done, notify, item = null, session }) {
         if (common.quantity) delete common.quantity
         if (common.unit_price) delete common.unit_price
         if (common.received_qty) delete common.received_qty
-        if (common.paid_amount) common.paid_amount = Number(common.paid_amount)
+        delete common.paid_amount
+        delete common.payment_status
+        delete common.currency
         const statusPayload = {}
         if (isManagement && form.status !== item.status) {
           statusPayload.status = form.status
@@ -4127,6 +4150,12 @@ function ZakazEditor({ close, done, notify, item = null, session }) {
           return Number(price || 0) * Number(qty || 0)
         })
         const grandTotal = lineTotals.reduce((sum, value) => sum + value, 0)
+        if (showPayment && form.payment_status === 'partial' && grandTotal <= 0) {
+          throw new Error('Qisman to\'lov uchun avval barcha qatorlarga narx kiritilishi kerak.')
+        }
+        const paidSplits = showPayment && form.payment_status === 'partial'
+          ? splitPartialPayment(form.paid_amount, lineTotals)
+          : null
         for (const [index, row] of importRows.entries()) {
           const rowPayload = {
             quantity: Number(row.source === 'new' ? row.manual.quantity : row.quantity),
@@ -4137,8 +4166,8 @@ function ZakazEditor({ close, done, notify, item = null, session }) {
           if (showPayment) {
             rowPayload.currency = form.currency
             rowPayload.payment_status = form.payment_status
-            if (form.payment_status === 'partial' && grandTotal > 0) {
-              rowPayload.paid_amount = Math.round((Number(form.paid_amount) * lineTotals[index] / grandTotal) * 100) / 100
+            if (paidSplits) {
+              rowPayload.paid_amount = paidSplits[index]
             }
           }
           if (row.zakazId === item.id && isManagement) {
@@ -4146,10 +4175,6 @@ function ZakazEditor({ close, done, notify, item = null, session }) {
           }
           if (row.zakazId) {
             const patchPayload = { ...common, ...rowPayload, ...statusPayload }
-            if (row.zakazId !== item.id) {
-              delete patchPayload.status
-              delete patchPayload.asos
-            }
             if (patchPayload.payment_status !== 'partial') delete patchPayload.paid_amount
             await api.update('/orders/zakaz/', row.zakazId, patchPayload)
           } else {
@@ -4158,6 +4183,9 @@ function ZakazEditor({ close, done, notify, item = null, session }) {
               ...buildImportItem(row),
               ...rowPayload,
             })
+            if (importBatchId || item?.import_batch) {
+              createPayload.import_batch = importBatchId || item.import_batch
+            }
             await api.create('/orders/zakaz/', createPayload)
           }
         }
@@ -4339,7 +4367,7 @@ function ZakazEditor({ close, done, notify, item = null, session }) {
           <label className="full-width">Asos<textarea required={item?.id && form.status !== item.status} rows="3" value={form.asos} onChange={(event) => setForm({ ...form, asos: event.target.value })} /></label>
           <label className="full-width">Izoh<textarea rows="3" value={form.comment} onChange={(event) => setForm({ ...form, comment: event.target.value })} /></label>
         </div>
-        <div className="editor-actions"><button type="button" className="secondary-button" onClick={close}>Bekor qilish</button><button className="primary-button" disabled={saving}>{saving ? <SpinnerGap size={18} className="spin" /> : 'Saqlash'}</button></div>
+        <div className="editor-actions"><button type="button" className="secondary-button" onClick={close}>Bekor qilish</button><button className="primary-button" disabled={saving || batchLoading}>{saving ? <SpinnerGap size={18} className="spin" /> : 'Saqlash'}</button></div>
       </form>
     </div>
   )

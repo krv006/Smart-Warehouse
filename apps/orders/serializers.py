@@ -11,7 +11,8 @@ from rest_framework.serializers import (ModelSerializer, Serializer,
                                         ValidationError, BooleanField,
                                         CharField, DateField,
                                         DecimalField, IntegerField,
-                                        PrimaryKeyRelatedField, FileField)
+                                        PrimaryKeyRelatedField, FileField,
+                                        UUIDField)
 
 from apps.clients.models import Client
 from apps.orders.dates import current_year_end
@@ -65,6 +66,27 @@ def _validate_partial_paid_amount(payment_status, paid_amount, total, *, require
         raise ValidationError({
             'paid_amount': (
                 f'To\'langan summa jami import summasidan ({total}) oshmasligi kerak.')})
+
+
+def _split_partial_payment(paid_amount, line_totals):
+    """Qisman to'lovni qatorlar bo'yicha taqsimlash; qoldiq oxirgi qatorga."""
+    if not line_totals:
+        return []
+    grand_total = sum(line_totals, Decimal('0'))
+    if grand_total <= 0:
+        return [Decimal('0')] * len(line_totals)
+    total_paid = Decimal(str(paid_amount))
+    splits = []
+    allocated = Decimal('0')
+    last_idx = len(line_totals) - 1
+    for idx, line_total in enumerate(line_totals):
+        if idx == last_idx:
+            line_paid = (total_paid - allocated).quantize(Decimal('0.01'))
+        else:
+            line_paid = (total_paid * line_total / grand_total).quantize(Decimal('0.01'))
+            allocated += line_paid
+        splits.append(line_paid)
+    return splits
 
 
 def order_serializer_class(user):
@@ -623,7 +645,7 @@ class ZakazSerializer(ModelSerializer):
         # zakaz_type/order — yaratishda o'rnatiladi, keyin o'zgarmaydi (audit;
         # order'ni ko'chirish buyurtma↔zakaz bog'lanishini buzadi)
         read_only_fields = ('created_by', 'confirmed_at', 'created_at',
-                            'zakaz_type', 'order', 'import_batch')
+                            'zakaz_type', 'order')
         extra_kwargs = {'product': {'required': False, 'allow_null': True}}
 
     def get_product_name(self, obj):
@@ -771,7 +793,8 @@ class ZakazSerializer(ModelSerializer):
         new_product_data = validated_data.pop('_new_product_data', None)
         if new_product_data:
             validated_data['product'] = self._create_inline_product(new_product_data)
-        validated_data.setdefault('import_batch', uuid.uuid4())
+        if not validated_data.get('import_batch'):
+            validated_data['import_batch'] = uuid.uuid4()
         validated_data['status']     = Zakaz.NEW
         validated_data['zakaz_type'] = Zakaz.MANUAL
         validated_data['created_by'] = self.context['request'].user
@@ -813,6 +836,7 @@ class ZakazSerializer(ModelSerializer):
         # Atomic: status 'received' ga o'tib, receive() (ombor to'ldirish +
         # taqsimlash) yiqilsa — hammasi birga qaytariladi; zakaz RECEIVED'da
         # stock kirmagan holda qotib qolmaydi.
+        validated_data.pop('import_batch', None)
         user       = self.context['request'].user
         new_status = validated_data.get('status')
         status_changing = bool(new_status and new_status != instance.status)
@@ -1004,6 +1028,7 @@ class ZakazBulkCreateSerializer(Serializer):
     payment_status  = CharField(required=False, allow_blank=True, allow_null=True)
     paid_amount     = DecimalField(max_digits=14, decimal_places=2,
                                    required=False, allow_null=True)
+    import_batch    = UUIDField(required=False, allow_null=True)
     items           = ZakazItemSerializer(many=True)
 
     def validate(self, attrs):
@@ -1067,7 +1092,12 @@ class ZakazBulkCreateSerializer(Serializer):
         user            = self.context['request'].user
         line_totals     = self._line_totals(items)
         grand_total     = sum(line_totals, Decimal('0'))
-        batch_id        = uuid.uuid4()
+        batch_id        = validated_data.pop('import_batch', None) or uuid.uuid4()
+        line_paid_splits = (
+            _split_partial_payment(paid_amount, line_totals)
+            if payment_status == Zakaz.PARTIAL and paid_amount and grand_total > 0
+            else None
+        )
 
         created = []
         for idx, item in enumerate(items):
@@ -1075,8 +1105,8 @@ class ZakazBulkCreateSerializer(Serializer):
             if not product:
                 product = create_import_product(item['new_product'])
             line_paid = Decimal('0')
-            if payment_status == Zakaz.PARTIAL and paid_amount and grand_total > 0:
-                line_paid = (Decimal(str(paid_amount)) * line_totals[idx] / grand_total).quantize(Decimal('0.01'))
+            if line_paid_splits is not None:
+                line_paid = line_paid_splits[idx]
             elif payment_status == Zakaz.PAID and line_totals[idx] > 0:
                 line_paid = line_totals[idx]
             zakaz = Zakaz.objects.create(
