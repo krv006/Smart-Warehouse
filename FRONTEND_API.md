@@ -615,9 +615,9 @@ Chiqimlar kassa jurnalida `kind=out`, `source=import` ko‘rinadi. Excel export:
 }
 ```
 
-`serial_number` bo‘sh bo‘lsa **avtomatik yaratilmaydi** — mahsulot seriya raqamsiz saqlanadi (`null`).
+`serial_number` bo‘sh bo‘lsa **avtomatik yaratilmaydi** — mahsulot seriya raqamsiz saqlanadi (`null`). Seriya raqami **noyob**: omborda band raqam yuborilsa `400` qaytadi (`new_product.serial_number` yoki `serial_number` maydonida) — bo‘sh seriya cheklanmaydi.
 
-`product` va `new_product` **bitta qator** ichida bir vaqtda bo‘lmaydi. Bir importda bir nechta qator bo‘lsa, qatorlar orasida aralash mumkin: biri `product` (ombordan), boshqasi `new_product` (yangi mahsulot) — `POST /orders/zakaz/bulk/` orqali.
+`product` va `new_product` **bitta qator** ichida bir vaqtda bo‘lmaydi; lekin ikkalasidan **biri majburiy** — `new_product` yuborilsa `product` talab qilinmaydi. Bir importda bir nechta qator bo‘lsa, qatorlar orasida aralash mumkin: biri `product` (ombordan), boshqasi `new_product` (yangi mahsulot) — `POST /orders/zakaz/bulk/` orqali.
 
 **Serializer javobi:** `ZakazOperatorSerializer` `new_product` maydonini qaytaradi (write-only emas, read uchun).
 

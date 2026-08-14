@@ -7,6 +7,17 @@ def normalize_product_serial(serial):
     return serial or None
 
 
+def serial_number_is_taken(serial, exclude_pk=None):
+    """Seriya raqami boshqa mahsulotda bandmi? (bo'sh seriya hech qachon band emas)"""
+    serial = normalize_product_serial(serial)
+    if not serial:
+        return False
+    queryset = Product.objects.filter(serial_number=serial)
+    if exclude_pk:
+        queryset = queryset.exclude(pk=exclude_pk)
+    return queryset.exists()
+
+
 def create_import_product(data, origin=ProductOrigin.IMPORT):
     """Import/zakaz/buyurtma paytida omborga yangi mahsulot qo'shish."""
     return Product.objects.create(

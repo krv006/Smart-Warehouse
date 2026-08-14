@@ -425,3 +425,60 @@ class ProductCategoryFilterTests(TestCase):
 
     def test_other_category(self):
         self.assertEqual(self._names(self.other.pk), ['Stol'])
+
+
+class DuplicateSerialTests(TestCase):
+    """Band seriya raqami — 500 (IntegrityError) emas, tushunarli 400."""
+
+    BULK_URL = '/api/v1/orders/zakaz/bulk/'
+
+    def setUp(self):
+        self.api = APIClient()
+        self.manager = User.objects.create_user('mng_dup', password='x',
+                                                role=User.MANAGEMENT)
+        self.api.force_authenticate(self.manager)
+        self.category = Category.objects.create(name='Kategoriya')
+        Product.objects.create(name='Mavjud tovar', serial_number='SN-BAND',
+                               category=self.category)
+
+    def test_bulk_rejects_taken_serial(self):
+        res = self.api.post(self.BULK_URL, {
+            'items': [{'new_product': {'name': 'Yangi tovar', 'serial_number': 'SN-BAND',
+                                       'category': self.category.pk},
+                       'quantity': 1, 'unit_price': '1000.00',
+                       'selling_price': '2000.00'}],
+        }, format='json')
+        self.assertEqual(res.status_code, 400, res.data)
+
+    def test_product_endpoint_rejects_taken_serial(self):
+        res = self.api.post('/api/v1/warehouse/products/', {
+            'name': 'Boshqa tovar', 'serial_number': 'SN-BAND',
+            'category': self.category.pk, 'unit': 'piece',
+        }, format='json')
+        self.assertEqual(res.status_code, 400, res.data)
+        self.assertIn('serial_number', res.data)
+
+    def test_empty_serial_is_always_allowed(self):
+        res = self.api.post(self.BULK_URL, {
+            'items': [
+                {'new_product': {'name': 'Seriyasiz 1', 'category': self.category.pk},
+                 'quantity': 1, 'unit_price': '1000.00', 'selling_price': '2000.00'},
+                {'new_product': {'name': 'Seriyasiz 2', 'category': self.category.pk},
+                 'quantity': 1, 'unit_price': '1000.00', 'selling_price': '2000.00'},
+            ],
+        }, format='json')
+        self.assertEqual(res.status_code, 201, res.data)
+
+    def test_new_product_does_not_require_product_id(self):
+        """`product` MAJBURIY emas — `new_product` bilan import yaratiladi."""
+        res = self.api.post(self.BULK_URL, {
+            'supplier': 'uzb',
+            'items': [{'new_product': {'name': 'Faqat yangi tovar',
+                                       'serial_number': 'SN-YANGI',
+                                       'category': self.category.pk,
+                                       'unit': 'piece', 'vat_percent': '12'},
+                       'quantity': 10, 'unit_price': '10000.00',
+                       'selling_price': '15000.00'}],
+        }, format='json')
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(res.data['zakazlar'][0]['product_name'], 'Faqat yangi tovar')
