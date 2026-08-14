@@ -253,7 +253,34 @@ class ElectronicInvoiceSerializer(ModelSerializer):
     def validate_lines(self, lines):
         if self.instance is None and not lines:
             raise ValidationError('Kamida bitta mahsulot qatori kiritilishi kerak.')
+        self._check_duplicate_new_serials(lines)
         return lines
+
+    def _check_duplicate_new_serials(self, lines):
+        """Bitta so'rov ichida bir xil seriya raqami ikki xil nom bilan
+        kelmasin — aks holda ikkinchi qator birinchi qator yaratgan
+        mahsulotga jimgina bog'lanib, o'z nomi/mahsuloti yo'qoladi (chunki
+        qatorlar ketma-ket saqlanadi va keyingi qator seriya bo'yicha
+        avvalgisini topib oladi).
+        """
+        from apps.warehouse.product_utils import find_product, normalize_product_serial
+
+        seen = {}
+        for index, line in enumerate(lines, start=1):
+            if isinstance(line.get('product'), Product):
+                continue  # FK aniq berilgan — chalkashlik yo'q
+            serial = normalize_product_serial(line.get('identification_code'))
+            if not serial or find_product(serial_number=serial):
+                continue  # bo'sh yoki omborda ALLAQACHON mavjud mahsulot
+            name = (line.get('product_name') or '').strip().lower()
+            if serial in seen and seen[serial][0] != name:
+                raise ValidationError(
+                    f'{index}-qator: "{serial}" seriya raqami '
+                    f'{seen[serial][1]}-qatorda boshqa mahsulot nomi '
+                    f'("{line.get("product_name")}" ≠ oldingi qator) bilan '
+                    f'ishlatilgan — bitta seriya raqami bitta mahsulotga tegishli '
+                    f'bo\'lishi kerak.')
+            seen.setdefault(serial, (name, index))
 
     @transaction.atomic
     def create(self, validated_data):

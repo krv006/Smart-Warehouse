@@ -615,7 +615,7 @@ Chiqimlar kassa jurnalida `kind=out`, `source=import` ko‘rinadi. Excel export:
 }
 ```
 
-`serial_number` bo‘sh bo‘lsa **avtomatik yaratilmaydi** — mahsulot seriya raqamsiz saqlanadi (`null`). Seriya raqami **noyob**: omborda band raqam yuborilsa `400` qaytadi (`new_product.serial_number` yoki `serial_number` maydonida) — bo‘sh seriya cheklanmaydi. Bitta bulk so‘rov ichida ikki qatorda bir xil seriya bo‘lsa ham `400` (`items` xatosi: «2-qator: … 1-qatorda ham ishlatilgan»).
+`serial_number` bo‘sh bo‘lsa **avtomatik yaratilmaydi** — mahsulot seriya raqamsiz saqlanadi (`null`). Seriya raqami **noyob**: omborda band raqam yuborilsa `400` qaytadi (`new_product.serial_number` yoki `serial_number` maydonida) — bo‘sh seriya cheklanmaydi. Bitta bulk so‘rov ichida ikki qatorda bir xil seriya bo‘lsa ham `400` (`items` xatosi: «2-qator: … 1-qatorda ham ishlatilgan»). Xuddi shu qoida buyurtma (`/invoices/`) qatorlari uchun ham amal qiladi — ikki qator bir xil (yangi) seriyani boshqa mahsulot nomi bilan ishlatsa `lines` xatosi qaytadi; bir xil nom bilan (bitta mahsulot ikki qatorga bo‘lingan holat) ruxsat etiladi.
 
 `product` va `new_product` **bitta qator** ichida bir vaqtda bo‘lmaydi; lekin ikkalasidan **biri majburiy** — `new_product` yuborilsa `product` talab qilinmaydi. Bir importda bir nechta qator bo‘lsa, qatorlar orasida aralash mumkin: biri `product` (ombordan), boshqasi `new_product` (yangi mahsulot) — `POST /orders/zakaz/bulk/` orqali.
 

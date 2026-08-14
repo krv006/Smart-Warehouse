@@ -799,8 +799,12 @@ class ZakazSerializer(ModelSerializer):
             getattr(self.instance, 'paid_amount', None) if self.instance else None,
         )
         # To'lov maydonlari tegilmagan tahrirda (masalan faqat izoh) eski
-        # yozuvni bloklamaymiz — tekshiruv faqat to'lov yuborilganda
+        # yozuvni bloklamaymiz — lekin miqdor/narx o'zgarsa jami summa ham
+        # o'zgaradi, shuning uchun ularni ham "tegilgan" deb hisoblaymiz —
+        # aks holda miqdorni kamaytirish paid_amount > total holatini
+        # tekshirilmasdan qoldiradi
         payment_touched = ('payment_status' in attrs or 'paid_amount' in attrs
+                           or 'quantity' in attrs or 'unit_price' in attrs
                            or self.instance is None)
         if payment_status == Zakaz.PARTIAL and payment_touched:
             line_total = None

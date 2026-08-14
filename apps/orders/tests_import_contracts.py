@@ -180,6 +180,34 @@ class PartialPaymentLimitTests(TestCase):
         zakaz.refresh_from_db()
         self.assertEqual(zakaz.paid_amount, Decimal('150000.00'))
 
+    def test_reducing_quantity_below_paid_amount_is_rejected(self):
+        """Miqdorni kamaytirish jami summani paid_amount dan pastga tushirsa — 400.
+
+        Aks holda paid_amount > total holati tekshirilmasdan saqlanib qolardi.
+        """
+        zakaz = Zakaz.objects.create(product=self.product, quantity=2,
+                                     zakaz_type=Zakaz.MANUAL,
+                                     unit_price=Decimal('100000'),
+                                     payment_status=Zakaz.PARTIAL,
+                                     paid_amount=Decimal('180000'))  # 200000 dan kam
+        res = self.api.patch(f'/api/v1/orders/zakaz/{zakaz.pk}/',
+                             {'quantity': 1}, format='json')  # jami endi 100000
+        self.assertEqual(res.status_code, 400, res.data)
+        zakaz.refresh_from_db()
+        self.assertEqual(zakaz.quantity, 2)
+        self.assertEqual(zakaz.paid_amount, Decimal('180000'))
+
+    def test_comment_only_edit_is_not_blocked_by_payment_check(self):
+        """To'lov/miqdor/narxga tegilmagan tahrir bloklanmasligi kerak."""
+        zakaz = Zakaz.objects.create(product=self.product, quantity=2,
+                                     zakaz_type=Zakaz.MANUAL,
+                                     unit_price=Decimal('100000'),
+                                     payment_status=Zakaz.PARTIAL,
+                                     paid_amount=Decimal('180000'))
+        res = self.api.patch(f'/api/v1/orders/zakaz/{zakaz.pk}/',
+                             {'comment': 'izoh'}, format='json')
+        self.assertEqual(res.status_code, 200, res.data)
+
 
 class ProductOriginTests(TestCase):
     """Import mahsuloti qabul qilingach oddiy ombor mahsulotiga aylanadi."""
@@ -297,6 +325,51 @@ class InvoiceAutoProductTests(TestCase):
         zakaz = Zakaz.objects.get(product=product)
         self.assertEqual(zakaz.unit_price, Decimal('5000.00'))
         self.assertEqual(zakaz.selling_price, Decimal('9000.00'))
+
+    def test_duplicate_serial_across_lines_with_different_names_is_rejected(self):
+        """Ikki qator bir xil (yangi) seriyani boshqa nom bilan ishlatsa — 400.
+
+        Aks holda ikkinchi qator birinchi qator yaratgan mahsulotga jimgina
+        bog'lanib, o'z nomi va mahsuloti butunlay yo'qolib qolardi.
+        """
+        payload = {
+            'document_type': 'contract_sk',
+            'contract_date': '2026-08-13',
+            'client': str(self.client_obj.pk),
+            'lines': [
+                {'product_name': 'Mahsulot A', 'category': self.category.pk,
+                 'identification_code': 'DUP-1', 'quantity': 2,
+                 'unit_price': '5000.00', 'selling_price': '9000.00'},
+                {'product_name': 'Mahsulot B', 'category': self.category.pk,
+                 'identification_code': 'DUP-1', 'quantity': 3,
+                 'unit_price': '6000.00', 'selling_price': '10000.00'},
+            ],
+        }
+        res = self.api.post(self.URL, payload, format='json')
+        self.assertEqual(res.status_code, 400, res.data)
+        self.assertFalse(Product.objects.filter(name='Mahsulot A').exists())
+        self.assertFalse(Product.objects.filter(name='Mahsulot B').exists())
+
+    def test_same_serial_same_name_two_lines_is_allowed(self):
+        """Bitta yangi mahsulot ikki qatorga bo'linsa (bir xil nom) — ruxsat."""
+        payload = {
+            'document_type': 'contract_sk',
+            'contract_date': '2026-08-13',
+            'client': str(self.client_obj.pk),
+            'lines': [
+                {'product_name': 'Bo\'lingan tovar', 'category': self.category.pk,
+                 'identification_code': 'SPLIT-1', 'quantity': 2,
+                 'unit_price': '5000.00', 'selling_price': '9000.00'},
+                {'product_name': 'Bo\'lingan tovar', 'category': self.category.pk,
+                 'identification_code': 'SPLIT-1', 'quantity': 3,
+                 'unit_price': '5000.00', 'selling_price': '9000.00'},
+            ],
+        }
+        res = self.api.post(self.URL, payload, format='json')
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(Product.objects.filter(name='Bo\'lingan tovar').count(), 1)
+        product = Product.objects.get(name='Bo\'lingan tovar')
+        self.assertEqual(set(res.data['lines'][i]['product'] for i in (0, 1)), {product.pk})
 
     def test_unknown_product_is_created_with_import_origin(self):
         res = self.api.post(self.URL, self._payload('Yangi tovar'), format='json')
