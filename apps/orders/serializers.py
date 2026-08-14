@@ -1123,10 +1123,27 @@ class ZakazBulkCreateSerializer(Serializer):
         return attrs
 
     def validate_items(self, value):
+        from apps.warehouse.product_utils import normalize_product_serial
+
         if not value:
             raise ValidationError('Kamida bitta mahsulot kiritilishi kerak.')
         errors = []
-        for item in value:
+        seen_serials = {}
+        for index, item in enumerate(value, start=1):
+            # Bitta so'rov ichida bir xil seriya raqami — bazaga yozishda
+            # unique cheklovi buziladi, shuning uchun oldindan to'xtatamiz
+            new_product = item.get('new_product')
+            if new_product:
+                serial = normalize_product_serial(new_product.get('serial_number'))
+                if serial:
+                    if serial in seen_serials:
+                        errors.append(
+                            f'{index}-qator: "{serial}" seriya raqami '
+                            f'{seen_serials[serial]}-qatorda ham ishlatilgan — '
+                            f'seriya raqami takrorlanmasligi kerak.')
+                    else:
+                        seen_serials[serial] = index
+
             product = item.get('product')
             if not product:
                 continue

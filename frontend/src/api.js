@@ -26,6 +26,30 @@ function fieldErrors(data) {
   return errors
 }
 
+// Ichma-ich joylashgan DRF xatolarini ({items: {0: {new_product: {...}}}})
+// o'qiladigan matnga aylantiradi
+function collectMessages(value, path = []) {
+  if (typeof value === 'string') return [{ path, message: value }]
+  if (Array.isArray(value)) return value.flatMap((item) => collectMessages(item, path))
+  if (value && typeof value === 'object') {
+    return Object.entries(value).flatMap(([key, item]) => collectMessages(item, [...path, key]))
+  }
+  return []
+}
+
+const ROW_KEYS = { items: 'qator', lines: 'qator' }
+
+function formatMessage({ path, message }) {
+  const rowKeyIndex = path.findIndex((key) => ROW_KEYS[key] !== undefined)
+  if (rowKeyIndex !== -1) {
+    const index = Number(path[rowKeyIndex + 1])
+    if (Number.isFinite(index)) {
+      return `${index + 1}-${ROW_KEYS[path[rowKeyIndex]]}: ${message}`
+    }
+  }
+  return message
+}
+
 function errorMessage(data) {
   if (!data || typeof data !== 'object') return 'So‘rovni bajarib bo‘lmadi.'
   if (data.detail) {
@@ -38,7 +62,7 @@ function errorMessage(data) {
     }
     return detail
   }
-  const messages = Object.values(data).flat(Infinity).filter(Boolean)
+  const messages = [...new Set(collectMessages(data).map(formatMessage))]
   return messages.join(' ') || 'So‘rovni bajarib bo‘lmadi.'
 }
 
