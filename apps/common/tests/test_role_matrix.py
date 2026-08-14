@@ -6,7 +6,7 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 
 from apps.users.models import User
-from apps.warehouse.models import Product, Stock
+from apps.warehouse.models import Category, Product, Stock
 
 
 class RoleMatrixTests(TestCase):
@@ -17,7 +17,9 @@ class RoleMatrixTests(TestCase):
         self.operator = User.objects.create_user('op', password='x', role=User.OPERATOR)
         self.accountant = User.objects.create_user('acc', password='x', role=User.ACCOUNTANT)
         self.manager = User.objects.create_user('mng', password='x', role=User.MANAGEMENT)
+        self.category = Category.objects.create(name='Test kategoriya')
         self.product = Product.objects.create(
+            category=self.category,
             name='Test', serial_number='SN-MX-1',
             purchase_price=Decimal('1000'), selling_price=Decimal('1500'),
             min_quantity=2,
@@ -29,7 +31,9 @@ class RoleMatrixTests(TestCase):
 
     # 1 — Mahsulot qo'shish
     def test_rule1_product_create_permissions(self):
-        payload = {'name': 'New', 'serial_number': 'SN-NEW-1', 'unit': 'piece'}
+        # Kategoriya — mahsulot qo'shishda majburiy
+        payload = {'name': 'New', 'serial_number': 'SN-NEW-1', 'unit': 'piece',
+                   'category': self.category.pk}
         self._auth(self.operator)
         self.assertEqual(self.api.post('/api/v1/warehouse/products/', payload).status_code, 201)
         payload['serial_number'] = 'SN-NEW-2'

@@ -108,7 +108,12 @@ class InvoiceLineItem(TimeStampedModel):
     unit = CharField(max_length=20, choices=ProductUnit.choices,
                      default=ProductUnit.PIECE)
     quantity = PositiveIntegerField(default=1)
-    unit_price = DecimalField(max_digits=14, decimal_places=2, default=Decimal('0'))
+    # `unit_price` — KELISH narxi: yetkazish qiymati va QQS shundan hisoblanadi
+    unit_price = DecimalField(max_digits=14, decimal_places=2, default=Decimal('0'),
+                              verbose_name='Kelish narxi')
+    selling_price = DecimalField(max_digits=14, decimal_places=2,
+                                 null=True, blank=True,
+                                 verbose_name='Sotuv narxi')
     delivery_amount = DecimalField(max_digits=14, decimal_places=2, default=Decimal('0'),
                                    verbose_name='Yetkazish narxi')
     vat_percent = CharField(max_length=8, choices=VatPercent.choices,
@@ -134,17 +139,21 @@ class InvoiceLineItem(TimeStampedModel):
         vat_rate = VatPercent.rate(vat_percent_value)
 
         if reverse:
+            # Teskari hisobda ham NARX ustun: soni × narx bo'lsa yetkazish
+            # qiymati doim shundan olinadi, QQS esa o'sha qiymatdan
+            # hisoblanadi. Faqat narx bo'lmaganda jami summadan orqaga
+            # (total → yetkazish + QQS) hisoblanadi.
             delivery = Decimal(delivery_amount or 0)
             vat = Decimal(vat_amount or 0)
             total = Decimal(total_amount or 0)
-            if delivery > 0 and vat_rate > 0:
+            if qty > 0 and price > 0:
+                delivery = (qty * price).quantize(Decimal('0.01'))
+            elif not delivery and total > 0:
+                divisor = Decimal('1') + vat_rate / Decimal('100')
+                delivery = (total / divisor).quantize(Decimal('0.01'))
+            if vat_rate > 0:
                 vat = (delivery * vat_rate / Decimal('100')).quantize(Decimal('0.01'))
-                total = (delivery + vat).quantize(Decimal('0.01'))
-            elif total > 0 and vat_rate > 0 and not delivery:
-                delivery = (total / (Decimal('1') + vat_rate / Decimal('100'))).quantize(Decimal('0.01'))
-                vat = (total - delivery).quantize(Decimal('0.01'))
-            elif not total and delivery:
-                total = (delivery + vat).quantize(Decimal('0.01'))
+            total = (delivery + vat).quantize(Decimal('0.01'))
             return delivery, vat, total
 
         delivery = (qty * price).quantize(Decimal('0.01'))

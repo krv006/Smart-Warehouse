@@ -2,23 +2,29 @@ from decimal import Decimal
 
 from django.db import transaction
 from rest_framework.serializers import (ModelSerializer, ValidationError,
+                                        PrimaryKeyRelatedField,
                                         SerializerMethodField)
 
 from apps.invoices.models import ElectronicInvoice, ExecutorType, InvoiceLineItem, VatPercent
 from apps.invoices.services import sync_invoice_contract_registry
-from apps.warehouse.models import Product, ProductUnit
+from apps.warehouse.models import Category, Product, ProductUnit
 
 
 class InvoiceLineItemSerializer(ModelSerializer):
     unit_display = SerializerMethodField()
     vat_percent_display = SerializerMethodField()
+    # Ombordagi mahsulot topilmasa YANGI mahsulot ochiladi — unga kategoriya
+    # majburiy (modelda saqlanmaydi, faqat mahsulot yaratish uchun)
+    category = PrimaryKeyRelatedField(queryset=Category.objects.all(),
+                                      required=False, allow_null=True,
+                                      write_only=True)
 
     class Meta:
         model = InvoiceLineItem
         fields = (
-            'id', 'line_number', 'product', 'product_name',
+            'id', 'line_number', 'product', 'product_name', 'category',
             'identification_code', 'barcode', 'unit', 'unit_display',
-            'quantity', 'unit_price', 'delivery_amount',
+            'quantity', 'unit_price', 'selling_price', 'delivery_amount',
             'vat_percent', 'vat_percent_display', 'vat_amount', 'total_amount',
         )
         read_only_fields = ('id',)
@@ -109,6 +115,108 @@ class ElectronicInvoiceSerializer(ModelSerializer):
     def get_created_by_name(self, obj):
         return str(obj.created_by) if obj.created_by else None
 
+    def _resolve_line_product(self, line_data):
+        """Qatordagi tovarni omborda topadi; bo'lmasa YANGI mahsulot yaratadi.
+
+        Yangi mahsulot holati `import` bo'lib qo'shiladi — ombor ro'yxatida
+        u "Import" deb ko'rsatiladi.
+        """
+        from apps.warehouse.models import ProductOrigin
+        from apps.warehouse.product_utils import create_import_product, find_product
+
+        # `category` modelda yo'q — faqat yangi mahsulot ochish uchun
+        category = line_data.pop('category', None)
+        if isinstance(line_data.get('product'), Product):
+            return line_data
+        name = (line_data.get('product_name') or '').strip()
+        if not name:
+            return line_data
+        product = find_product(
+            name=name,
+            serial_number=line_data.get('identification_code'),
+            barcode=line_data.get('barcode'),
+        )
+        if product is None:
+            if category is None:
+                raise ValidationError({
+                    'lines': (f'"{name}" omborda topilmadi — yangi mahsulot '
+                              f'uchun kategoriya (category) tanlanishi shart.'),
+                })
+            product = create_import_product({
+                'name': name,
+                'category': category,
+                'serial_number': line_data.get('identification_code'),
+                'barcode': line_data.get('barcode'),
+                'unit': line_data.get('unit'),
+                'vat_percent': line_data.get('vat_percent'),
+                # qatordagi «Narxi» — KELISH narxi, «Sotuv narxi» — ketish
+                'purchase_price': line_data.get('unit_price') or None,
+                'selling_price': line_data.get('selling_price') or None,
+            }, origin=ProductOrigin.IMPORT)
+            # Yangi mahsulot import bo'limiga ham tushishi kerak — hujjat
+            # saqlangandan keyin zakaz (import) yozuvi ochiladi
+            if not hasattr(self, '_auto_import_lines'):
+                self._auto_import_lines = []
+            self._auto_import_lines.append({
+                'product': product,
+                'quantity': line_data.get('quantity') or 1,
+                'unit_price': line_data.get('unit_price') or None,
+                'selling_price': line_data.get('selling_price') or None,
+                'vat_percent': line_data.get('vat_percent') or 'none',
+            })
+        line_data['product'] = product
+        return line_data
+
+    def _create_auto_imports(self, invoice):
+        """Buyurtmada yangi ochilgan mahsulotlar uchun import (zakaz) yozuvi.
+
+        Qatordagi «Narxi» — kelish narxi (`unit_price`), «Sotuv narxi» —
+        `selling_price`. To'lov holati "to'lanmagan" bo'lib boshlanadi;
+        keyingisini operator import bo'limida yuritadi.
+        """
+        import uuid
+
+        from apps.orders.models import (ProductContract, Zakaz, ZakazHistory,
+                                        register_contract)
+
+        lines = getattr(self, '_auto_import_lines', [])
+        if not lines:
+            return
+        user = self.context['request'].user
+        batch_id = uuid.uuid4()
+        asos = (f'Buyurtma №{invoice.contract_number or "—"} qatoridagi yangi '
+                f'mahsulot — import bo\'limiga avtomatik qo\'shildi.')
+        for line in lines:
+            zakaz = Zakaz.objects.create(
+                product=line['product'],
+                zakaz_type=Zakaz.MANUAL,
+                quantity=line['quantity'],
+                unit_price=line['unit_price'],
+                selling_price=line['selling_price'],
+                vat_percent=line['vat_percent'],
+                status=Zakaz.NEW,
+                payment_status=Zakaz.UNPAID,
+                contract_number=invoice.contract_number,
+                contract_date=invoice.contract_date,
+                import_batch=batch_id,
+                comment=asos,
+                created_by=user if user.is_authenticated else None,
+            )
+            ZakazHistory.objects.create(
+                zakaz=zakaz, changed_by=zakaz.created_by,
+                action=ZakazHistory.CREATED, new_status=Zakaz.NEW,
+                contract_number=invoice.contract_number,
+                contract_date=invoice.contract_date,
+                asos=asos,
+            )
+            register_contract(
+                zakaz.product, ProductContract.ZAKAZ_CREATED,
+                contract_number=invoice.contract_number,
+                contract_date=invoice.contract_date,
+                asos=asos, zakaz=zakaz, user=zakaz.created_by,
+            )
+        self._auto_import_lines = []
+
     def _apply_product_defaults(self, line_data):
         product = line_data.get('product')
         if isinstance(product, Product):
@@ -117,9 +225,12 @@ class ElectronicInvoiceSerializer(ModelSerializer):
             line_data['barcode'] = product.barcode or line_data.get('barcode', '')
             line_data['unit'] = product.unit or line_data.get('unit') or ProductUnit.PIECE
             if line_data.get('unit_price') in (None, '', 0):
-                price = product.selling_price or product.delivery_price
+                # «Narxi» — KELISH narxi
+                price = product.purchase_price or product.delivery_price
                 if price is not None:
                     line_data['unit_price'] = price
+            if line_data.get('selling_price') in (None, '') and product.selling_price is not None:
+                line_data['selling_price'] = product.selling_price
             if line_data.get('vat_percent') in (None, '', VatPercent.NONE) and product.vat_percent:
                 line_data['vat_percent'] = product.vat_percent
         return line_data
@@ -146,8 +257,15 @@ class ElectronicInvoiceSerializer(ModelSerializer):
 
     @transaction.atomic
     def create(self, validated_data):
+        from apps.common.contracts import allocate_contract_number
+
+        self._auto_import_lines = []
         lines_data = validated_data.pop('lines', [])
         reverse = validated_data.get('reverse_calculation', False)
+        if not (validated_data.get('contract_number') or '').strip():
+            # Har kun uchun alohida o'suvchi tartib raqam: 1/1308, 2/1308, ...
+            validated_data['contract_number'] = allocate_contract_number(
+                validated_data.get('contract_date'))
         invoice = ElectronicInvoice.objects.create(
             created_by=self.context['request'].user,
             **validated_data,
@@ -156,15 +274,18 @@ class ElectronicInvoiceSerializer(ModelSerializer):
             line_data = dict(raw)
             line_data.pop('id', None)
             line_data['line_number'] = line_data.get('line_number') or idx
+            line_data = self._resolve_line_product(line_data)
             line_data = self._apply_product_defaults(line_data)
             line_data = self._compute_line(line_data, reverse)
             InvoiceLineItem.objects.create(invoice=invoice, **line_data)
         sync_invoice_contract_registry(invoice, created=True,
                                        user=self.context['request'].user)
+        self._create_auto_imports(invoice)
         return invoice
 
     @transaction.atomic
     def update(self, instance, validated_data):
+        self._auto_import_lines = []
         lines_data = validated_data.pop('lines', None)
         old_reverse = instance.reverse_calculation
         reverse = validated_data.get('reverse_calculation', old_reverse)
@@ -176,6 +297,7 @@ class ElectronicInvoiceSerializer(ModelSerializer):
                 line_data = dict(raw)
                 line_id = line_data.pop('id', None)
                 line_data['line_number'] = line_data.get('line_number') or idx
+                line_data = self._resolve_line_product(line_data)
                 line_data = self._apply_product_defaults(line_data)
                 line_data = self._compute_line(line_data, reverse)
                 if line_id:
@@ -204,4 +326,5 @@ class ElectronicInvoiceSerializer(ModelSerializer):
                 line.save()
         sync_invoice_contract_registry(invoice, created=False,
                                        user=self.context['request'].user)
+        self._create_auto_imports(invoice)
         return invoice

@@ -406,16 +406,18 @@ Ro‘yxatdan **ko‘z** ikonkasi URL o‘zgartirmaydi — `loadInvoiceForView(id
 
 Filtr paneli: `ListFiltersPanel` + `frontend/src/listFilters.js`.
 
-| Modul | Status | Mijoz | Sana |
-|---|---|---|---|
-| Mijozlar | `is_active` | — | ✅ |
-| Sotuvlar | — | ✅ | ✅ |
-| Import | `status` | — | ✅ |
-| Ombor | — | — | — |
-| Kassa | `status` | ✅ | ✅ (UI yuboradi; backend `/cash/payments/` hozircha e’tiborsiz) |
-| Xarajatlar | — | — | ✅ |
+| Modul | Status | Mijoz | Kategoriya | Sana |
+|---|---|---|---|---|
+| Mijozlar | `is_active` | — | — | ✅ |
+| Sotuvlar | — | ✅ | — | ✅ |
+| Import | `status` | — | — | ✅ |
+| Ombor | — | — | ✅ `category` | — |
+| Kassa | `status` | ✅ | — | ✅ (UI yuboradi; backend `/cash/payments/` hozircha e’tiborsiz) |
+| Xarajatlar | — | — | — | ✅ |
 
-`buildListQueryParams(title, filters)` → API query: `status` yoki `is_active`, `client`, `date_from`, `date_to`.
+`buildListQueryParams(title, filters)` → API query: `status` yoki `is_active`, `client`, `category`, `date_from`, `date_to`.
+
+Kategoriya filtri daraxt ko‘rinishida (`— ` bilan bosqichlangan) va 8 tadan ko‘p bo‘lsa qidiruv maydoni bilan chiqadi; backend tanlangan kategoriya bilan birga **ost-kategoriyalarni** ham qamrab oladi.
 
 Backend sana maydoni (`apps/common/querysets.apply_date_range`):
 
@@ -475,6 +477,12 @@ Shifrlangan maydonlar serverda ochiladi. Kamida **2** belgi; debounce **400 ms**
 **Buyurtmalar — korxona tanlash modali (`ClientPickerModal`):** «Bajaruvchi korxona» yoki «Mijoz» maydoniga bosilganda modal ochiladi (tovar tanlashdagi `ProductPickerModal` kabi). Qidiruv `searchClients()`; pastda **Yangi korxona qo‘shish** — `clients_manage` bo‘lsa yuridik mijoz editori ochiladi va saqlangach tanlangan tomonga (`client` yoki `executor_client`) biriktiriladi.
 
 **Buyurtma qatorlari — tovar tanlash:** «Tovar nomi» maydoni qo‘lda yoki datalist orqali; yonidagi **quti** ikonkasi `ProductPickerModal` ochadi. Ombor maydoni `serial_number` buyurtma qatorida `identification_code` (UI: **Seriya raqami**). Ombordan tanlanganda FK + maydonlar sinxron; qo‘lda o‘zgartirsangiz frontend `reconcileLineWithProducts()` orqali qayta bog‘laydi yoki FK ni uzadi; saqlashda backend `product` FK bo‘lsa ombordan majburiy sinxron qiladi.
+
+**Bazada yo‘q tovar:** qator nomi (yoki seriya/shtrix kodi) ombordagi hech bir mahsulotga mos kelmasa, saqlashda backend mahsulotni DARHOL ombor ro‘yxatiga qo‘shadi va qatorga bog‘laydi. Bunday mahsulotning `origin` maydoni `import` bo‘ladi (`origin_display` — «Import»), ombor ro‘yxatida **Holati** ustunida ko‘rinadi. Ombordan qo‘lda yaratilganlarda `origin=warehouse`.
+
+Shu bilan birga o‘sha mahsulot uchun **import (zakaz) yozuvi** ham ochiladi — Import bo‘limida ko‘rinadi: `zakaz_type=manual`, `status=new` (Yangi), `payment_status=unpaid`, `quantity` — qator soni, `selling_price` — qatordagi narx, `unit_price` (kelish narxi) **bo‘sh** (hali noma’lum), shartnoma raqami/sanasi hujjatnikidan. Ombordagi mavjud mahsulot uchun takroriy import yozuvi ochilmaydi.
+
+**Import oynasi:** import (`ZakazEditor`) mahsulot qatorlari buyurtma hujjatidagi jadval bilan bir xil — Tovar nomi (+ `ProductPickerModal`), Seriya raqami, Shtrix kod, O‘lchov birligi, Soni, **Kelish narxi**, **Ketish narxi**, Yetkazish qiymati, QQS %, QQS miqdori, Jami, «Teskari hisob» va MXIK havolasi.
 
 ### `FxRatePanel` rejimlari (`App.jsx`)
 
@@ -558,7 +566,11 @@ DELETE yo‘q — bekor qilish `/cancel/` orqali.
 | POST | `/bulk/` | bulk zakaz body | Auth | ✅ `zakazBulk` |
 | GET | `/{id}/batch/` | — | Auth | ✅ `zakazBatch` |
 
+**`product_name`:** import javobida faqat mahsulot nomi qaytadi (seriya raqamisiz) — «rv (rv)» emas, «rv».
+
 **`import_batch` (UUID, nullable):** har bir manual import qatoriga yoziladi. Yangi bulk yaratishda avtomatik yangi UUID; mavjud guruhga qator qo‘shishda ixtiyoriy yuboriladi (`POST /bulk/` yoki `POST /` body da). Tahrir (`PATCH`) da o‘zgartirilmaydi. Javobda barcha rollar uchun qaytariladi (Operator serializer ham).
+
+**Qisman to‘lov chegarasi:** `payment_status=partial` bo‘lganda `paid_amount` **jami import summasidan** (`unit_price × quantity`) oshmasligi kerak — bulk, single `POST` va `PATCH` da bir xil tekshiriladi (`400`). Narx (`unit_price`) yo‘q importda qisman to‘lov umuman qabul qilinmaydi — summani solishtirib bo‘lmaydi. UI da input `max` bilan cheklangan, jami summa ko‘rsatiladi va saqlashdan oldin xato matni chiqadi.
 
 **Operator to‘lov himoyasi:** Operator `PATCH` da `payment_status` / `paid_amount` yuborsa ham serializer maydonlari cheklangan — DB dagi qiymatlar o‘zgarmaydi (`ZakazOperatorSerializer`). Bulk va single `POST` da backend to‘lov maydonlarini strip qiladi.
 
@@ -572,16 +584,21 @@ DELETE yo‘q — bekor qilish `/cancel/` orqali.
 
 Chiqimlar kassa jurnalida `kind=out`, `source=import` ko‘rinadi. Excel export: `GET /reports/excel/kassa/` (jurnal) yoki `GET /reports/excel/imports/` (zakaz ro‘yxati).
 
+**Narxlar (`unit_price` / `selling_price`):** import qatorida **kelish narxi** (`unit_price`) va **ketish narxi** (`selling_price`) `prices_manage` roli uchun MAJBURIY. Ikkalasi ham ombordagi mahsulotga yoziladi (`purchase_price` / `selling_price`) — mavjud mahsulot tanlansa ham yangilanadi. `vat_percent` qatorda beriladi (bo‘lmasa mahsulotniki olinadi); **QQS har doim kelish narxi asosida** hisoblanadi va javobda `vat_amount`, `total_with_vat` bo‘lib qaytadi.
+
+**Shartnoma raqami:** `contract_number` yuborilmasa backend o‘sha kun uchun keyingi tartib raqamni atomar band qiladi (`{tartib}/{DDMM}` — 1/1308, 2/1308 …). `GET /orders/next-contract-number/` faqat ko‘rsatadi (band qilmaydi), shuning uchun forma raqamni oldindan ko‘rsatishi va saqlashda uni yubormasligi kerak.
+
 **Manual import — `new_product` inline** (POST body, `product` o‘rniga):
 
 ```json
 {
   "quantity": 10,
   "supplier": "Yetkazuvchi",
-  "contract_number": "3/1108",
   "contract_date": "2026-08-11",
   "expected_date": "2026-08-25",
   "unit_price": "1500000",
+  "selling_price": "1900000",
+  "vat_percent": "12",
   "payment_status": "partial",
   "paid_amount": "500000",
   "currency": "UZS",
@@ -592,10 +609,13 @@ Chiqimlar kassa jurnalida `kind=out`, `source=import` ko‘rinadi. Excel export:
     "unit": "piece",
     "vat_percent": "12",
     "purchase_price": "1200000",
+    "selling_price": "1900000",
     "delivery_price": "15000000"
   }
 }
 ```
+
+`serial_number` bo‘sh bo‘lsa **avtomatik yaratilmaydi** — mahsulot seriya raqamsiz saqlanadi (`null`).
 
 `product` va `new_product` **bitta qator** ichida bir vaqtda bo‘lmaydi. Bir importda bir nechta qator bo‘lsa, qatorlar orasida aralash mumkin: biri `product` (ombordan), boshqasi `new_product` (yangi mahsulot) — `POST /orders/zakaz/bulk/` orqali.
 
@@ -628,11 +648,24 @@ List faqat root node + `children` daraxti.
 
 | Method | Path | Query / body | Ruxsat | api.js |
 |---|---|---|---|---|
-| GET | `/` | `search`, `category`, `purchase_price__isnull`, `selling_price__isnull` | Auth | ✅ `products` |
+| GET | `/` | `search`, `category` (ost-kategoriyalar bilan), `purchase_price__isnull`, `selling_price__isnull` | Auth | ✅ `products` |
 | POST | `/` | product body | Operator+ | ✅ `create` |
 | GET/PATCH/DELETE | `/{id}/` | — | Operator+ | ✅ CRUD |
 | POST | `/{id}/add-stock/` | `{ quantity, asos, warehouse_location?, contract_number?, faktura? }` | Operator+ | ✅ `addStock` |
 | GET | `/{id}/contracts/` | — | Auth | ✅ `productContracts` |
+
+**Holati (`origin`):** `import` — tovar hali kelmagan (buyurtma/import qatoridan yaratilgan), ro‘yxatda «Import» deb ko‘rsatiladi va **buyurtma qatorlarida tanlash uchun chiqmaydi**. Import «Qabul qilindi» bo‘lgach (`Zakaz.receive()`) `origin` avtomatik `warehouse` ga o‘tadi — shundan keyin tovar oddiy ombor mahsuloti bo‘lib, buyurtmada tanlanadi.
+
+**`category` MAJBURIY — har uch yo‘lda:**
+- `POST /warehouse/products/` — `category` bo‘lmasa `400`; mahsulot formasi (yaratish va tahrirlash) kategoriya select’ini ko‘rsatadi.
+- `POST /orders/zakaz/bulk/` va `POST /orders/zakaz/` — `new_product.category` majburiy; import jadvalida «Kategoriya» ustuni bor.
+- `POST/PATCH /invoices/` — qator ombordagi mahsulotga mos kelmasa (yangi mahsulot ochiladi) `lines[].category` majburiy (write-only maydon, faqat mahsulot yaratish uchun); buyurtma jadvalida «Kategoriya» ustuni bor.
+
+Mahsulotlar ro‘yxatida **Kategoriya** (`category_name`) va **Model** ustunlari ko‘rsatiladi. Ro‘yxat **Filtr** panelida kategoriya bo‘yicha saralanadi (`?category=<id>`) — tanlangan kategoriya **va uning barcha ost-kategoriyalari** mahsulotlari chiqadi (MPTT `get_descendants`).
+
+`pending_import_quantity` — hali qabul qilinmagan (yo‘ldagi) import miqdori: faol zakazlar bo‘yicha `quantity − received_qty`. Ombor qoldig‘i (`available_quantity`) faqat import **«Qabul qilindi»** bo‘lgach oshadi, shuning uchun ro‘yxatda qoldiq yonida «+N yo‘lda» ko‘rsatiladi.
+
+`serial_number` — **ixtiyoriy va avtomatik yaratilmaydi**: bo‘sh yuborilsa `null` saqlanadi (unique, lekin bir nechta `null` bo‘lishi mumkin). `origin` — `warehouse` (ombordan yaratilgan, default) yoki `import` (buyurtma/import qatoridan avtomatik qo‘shilgan); `origin_display` inson o‘qiydigan nom.
 
 **Qoldiqlar** `/stocks/`
 
@@ -738,7 +771,11 @@ Backend validatsiya: `executor_type=client` → `executor_client` majburiy; `com
 
 **Buyurtmachi (hamkor):** `client` — majburiy FK (`clients.Client`).
 
-Qator (`lines[]`) maydonlari: `product`, `product_name`, `identification_code`, `barcode`, `unit`, `quantity`, `unit_price`, `delivery_amount`, `vat_percent`, `vat_amount`, `total_amount`. Backend `reverse_calculation=true` bo‘lsa teskari hisoblaydi.
+Qator (`lines[]`) maydonlari: `product`, `product_name`, `identification_code`, `barcode`, `unit`, `quantity`, `unit_price`, `selling_price`, `delivery_amount`, `vat_percent`, `vat_amount`, `total_amount`.
+
+**Narxlar:** `unit_price` — **kelish narxi** (UI: «Narxi (kelish)»); yetkazish qiymati va QQS aynan shundan hisoblanadi. `selling_price` — **sotuv narxi** (UI: «Sotuv narxi», jadvalda «Jami» dan keyingi ustun), ixtiyoriy (`null` bo‘lishi mumkin), hisobga ta’sir qilmaydi. Ombordan tanlanganda qatorga mahsulotning `purchase_price` va `selling_price` qiymatlari tushadi; yangi mahsulot yaratilganda esa aksincha — qator narxlari mahsulotga yoziladi va shu narxlar bilan import (zakaz) yozuvi ochiladi.
+
+**Hisob qoidasi (`InvoiceLineItem.compute_line`):** NARX ustun — `quantity` × `unit_price` bo‘lsa `delivery_amount` doim shundan, `vat_amount` esa `delivery_amount` dan hisoblanadi, `reverse_calculation=true` bo‘lganda ham. Ya’ni narx yoki QQS % o‘zgarishi bilan QQS miqdori va jami darhol qayta hisoblanadi (frontendda ham — `calcInvoiceLine`), eski qiymatlar qolib ketmaydi. Teskari hisob faqat narx bo‘lmaganda ishlaydi: `total_amount` dan orqaga `delivery_amount` va `vat_amount` chiqariladi (UI da jami/QQS/yetkazish qo‘lda kiritilsa narx ham qayta hisoblanadi).
 
 Operator uchun narx maydonlari (`unit_price`, `delivery_amount`, `vat_amount`, `total_amount`) javobdan olib tashlanadi.
 
@@ -843,13 +880,24 @@ POST /api/v1/invoices/
       "product": 1,
       "quantity": 2,
       "unit_price": "1500000",
+      "selling_price": "1900000",
+      "vat_percent": "12"
+    },
+    {
+      "product_name": "Bazada yo‘q tovar",
+      "category": 3,
+      "quantity": 1,
+      "unit_price": "500000",
+      "selling_price": "800000",
       "vat_percent": "12"
     }
   ]
 }
 ```
 
-Backend mahsulotdan `product_name`, `barcode`, `identification_code`, `unit`, narx va QQS ni to‘ldiradi; `delivery_amount`, `vat_amount`, `total_amount` hisoblanadi.
+Backend mahsulotdan `product_name`, `barcode`, `identification_code`, `unit`, narx va QQS ni to‘ldiradi; `delivery_amount`, `vat_amount`, `total_amount` hisoblanadi (`unit_price` — **kelish narxi**, QQS shundan).
+
+`contract_number` yuborilmasa o‘sha kunning keyingi raqami avtomatik band qilinadi. Ikkinchi qatordagidek ombordagi mahsulotga mos kelmaydigan tovar uchun `category` majburiy: backend mahsulotni `origin=import` bilan yaratadi va unga import (zakaz) yozuvini ochadi.
 
 **Boshqa korxona bajaruvchi sifatida:**
 
@@ -906,7 +954,9 @@ Ko‘rish — `InvoiceContractModal` (jadval + mazmun + «2. Tomonlarni yuridik 
 | `lines[].product_name` | Har qator — majburiy |
 | `lines[].identification_code` | Har qator — majburiy |
 | `lines[].quantity` | Kamida 1 |
-| `lines[].unit_price` | Faqat `prices_view` + `reverse_calculation=false` bo‘lsa majburiy |
+| `lines[].unit_price` | Faqat `prices_view` bo‘lsa majburiy — bu **kelish narxi**, QQS shundan hisoblanadi |
+| `lines[].selling_price` | Ixtiyoriy («Sotuv narxi» ustuni) |
+| `lines[].category` | Qator ombordagi mahsulotga bog‘lanmagan bo‘lsa majburiy (yangi mahsulot ochiladi) |
 | `lines` (umumiy) | Kamida bitta to‘liq qator (`product_name` + `quantity` + `identification_code`) |
 
 Xato kalitlari: `contract_number`, `client`, `executor_client`, `company`, `lines.0.product_name` va hokazo. Komponent: `EInvoiceFieldError`.
@@ -1541,14 +1591,20 @@ POST /api/v1/orders/zakaz/
 {
   "product": 5,
   "quantity": 20,
+  "unit_price": "100000.00",
+  "selling_price": "150000.00",
+  "vat_percent": "12",
   "supplier": "Guangzhou Medical Supply",
-  "contract_number": "13/1108",
   "contract_date": "2026-08-11",
   "expected_date": "2026-08-25",
   "comment": "Yetkazuvchi bilan kelishildi",
   "import_batch": "550e8400-e29b-41d4-a716-446655440000"
 }
 ```
+
+`prices_manage` roli uchun `unit_price` (kelish) va `selling_price` (ketish) **majburiy**; ikkalasi mahsulotning `purchase_price` / `selling_price` maydonlariga yoziladi. `contract_number` yuborilmasa backend o‘sha kunning keyingi raqamini band qiladi.
+
+**Javobda qo‘shimcha maydonlar:** `selling_price`, `delivery_price`, `vat_percent`, `vat_amount` (kelish summasidan hisoblangan QQS), `total_with_vat`, `total`. `product_name` — faqat mahsulot nomi (seriya raqamisiz).
 
 `import_batch` ixtiyoriy — berilmasa backend yangi UUID yaratadi. Mavjud import guruhiga bitta qator qo‘shishda shu UUID yuboriladi (tahrir modalidagi yangi qatorlar).
 
@@ -1570,15 +1626,23 @@ Bir nechta mahsulot uchun zakaz yaratadi. Har bir `items` qatori mavjud `product
   "paid_amount": "500000.00",
   "import_batch": "550e8400-e29b-41d4-a716-446655440000",
   "items": [
-    { "product": 12, "quantity": 5, "unit_price": "100000.00" },
+    {
+      "product": 12,
+      "quantity": 5,
+      "unit_price": "100000.00",
+      "selling_price": "140000.00"
+    },
     {
       "new_product": {
         "name": "AMD CHIP",
+        "category": 3,
         "serial_number": "1234",
         "unit": "piece"
       },
       "quantity": 10,
-      "unit_price": "50000.00"
+      "unit_price": "50000.00",
+      "selling_price": "70000.00",
+      "vat_percent": "12"
     }
   ]
 }
@@ -1744,45 +1808,41 @@ Ability kalitlari:
 
 | Element | Aniq UI matni |
 |---|---|
-| Bo‘lim eyebrow | **`MAHSULOTLAR`** |
-| Yordamchi matn | **`Ro‘yxatdagi «raqam» — mahsulot identifikatori (seriya), «Miqdor» esa import soni. Har qator alohida: ombordan yoki yangi mahsulot.`** |
+| Bo‘lim eyebrow | **`MAHSULOT QATORLARI`** |
+| Yordamchi matn | **`Tovar nomi ombordagi mahsulot bilan mos kelsa qator avtomatik bog‘lanadi; mos kelmasa yangi mahsulot ombor ro‘yxatiga qo‘shiladi. QQS kelish narxi asosida hisoblanadi.`** |
 | Yuklanish holati | **`Mahsulot qatorlari yuklanmoqda…`** — tahrirda `api.zakazBatch(id)` chaqirilganda; shu vaqt **`Saqlash` bloklangan** |
-| Qator qo‘shish | **`+ Qator qo‘shish`** (`secondary-button`, Plus ikon) — yangi importda ham, mavjud guruh tahririda ham |
-| Qator o‘chirish | **`Qatorni o‘chirish`** (`aria-label`, X ikon) — faqat 2+ qator bo‘lsa; **mavjud API qatorlari** (`zakazId` bor) o‘chirilmaydi |
-| Har qator — dropdown label | **`Manba`** |
-| Manba variant 1 | **`Ombordan tanlash`** (`source=existing` → API: `product`) |
-| Manba variant 2 | **`Yangi mahsulot`** (`source=new` → API: `new_product`) |
-| Mavjud qator | `zakazId` bor — **Manba** dropdown **disabled** (o‘zgartirilmaydi) |
+| Qator qo‘shish | Jadval oxiridagi **`+`** tugmasi |
+| Qator o‘chirish | **`Qatorni o‘chirish`** (savat ikon) — faqat 2+ qator bo‘lsa; **mavjud API qatorlari** (`zakazId` bor) o‘chirilmaydi |
+| Jadval ustidagi boshqaruv | **`Teskari hisob`** katagi + **`MXIK kodlari`** havolasi |
+| Ombordan tanlash | Tovar nomi yonidagi **quti** ikonkasi → `ProductPickerModal`; nom/seriya datalist orqali ham |
 
-**Manba = Ombordan tanlash** (`existing`):
+**Jadval ustunlari:**
 
 | Label | Maydon | Eslatma |
 |---|---|---|
-| Mahsulot | `<select>` | placeholder: **`Mahsulotni tanlang`**; variantlar: `productOptionLabel` |
-| Miqdor | `number` | min 1 |
-| Narx | `number` | faqat `prices_manage`; tanlanganda avtomatik `purchase_price` |
-
-**Manba = Yangi mahsulot** (`new`):
-
-| Label | Maydon | Eslatma |
-|---|---|---|
-| Tovar nomi | `input` | majburiy |
-| Mahsulot raqami | `input` | placeholder: **`Bo‘sh qoldirilsa avtomatik`** → backend `IMP-{timestamp}` |
+| Tovar nomi | `input` + datalist + `ProductPickerModal` (quti ikonkasi) | majburiy; ombordagi nom bilan mos kelsa qator avtomatik bog‘lanadi |
+| Kategoriya | `<select>` | yangi mahsulot qatorida **majburiy**; ombordan tanlansa avtomatik |
+| Seriya raqami | `input` + datalist | ixtiyoriy — **avtomatik yaratilmaydi** |
 | Shtrix kod | `input` | ixtiyoriy |
-| O‘lchov birligi | `<select>` | `productUnits` ro‘yxati (dona, kg, …) |
-| Miqdor | `number` | min 1 |
-| Narx | `number` | faqat `prices_manage` |
+| O‘lchov birligi | `<select>` | `productUnits` (dona, kg, …) |
+| Soni | `number` | min 1 |
+| Kelish narxi | `number` | `prices_manage`; majburiy; ombordan tanlansa `purchase_price` |
+| Ketish narxi | `number` | `prices_manage`; majburiy; ombordan tanlansa `selling_price` |
+| Yetkazish qiymati | read-only (teskari hisobda tahrirlanadi) | `soni × kelish narxi` |
 | QQS % | `<select>` | QQS siz / 0% / 6% / 12% / 15% |
-| Yetkazish | read-only | hisoblangan |
-| QQS miqdori | read-only | hisoblangan |
-| JAMI | read-only | hisoblangan |
-| Izoh satri | **`Yangi mahsulot import bilan birga ombor ro‘yxatiga qo‘shiladi.`** | |
+| QQS miqdori | read-only (teskari hisobda tahrirlanadi) | kelish qiymatidan |
+| Jami | read-only (teskari hisobda tahrirlanadi) | yetkazish + QQS |
+
+Jadval ustida **«Teskari hisob»** katagi va **MXIK kodlari** havolasi; pastda ustunlar bo‘yicha jami satri. Qator qo‘shish/o‘chirish — oxirgi ustundagi `+` / savat tugmalari.
 
 Frontend validatsiya (toast xato):
 
 - `{N}-qator: miqdor kamida 1 bo‘lishi kerak.`
 - `{N}-qator: tovar nomi kiritilishi shart.`
-- `{N}-qator: mahsulotni tanlang.`
+- `{N}-qator: yangi mahsulot uchun kategoriya tanlanishi shart.`
+- `{N}-qator: kelish narxi kiritilishi shart.`
+- `{N}-qator: ketish narxi kiritilishi shart.`
+- `Qisman to‘langan summa jami import summasidan ({jami}) oshmasligi kerak.`
 - `{N}-qator: narx kiritilishi shart.` (`prices_manage`)
 - **`Qisman to'lov uchun summa kiriting.`**
 - **`Qisman to'lov uchun avval barcha qatorlarga narx kiritilishi kerak.`** — guruh tahririda `partial` + barcha qator jami (`grandTotal`) 0 bo‘lsa
@@ -1845,15 +1905,16 @@ Operator (`prices_manage` yo‘q): payload dan `unit_price`, `currency`, `paymen
 
 **Frontend (`ZakazEditor`) — qisqa xulosa:**
 
-- Har qator **`Manba`** dropdown: **`Ombordan tanlash`** yoki **`Yangi mahsulot`** — bir importda ikkala tur **aralash** qatorlar bo‘lishi mumkin.
-- **`+ Qator qo‘shish`** — yangi import va mavjud guruh tahririda.
+- Manba dropdowni yo‘q: tovar nomi ombordagi mahsulot bilan mos kelsa qator o‘sha mahsulotga bog‘lanadi, mos kelmasa yangi mahsulot ochiladi — bir importda aralash bo‘lishi mumkin.
+- Qator qo‘shish/o‘chirish — jadval oxiridagi `+` / savat tugmalari.
 - Yaratish → har doim `POST /orders/zakaz/bulk/` (`items[]` + to‘lov maydonlari).
 - Tahrir (qalamcha) → `GET /orders/zakaz/{id}/batch/` orqali guruhdagi **barcha** mahsulot qatorlari; yuklanmaguncha saqlash bloklangan.
 - Tahrir saqlash → mavjud qatorlar `PATCH`, yangi qatorlar `POST` + `import_batch`.
 - Qisman to‘lov → qatorlar bo‘yicha taqsimlangan `paid_amount`; jami 0 bo‘lsa xato.
 - Status o‘zgarishi → barcha sibling qatorlarga; `received_qty` faqat ochilgan qator uchun.
 - Ombordan tanlanganda **Narx** avtomatik `purchase_price` (`prices_manage`).
-- `serial_number` bo‘sh bo‘lsa backend `IMP-{timestamp}` (`ensure_product_serial_number`).
+- `serial_number` bo‘sh bo‘lsa `null` saqlanadi — avtomatik raqam **yaratilmaydi**.
+- Yangi import shartnoma raqamini `GET /orders/next-contract-number/` dan oldindan ko‘rsatadi; qo‘lda o‘zgartirilmasa saqlashda yubormaydi va backend raqamni band qiladi.
 
 ### Status PATCH
 
@@ -2006,11 +2067,17 @@ Javob maydonlari:
 quantity_in_stock
 reserved_quantity
 available_quantity
+pending_import_quantity
 stock_status
 category_name
+origin
+origin_display
+unit_display
 ```
 
 Operator uchun `purchase_price`, `selling_price` qaytmasligi mumkin.
+
+`category` — **majburiy**; `serial_number` — ixtiyoriy (bo‘sh bo‘lsa `null`, avtomatik yaratilmaydi).
 
 ### Kirim
 

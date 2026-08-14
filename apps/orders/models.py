@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.conf import settings
 from django.db import models, transaction
 from django.db.models import (
@@ -14,15 +16,16 @@ from apps.orders.dates import current_year_end
 
 
 def build_contract_number(client=None, *, contract_number=None, contract_date=None):
-    """Shartnoma raqamini avtomatik yaratadi: {tartib}/{DDMM}."""
+    """Shartnoma raqamini avtomatik BAND QILADI: {tartib}/{DDMM}.
+
+    Tartib raqam har kun uchun alohida hisoblanadi va o'sha kundagi har bir
+    yangi hujjatda bittaga oshadi (1/1308, 2/1308, ...).
+    """
+    from apps.common.contracts import allocate_contract_number
+
     if contract_number:
         return contract_number.strip()
-    if client is None:
-        return ''
-    date_value = (contract_date or timezone.localdate())
-    date_part = date_value.strftime('%d%m')
-    order_count = Order.objects.filter(contract_date=date_value).count() + 1
-    return f'{order_count}/{date_part}'
+    return allocate_contract_number(contract_date)
 
 
 # ── Order (Mijoz buyurtmasi / bron — HUJJAT) ─────────────────────────────────
@@ -548,7 +551,15 @@ class Zakaz(TimeStampedModel):
     # Narx / summa — faqat MANUAL zakaz uchun (kassadan chiqim — Expense)
     unit_price         = DecimalField(max_digits=14, decimal_places=2,
                                       null=True, blank=True,
-                                      help_text='Birlik narxi (mustaqil zakaz uchun)')
+                                      help_text='Kelish (tan) narxi — birlik uchun')
+    selling_price      = DecimalField(max_digits=14, decimal_places=2,
+                                      null=True, blank=True,
+                                      help_text='Ketish (sotuv) narxi — birlik uchun')
+    delivery_price     = DecimalField(max_digits=14, decimal_places=2,
+                                      null=True, blank=True,
+                                      help_text='Yetkazish narxi (birlik uchun)')
+    vat_percent        = CharField(max_length=8, default='none',
+                                   help_text='QQS foizi — kelish narxi asosida hisoblanadi')
     currency           = CharField(max_length=3, choices=CURRENCY_CHOICES, default=UZS,
                                    help_text='Zakaz valyutasi (mustaqil zakaz)')
     payment_status     = CharField(max_length=10, choices=PAYMENT_STATUS_CHOICES,
@@ -617,6 +628,31 @@ class Zakaz(TimeStampedModel):
             return None
         return self.unit_price * self.quantity
 
+    @property
+    def vat_rate(self):
+        """QQS foizi son ko'rinishida (0 — QQS siz)."""
+        if self.vat_percent in (None, '', 'none'):
+            return Decimal('0')
+        try:
+            return Decimal(self.vat_percent)
+        except Exception:
+            return Decimal('0')
+
+    @property
+    def vat_amount(self):
+        """QQS summasi — KELISH narxi (unit_price × quantity) asosida."""
+        if self.total is None:
+            return None
+        return (Decimal(self.total) * self.vat_rate / Decimal('100')
+                ).quantize(Decimal('0.01'))
+
+    @property
+    def total_with_vat(self):
+        """Kelish summasi + QQS."""
+        if self.total is None:
+            return None
+        return Decimal(self.total) + (self.vat_amount or Decimal('0'))
+
     @transaction.atomic
     def receive(self, user=None):
         """
@@ -641,6 +677,13 @@ class Zakaz(TimeStampedModel):
         )
         stock.quantity = F('quantity') + qty
         stock.save(update_fields=['quantity'])
+
+        # Tovar omborga kirdi — endi u "import" emas, oddiy ombor mahsuloti
+        # (buyurtmada tanlash uchun ham ochiladi)
+        from apps.warehouse.models import ProductOrigin
+        if self.product.origin == ProductOrigin.IMPORT:
+            self.product.origin = ProductOrigin.WAREHOUSE
+            self.product.save(update_fields=['origin'])
 
         # Mustaqil import uchun chiqim sync_zakaz_expense orqali yoziladi —
         # qabul paytida takrorlanmasin.

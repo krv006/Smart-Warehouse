@@ -3952,6 +3952,31 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   font-size: 13px;
 }
 
+/* Import editori — «Teskari hisob» katagi form-grid o'lchamlarini olmasin */
+.form-grid .e-invoice-reverse-check {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  width: auto;
+  min-height: 0;
+  white-space: nowrap;
+}
+.form-grid .e-invoice-reverse-check input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  min-height: 16px;
+  padding: 0;
+  flex: none;
+  accent-color: var(--primary);
+}
+.import-lines .e-invoice-lines-toolbar-end {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
 .mazmun-section textarea {
   width: 100%;
   min-height: 180px;

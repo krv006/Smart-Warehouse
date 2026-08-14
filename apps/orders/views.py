@@ -179,11 +179,9 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
         date_value = parse_date(request.query_params.get('contract_date') or '')
         if date_value is None:
             date_value = timezone.localdate()
+        from apps.common.contracts import peek_contract_number
         return Response({
-            'contract_number': build_contract_number(
-                client=True,
-                contract_date=date_value,
-            ),
+            'contract_number': peek_contract_number(date_value),
             'contract_date': date_value,
         })
 

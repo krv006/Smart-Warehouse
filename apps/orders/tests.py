@@ -6,7 +6,7 @@ from rest_framework.test import APIClient
 from apps.cash.models import Payment
 from apps.orders.models import Order, OrderItem, Zakaz
 from apps.users.models import User
-from apps.warehouse.models import Product, Stock
+from apps.warehouse.models import Category, Product, Stock
 
 
 class OrderActionPermissionTests(TestCase):
@@ -124,14 +124,14 @@ class ManualZakazTests(TestCase):
 
     def test_manual_zakaz_total_auto(self):
         res = self._create(self.manager, {'product': self.product.pk, 'quantity': 10,
-                            'unit_price': '1000000'})
+                            'unit_price': '1000000', 'selling_price': '1000000'})
         self.assertEqual(res.status_code, 201, res.data)
         self.assertEqual(res.data['zakaz_type'], 'manual')
         self.assertEqual(Decimal(res.data['total']), Decimal('10000000'))
 
     def test_total_recomputes_when_quantity_changes(self):
         res = self._create(self.manager, {'product': self.product.pk, 'quantity': 10,
-                            'unit_price': '1000000'})
+                            'unit_price': '1000000', 'selling_price': '1000000'})
         zakaz_id = res.data['id']
         patch = self.api.patch(f'{self.ZAKAZ_URL}{zakaz_id}/',
                                {'quantity': 20}, format='json')
@@ -218,8 +218,8 @@ class OrderEditKassaSyncTests(TestCase):
         res = self.api.post('/api/v1/orders/', {
             'contract_number': '1/1108', 'prepaid_amount': '5000000',
             'items': [
-                {'product': self.p1.pk, 'quantity': 10, 'unit_price': '3500000'},
-                {'product': self.p2.pk, 'quantity': 5,  'unit_price': '5000000'},
+                {'product': self.p1.pk, 'quantity': 10, 'unit_price': '3500000', 'selling_price': '3500000'},
+                {'product': self.p2.pk, 'quantity': 5,  'unit_price': '5000000', 'selling_price': '5000000'},
             ],
         }, format='json')
         self.assertEqual(res.status_code, 201, res.data)
@@ -247,7 +247,7 @@ class OrderEditKassaSyncTests(TestCase):
         Stock.objects.create(product=p3, quantity=100, warehouse_location='A')
         r = self.api.patch(f'/api/v1/orders/{self.oid}/', {
             'asos': 'Yangi mahsulot qo\'shildi',
-            'items': [{'product': p3.pk, 'quantity': 1, 'unit_price': '5000000'}],
+            'items': [{'product': p3.pk, 'quantity': 1, 'unit_price': '5000000', 'selling_price': '5000000'}],
         }, format='json')
         self.assertEqual(r.status_code, 200, r.data)
         # 60M + 5M = 65M
@@ -321,6 +321,7 @@ class ZakazBulkCreateTests(TestCase):
         self.product_b = Product.objects.create(
             name='Switch B', serial_number='SW-B',
             purchase_price=Decimal('50000'))
+        self.category = Category.objects.create(name='Kategoriya')
 
     def _bulk(self, user, body):
         self.api.force_authenticate(user)
@@ -333,9 +334,10 @@ class ZakazBulkCreateTests(TestCase):
             'contract_date': '2026-08-13',
             'items': [
                 {'product': self.product_a.pk, 'quantity': 20,
-                 'unit_price': '100000.00'},
-                {'new_product': {'name': 'New Item', 'unit': 'piece'},
-                 'quantity': 4, 'unit_price': '50000.00'},
+                 'unit_price': '100000.00', 'selling_price': '100000.00'},
+                {'new_product': {'name': 'New Item', 'unit': 'piece',
+                                  'category': self.category.pk},
+                 'quantity': 4, 'unit_price': '50000.00', 'selling_price': '50000.00'},
             ],
         }
         res = self._bulk(self.manager, body)
@@ -355,9 +357,9 @@ class ZakazBulkCreateTests(TestCase):
             'paid_amount': '500000.00',
             'items': [
                 {'product': self.product_a.pk, 'quantity': 10,
-                 'unit_price': '100000.00'},
+                 'unit_price': '100000.00', 'selling_price': '100000.00'},
                 {'product': self.product_b.pk, 'quantity': 5,
-                 'unit_price': '50000.00'},
+                 'unit_price': '50000.00', 'selling_price': '50000.00'},
             ],
         }
         res = self._bulk(self.manager, body)
@@ -373,11 +375,11 @@ class ZakazBulkCreateTests(TestCase):
             'paid_amount': '100.00',
             'items': [
                 {'product': self.product_a.pk, 'quantity': 1,
-                 'unit_price': '100.00'},
+                 'unit_price': '100.00', 'selling_price': '100.00'},
                 {'product': self.product_b.pk, 'quantity': 1,
-                 'unit_price': '100.00'},
+                 'unit_price': '100.00', 'selling_price': '100.00'},
                 {'product': self.product_a.pk, 'quantity': 1,
-                 'unit_price': '100.00'},
+                 'unit_price': '100.00', 'selling_price': '100.00'},
             ],
         }
         res = self._bulk(self.manager, body)
@@ -392,7 +394,7 @@ class ZakazBulkCreateTests(TestCase):
             'supplier': 'Append test',
             'items': [
                 {'product': self.product_a.pk, 'quantity': 2,
-                 'unit_price': '100000.00'},
+                 'unit_price': '100000.00', 'selling_price': '100000.00'},
             ],
         }
         res = self._bulk(self.manager, body)
@@ -406,7 +408,7 @@ class ZakazBulkCreateTests(TestCase):
         res = self.api.post('/api/v1/orders/zakaz/', {
             'product': self.product_a.pk,
             'quantity': 3,
-            'unit_price': '100000.00',
+            'unit_price': '100000.00', 'selling_price': '100000.00',
             'import_batch': str(batch_id),
         }, format='json')
         self.assertEqual(res.status_code, 201, res.data)
@@ -419,7 +421,7 @@ class ZakazBulkCreateTests(TestCase):
             'paid_amount': '1000.00',
             'items': [
                 {'product': self.product_a.pk, 'quantity': 10,
-                 'unit_price': '0.00'},
+                 'unit_price': '0.00', 'selling_price': '0.00'},
             ],
         }
         res = self._bulk(self.manager, body)
@@ -432,7 +434,7 @@ class ZakazBulkCreateTests(TestCase):
             'paid_amount': '999999999.00',
             'items': [
                 {'product': self.product_a.pk, 'quantity': 2,
-                 'unit_price': '100000.00'},
+                 'unit_price': '100000.00', 'selling_price': '100000.00'},
             ],
         }
         res = self._bulk(self.manager, body)
@@ -459,7 +461,7 @@ class ZakazBulkCreateTests(TestCase):
             'paid_amount': '200000.00',
             'items': [
                 {'product': self.product_a.pk, 'quantity': 5,
-                 'unit_price': '100000.00'},
+                 'unit_price': '100000.00', 'selling_price': '100000.00'},
             ],
         }
         res = self._bulk(self.accountant, body)

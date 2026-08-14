@@ -20,7 +20,7 @@ from apps.orders.models import (Order, OrderItem, OrderHistory,
                                 Zakaz, ZakazHistory,
                                 ProductContract, register_contract,
                                 allocate_pending_orders, build_contract_number)
-from apps.warehouse.models import Product
+from apps.warehouse.models import Category, Product
 
 CONTRACT_NUMBER_RE = re.compile(r'^\d+/\d{4}$')
 
@@ -45,6 +45,25 @@ def _can_manage_payment(user):
 
 def _can_view_prices(user):
     return _can_manage_prices(user) or bool(getattr(user, 'is_accountant', False))
+
+
+def _sync_product_import_prices(product, data):
+    """Import qatoridagi kelish/ketish narxini ombordagi mahsulotga yozadi."""
+    updates = {}
+    if data.get('unit_price') not in (None, ''):
+        updates['purchase_price'] = data['unit_price']
+    if data.get('selling_price') not in (None, ''):
+        updates['selling_price'] = data['selling_price']
+    if data.get('delivery_price') not in (None, ''):
+        updates['delivery_price'] = data['delivery_price']
+    if data.get('vat_percent'):
+        updates['vat_percent'] = data['vat_percent']
+    if not updates:
+        return product
+    for field, value in updates.items():
+        setattr(product, field, value)
+    product.save(update_fields=list(updates))
+    return product
 
 
 def _strip_zakaz_payment_fields(attrs):
@@ -252,10 +271,8 @@ class OrderSerializer(ModelSerializer):
             raise ValidationError({
                 'contract_number': 'Shartnoma raqami faqat "{raqam}/{DDMM}" formatida bo\'lishi kerak. Masalan: 12/1108.'
             })
-        if self.instance is None:
-            client = attrs.get('client')
-            if not contract_number_value:
-                attrs['contract_number'] = build_contract_number(client=client, contract_date=attrs.get('contract_date'))
+        # Bo'sh bo'lsa raqam create() ichida band qilinadi — validatsiya
+        # muvaffaqiyatsiz tugasa raqam behuda sarflanmasin.
         # Tahrirlashda asos MAJBURIY — auditda "nima uchun" aniq bo'lishi kerak
         if self.instance is not None:
             if not attrs.get('asos'):
@@ -602,12 +619,16 @@ class ZakazHistorySerializer(ModelSerializer):
 class ZakazInlineProductSerializer(Serializer):
     """Importda qo'lda kiritilgan mahsulot — zakaz yaratishda omborga qo'shiladi."""
     name = CharField(max_length=255)
+    # Kategoriya — import qatoridan yaratiladigan mahsulot uchun MAJBURIY
+    category = PrimaryKeyRelatedField(queryset=Category.objects.all())
     serial_number = CharField(required=False, allow_blank=True, default='')
     barcode = CharField(required=False, allow_blank=True, allow_null=True)
     unit = CharField(required=False, default='piece')
     vat_percent = CharField(required=False, allow_blank=True, default='none')
     purchase_price = DecimalField(max_digits=14, decimal_places=2,
                                   required=False, allow_null=True)
+    selling_price = DecimalField(max_digits=14, decimal_places=2,
+                                 required=False, allow_null=True)
     delivery_price = DecimalField(max_digits=14, decimal_places=2,
                                   required=False, allow_null=True)
 
@@ -620,6 +641,8 @@ class ZakazSerializer(ModelSerializer):
     type_display        = SerializerMethodField()
     payment_status_display = SerializerMethodField()
     total               = ReadOnlyField()   # unit_price × quantity (avtomatik)
+    vat_amount          = ReadOnlyField()   # QQS — kelish narxi asosida
+    total_with_vat      = ReadOnlyField()
     order_contract      = SerializerMethodField()
     warehouse_location  = CharField(required=False, allow_null=True,
                                     allow_blank=True, max_length=255)
@@ -631,7 +654,9 @@ class ZakazSerializer(ModelSerializer):
             'id', 'zakaz_type', 'type_display', 'order', 'order_contract',
             'product', 'product_name', 'new_product',
             'quantity', 'received_qty',
-            'unit_price', 'currency', 'total',
+            'unit_price', 'selling_price', 'delivery_price',
+            'vat_percent', 'vat_amount', 'total_with_vat',
+            'currency', 'total',
             'payment_status', 'payment_status_display', 'paid_amount',
             'supplier', 'status', 'status_display',
             'contract_number', 'contract_date', 'confirmed_at',
@@ -649,7 +674,8 @@ class ZakazSerializer(ModelSerializer):
         extra_kwargs = {'product': {'required': False, 'allow_null': True}}
 
     def get_product_name(self, obj):
-        return str(obj.product)
+        # Import ro'yxatida faqat mahsulot nomi — seriya raqamisiz
+        return obj.product.name if obj.product else None
 
     def get_created_by_name(self, obj):
         return str(obj.created_by) if obj.created_by else None
@@ -703,15 +729,22 @@ class ZakazSerializer(ModelSerializer):
                 if not _can_manage_prices(user):
                     new_product = dict(new_product)
                     new_product.pop('purchase_price', None)
+                    new_product.pop('selling_price', None)
                     new_product.pop('delivery_price', None)
                 attrs['_new_product_data'] = new_product
             if _can_manage_prices(user):
                 if attrs.get('unit_price') in (None, ''):
                     raise ValidationError({
-                        'unit_price': 'Mustaqil import uchun narx (unit_price) '
-                                      'kiritilishi shart.'})
+                        'unit_price': 'Mustaqil import uchun kelish narxi '
+                                      '(unit_price) kiritilishi shart.'})
+                if attrs.get('selling_price') in (None, ''):
+                    raise ValidationError({
+                        'selling_price': 'Mustaqil import uchun ketish narxi '
+                                         '(selling_price) kiritilishi shart.'})
             else:
                 attrs.pop('unit_price', None)
+                attrs.pop('selling_price', None)
+                attrs.pop('delivery_price', None)
                 if not _can_manage_payment(user):
                     _strip_zakaz_payment_fields(attrs)
         else:
@@ -753,7 +786,11 @@ class ZakazSerializer(ModelSerializer):
             'paid_amount',
             getattr(self.instance, 'paid_amount', None) if self.instance else None,
         )
-        if payment_status == Zakaz.PARTIAL:
+        # To'lov maydonlari tegilmagan tahrirda (masalan faqat izoh) eski
+        # yozuvni bloklamaymiz — tekshiruv faqat to'lov yuborilganda
+        payment_touched = ('payment_status' in attrs or 'paid_amount' in attrs
+                           or self.instance is None)
+        if payment_status == Zakaz.PARTIAL and payment_touched:
             line_total = None
             if self.instance:
                 qty = attrs.get('quantity', self.instance.quantity)
@@ -763,15 +800,10 @@ class ZakazSerializer(ModelSerializer):
             elif attrs.get('unit_price') is not None and attrs.get('quantity'):
                 line_total = (Decimal(str(attrs['unit_price']))
                               * Decimal(str(attrs['quantity'])))
+            # Narx noma'lum bo'lsa qisman to'lovni tekshirib bo'lmaydi —
+            # summa jami importdan oshib ketishi mumkin, shuning uchun taqiq
             _validate_partial_paid_amount(
-                payment_status, paid_amount, line_total,
-                require_total=not self.instance)
-            if line_total is not None and line_total > 0:
-                if Decimal(str(paid_amount)) > line_total:
-                    raise ValidationError({
-                        'paid_amount': (
-                            f'To\'langan summa jami import summasidan ({line_total}) '
-                            f'oshmasligi kerak.')})
+                payment_status, paid_amount, line_total, require_total=True)
         elif payment_status == Zakaz.UNPAID:
             attrs['paid_amount'] = Decimal('0')
         elif payment_status == Zakaz.PAID:
@@ -789,10 +821,27 @@ class ZakazSerializer(ModelSerializer):
         return attrs
 
     def create(self, validated_data):
+        from apps.common.contracts import allocate_contract_number
+
         # Status har doim 'new' dan boshlanadi; API orqali — MUSTAQIL zakaz
         new_product_data = validated_data.pop('_new_product_data', None)
         if new_product_data:
+            new_product_data = dict(new_product_data)
+            new_product_data.setdefault('purchase_price',
+                                        validated_data.get('unit_price'))
+            new_product_data.setdefault('selling_price',
+                                        validated_data.get('selling_price'))
+            new_product_data.setdefault('delivery_price',
+                                        validated_data.get('delivery_price'))
+            if validated_data.get('vat_percent'):
+                new_product_data.setdefault('vat_percent',
+                                            validated_data['vat_percent'])
             validated_data['product'] = self._create_inline_product(new_product_data)
+        elif validated_data.get('product'):
+            _sync_product_import_prices(validated_data['product'], validated_data)
+        if not (validated_data.get('contract_number') or '').strip():
+            validated_data['contract_number'] = allocate_contract_number(
+                validated_data.get('contract_date'))
         if not validated_data.get('import_batch'):
             validated_data['import_batch'] = uuid.uuid4()
         validated_data['status']     = Zakaz.NEW
@@ -973,6 +1022,11 @@ class ZakazItemSerializer(Serializer):
     quantity      = IntegerField(min_value=1)
     unit_price    = DecimalField(max_digits=14, decimal_places=2,
                                  min_value=0, required=False, allow_null=True)
+    selling_price = DecimalField(max_digits=14, decimal_places=2,
+                                 min_value=0, required=False, allow_null=True)
+    delivery_price = DecimalField(max_digits=14, decimal_places=2,
+                                  min_value=0, required=False, allow_null=True)
+    vat_percent   = CharField(required=False, allow_blank=True, allow_null=True)
     currency      = CharField(required=False, allow_blank=True, allow_null=True)
     supplier      = CharField(required=False, allow_blank=True, allow_null=True)
     expected_date = DateField(required=False, allow_null=True)
@@ -991,13 +1045,20 @@ class ZakazItemSerializer(Serializer):
         if _can_manage_prices(user):
             if attrs.get('unit_price') in (None, ''):
                 raise ValidationError({
-                    'unit_price': 'Import uchun narx (unit_price) kiritilishi shart.'})
+                    'unit_price': 'Import uchun kelish narxi (unit_price) '
+                                  'kiritilishi shart.'})
+            if attrs.get('selling_price') in (None, ''):
+                raise ValidationError({
+                    'selling_price': 'Import uchun ketish narxi (selling_price) '
+                                     'kiritilishi shart.'})
         else:
             attrs.pop('unit_price', None)
+            attrs.pop('selling_price', None)
+            attrs.pop('delivery_price', None)
         if new_product and not _can_manage_prices(user):
             attrs['new_product'] = {
                 k: v for k, v in new_product.items()
-                if k not in ('purchase_price', 'delivery_price')
+                if k not in ('purchase_price', 'selling_price', 'delivery_price')
             }
         return attrs
 
@@ -1079,12 +1140,16 @@ class ZakazBulkCreateSerializer(Serializer):
         return totals
 
     def create(self, validated_data):
+        from apps.common.contracts import allocate_contract_number
         from apps.warehouse.product_utils import create_import_product
 
         common_supplier = validated_data.get('supplier')
         common_expected = validated_data.get('expected_date')
-        contract_number = validated_data.get('contract_number')
         contract_date   = validated_data.get('contract_date')
+        contract_number = (validated_data.get('contract_number') or '').strip()
+        if not contract_number:
+            # Har kun uchun alohida o'suvchi tartib raqam: 1/1308, 2/1308, ...
+            contract_number = allocate_contract_number(contract_date)
         currency        = validated_data.get('currency') or Zakaz.UZS
         payment_status  = validated_data.get('payment_status') or Zakaz.UNPAID
         paid_amount     = validated_data.get('paid_amount')
@@ -1103,7 +1168,15 @@ class ZakazBulkCreateSerializer(Serializer):
         for idx, item in enumerate(items):
             product = item.get('product')
             if not product:
-                product = create_import_product(item['new_product'])
+                new_product_data = dict(item['new_product'])
+                new_product_data.setdefault('purchase_price', item.get('unit_price'))
+                new_product_data.setdefault('selling_price', item.get('selling_price'))
+                new_product_data.setdefault('delivery_price', item.get('delivery_price'))
+                if item.get('vat_percent'):
+                    new_product_data.setdefault('vat_percent', item['vat_percent'])
+                product = create_import_product(new_product_data)
+            else:
+                _sync_product_import_prices(product, item)
             line_paid = Decimal('0')
             if line_paid_splits is not None:
                 line_paid = line_paid_splits[idx]
@@ -1114,6 +1187,10 @@ class ZakazBulkCreateSerializer(Serializer):
                 zakaz_type=Zakaz.MANUAL,
                 quantity=item['quantity'],
                 unit_price=item.get('unit_price'),
+                selling_price=item.get('selling_price'),
+                delivery_price=item.get('delivery_price'),
+                vat_percent=(item.get('vat_percent')
+                             or product.vat_percent or 'none'),
                 currency=item.get('currency') or currency,
                 payment_status=payment_status,
                 paid_amount=line_paid,
