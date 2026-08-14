@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import {
-  Warehouse, Bell, Buildings, CaretDown, ChartLineUp,
+  Warehouse, ArrowLeft, Bell, Buildings, CaretDown, ChartLineUp,
   ClipboardText, ClockCounterClockwise, CurrencyCircleDollar, DownloadSimple, Eye, FileText, Funnel, House, MagnifyingGlass,
   Package, PencilSimple, Plus, SignOut, SpinnerGap, Trash, TrendDown, TrendUp, Truck, UserGear, Users, Wallet, WarningCircle, X, XCircle, DotsThree, CaretLeft, CaretRight, CheckCircle,
 } from '@phosphor-icons/react'
@@ -19,7 +19,7 @@ import FieldError from './components/FieldError'
 import EmptyState from './components/EmptyState'
 import StatusChangeModal, { InlineStatusSelect } from './components/StatusChangeModal'
 import { buildListQueryParams, emptyStateConfig, exportRowsCsv, hasActiveListFilters } from './listFilters'
-import { clientDetailPath, crumbFromPath, invoiceDetailPath, invoiceEditPath, invoiceNewPath, parseAppPath, pathForPage } from './routes'
+import { clientDetailPath, crumbFromPath, importEditPath, importNewPath, invoiceDetailPath, invoiceEditPath, invoiceNewPath, parseAppPath, pathForPage } from './routes'
 import { clientOptionLabel, clientSearchText, fetchClient, searchClients } from './lib/clients'
 import { validateClientFields, validateCompanyProfile } from './lib/uzValidators'
 
@@ -1529,7 +1529,20 @@ function App() {
             <KassaPage notify={notify} session={session} reloadKey={resourceReloadKey} onDataChange={() => loadDashboard(true)} />
           </>
         )}
-        {routeInfo.kind !== 'client-detail' && active !== 'Bosh sahifa' && active !== 'Hisobotlar' && active !== 'Buyurtmalar' && active !== 'Kassa' && isAccessiblePage(session, active) && resources[active] && (
+        {(routeInfo.kind === 'import-new' || routeInfo.kind === 'import-edit') && active === 'Import' && can(session, 'procurement_view') && (
+          <ImportEditorPage
+            zakazId={routeInfo.zakazId || null}
+            session={session}
+            notify={notify}
+            onClose={() => routerNavigate(pathForPage('Import'))}
+            onDone={() => {
+              setResourceReloadKey((value) => value + 1)
+              loadDashboard(true)
+              routerNavigate(pathForPage('Import'))
+            }}
+          />
+        )}
+        {routeInfo.kind === 'page' && routeInfo.kind !== 'client-detail' && active !== 'Bosh sahifa' && active !== 'Hisobotlar' && active !== 'Buyurtmalar' && active !== 'Kassa' && isAccessiblePage(session, active) && resources[active] && (
           <>
             {activeGroup && (
               <SectionTabs groupKey={activeGroup} active={active} onSelect={(page) => routerNavigate(pathForPage(page))} session={session} />
@@ -2999,6 +3012,11 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
 
   const handleEdit = async (row) => {
     if (!resources[title]) return
+    // Import — ko'p ma'lumotli forma, alohida sahifada ochiladi
+    if (title === 'Import') {
+      navigateToPath(importEditPath(row.id))
+      return
+    }
     setOpening(true)
     try {
       const detail = await api.retrieve(resources[title].path, row.id)
@@ -3161,7 +3179,14 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
           {title === 'Bildirishnomalar' && (
             <button className="secondary-button" onClick={handleMarkAllRead}>Hammasini o‘qilgan</button>
           )}
-          {canCreate && <button className="primary-button" onClick={() => setEditing({})}><Plus size={20} />Yangi qo‘shish</button>}
+          {canCreate && (
+            <button
+              className="primary-button"
+              onClick={() => (title === 'Import' ? navigateToPath(importNewPath()) : setEditing({}))}
+            >
+              <Plus size={20} />Yangi qo‘shish
+            </button>
+          )}
         </div>
       </div>
       <section className="data-panel">
@@ -3204,7 +3229,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
               emptyCta={showEmptyCta && emptyCfg.cta ? {
                 label: emptyCfg.label,
                 ctaLabel: emptyCfg.cta,
-                onCta: () => setEditing({}),
+                onCta: () => (title === 'Import' ? navigateToPath(importNewPath()) : setEditing({})),
               } : null}
               selectable={useGrid}
               selectedIds={selectedIds}
@@ -3301,9 +3326,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
           </div>
         )}
       </section>
-      {editing && (title === 'Import'
-          ? <ZakazEditor item={editing.id ? editing : null} close={() => setEditing(null)} done={() => { setEditing(null); refreshAfterChange() }} notify={notify} session={session} />
-        : title === 'Sotuvlar'
+      {editing && (title === 'Sotuvlar'
           ? <SaleEditor item={editing.id ? editing : null} close={() => setEditing(null)} done={() => { setEditing(null); refreshAfterChange() }} notify={notify} session={session} />
         : title === 'Foydalanuvchilar'
             ? <UserEditor item={editing.id ? editing : null} close={() => setEditing(null)} done={() => { setEditing(null); refreshAfterChange() }} notify={notify} />
@@ -3932,7 +3955,7 @@ function splitPartialPayment(totalPaid, lineTotals) {
   return splits
 }
 
-function ZakazEditor({ close, done, notify, item = null, session }) {
+function ZakazEditor({ close, done, notify, item = null, session, asPage = false }) {
   const showPrices = can(session, 'prices_manage')
   const showPayment = showPrices || can(session, 'cash_manage')
   const isManagement = can(session, 'order_status_manage')
@@ -4366,10 +4389,18 @@ function ZakazEditor({ close, done, notify, item = null, session }) {
     }
   }
 
-  return (
-    <div className="modal-backdrop" role="presentation">
-      <form className="editor import-editor" onSubmit={submit}>
-        <div className="editor-head"><div><p className="eyebrow">{item?.id ? 'IMPORT TAHRIRI' : 'YANGI IMPORT'}</p><h3>Yetkazuvchidan import</h3></div><button type="button" className="icon-button" onClick={close} aria-label="Yopish"><X size={20} /></button></div>
+  const editorBody = (
+    <>
+      <form className={`editor import-editor${asPage ? ' editor--page' : ''}`} onSubmit={submit}>
+        <div className="editor-head">
+          <div>
+            <p className="eyebrow">{item?.id ? 'IMPORT TAHRIRI' : 'YANGI IMPORT'}</p>
+            <h3>Yetkazuvchidan import</h3>
+          </div>
+          <button type="button" className="icon-button" onClick={close} aria-label={asPage ? 'Ro‘yxatga qaytish' : 'Yopish'}>
+            {asPage ? <ArrowLeft size={20} /> : <X size={20} />}
+          </button>
+        </div>
         <div className="form-grid">
           {canMultiLine && (isNew || importRows.some((row) => row.zakazId)) ? (
             <div className="full-width import-lines e-invoice-lines">
@@ -4605,7 +4636,46 @@ function ZakazEditor({ close, done, notify, item = null, session }) {
           }}
         />
       )}
-    </div>
+    </>
+  )
+
+  // Ko'p ma'lumotli import formasi — alohida sahifada ochiladi; modal
+  // rejimi eski chaqiruvlar (backorder zakaz) uchun saqlanadi
+  if (asPage) return <div className="page import-editor-page">{editorBody}</div>
+  return <div className="modal-backdrop" role="presentation">{editorBody}</div>
+}
+
+function ImportEditorPage({ zakazId, notify, session, onClose, onDone }) {
+  const [item, setItem] = useState(null)
+  const [loading, setLoading] = useState(Boolean(zakazId))
+
+  useEffect(() => {
+    if (!zakazId) { setItem(null); setLoading(false); return undefined }
+    let cancelled = false
+    setLoading(true)
+    api.retrieve('/orders/zakaz/', zakazId)
+      .then((detail) => { if (!cancelled) setItem(detail) })
+      .catch((err) => { if (!cancelled) { notify(err.message); onClose() } })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [zakazId, notify, onClose])
+
+  if (loading) {
+    return (
+      <div className="page import-editor-page">
+        <div className="buyurtmalar-loading"><SpinnerGap size={28} className="spin" /></div>
+      </div>
+    )
+  }
+  return (
+    <ZakazEditor
+      asPage
+      item={item}
+      session={session}
+      notify={notify}
+      close={onClose}
+      done={onDone}
+    />
   )
 }
 

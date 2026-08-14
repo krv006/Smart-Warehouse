@@ -3952,6 +3952,24 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   font-size: 13px;
 }
 
+/* Import — alohida sahifada ochiladigan forma (modal emas) */
+.import-editor-page {
+  display: block;
+}
+.editor--page {
+  width: 100%;
+  max-width: none;
+  max-height: none;
+  overflow: visible;
+  box-shadow: none;
+}
+.editor--page .editor-actions {
+  position: sticky;
+  bottom: 0;
+  padding-top: 12px;
+  background: var(--surface);
+}
+
 /* Import editori — «Teskari hisob» katagi form-grid o'lchamlarini olmasin */
 .form-grid .e-invoice-reverse-check {
   display: flex;

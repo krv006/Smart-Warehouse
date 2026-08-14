@@ -40,6 +40,20 @@ export function parseAppPath(pathname) {
     }
   }
 
+  if (clean === '/import/yangi') {
+    return { kind: 'import-new', page: 'Import', path: clean }
+  }
+
+  const importEditMatch = clean.match(/^\/import\/(\d+)\/tahrir$/)
+  if (importEditMatch) {
+    return {
+      kind: 'import-edit',
+      page: 'Import',
+      zakazId: Number(importEditMatch[1]),
+      path: clean,
+    }
+  }
+
   const invoiceNewMatch = clean === '/buyurtmalar/yangi'
   if (invoiceNewMatch) {
     return { kind: 'invoice-new', page: 'Buyurtmalar', path: clean }
@@ -93,6 +107,14 @@ export function invoiceEditPath(invoiceId) {
   return `/buyurtmalar/${invoiceId}/tahrir`
 }
 
+export function importNewPath() {
+  return '/import/yangi'
+}
+
+export function importEditPath(zakazId) {
+  return `/import/${zakazId}/tahrir`
+}
+
 /** @deprecated use invoiceDetailPath */
 export function orderDetailPath(id) {
   return invoiceDetailPath(id)
@@ -111,6 +133,12 @@ export function crumbFromPath(pathname) {
   }
   if (parsed.kind === 'invoice-edit') {
     return `Buyurtmalar / Tahrir / ${parsed.invoiceId.slice(0, 8)}…`
+  }
+  if (parsed.kind === 'import-new') {
+    return 'Import / Yangi'
+  }
+  if (parsed.kind === 'import-edit') {
+    return `Import / Tahrir / #${parsed.zakazId}`
   }
   if (parsed.page === 'Ombor' || parsed.page === 'Kategoriyalar' || parsed.page === 'Qoldiqlar') {
     if (parsed.page === 'Ombor') return 'Ombor / Mahsulotlar'
