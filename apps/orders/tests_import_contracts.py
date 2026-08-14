@@ -482,3 +482,16 @@ class DuplicateSerialTests(TestCase):
         }, format='json')
         self.assertEqual(res.status_code, 201, res.data)
         self.assertEqual(res.data['zakazlar'][0]['product_name'], 'Faqat yangi tovar')
+
+    def test_bulk_rejects_repeated_serial_inside_one_request(self):
+        """Bitta so'rovdagi ikki qatorda bir xil seriya — 400, 500 emas."""
+        item = lambda name: {
+            'new_product': {'name': name, 'serial_number': 'SN-TAKROR',
+                            'category': self.category.pk},
+            'quantity': 1, 'unit_price': '1000.00', 'selling_price': '2000.00',
+        }
+        res = self.api.post(self.BULK_URL,
+                            {'items': [item('Birinchi'), item('Ikkinchi')]},
+                            format='json')
+        self.assertEqual(res.status_code, 400, res.data)
+        self.assertFalse(Product.objects.filter(serial_number='SN-TAKROR').exists())
