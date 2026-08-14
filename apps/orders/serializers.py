@@ -619,6 +619,7 @@ class ZakazHistorySerializer(ModelSerializer):
 class ZakazInlineProductSerializer(Serializer):
     """Importda qo'lda kiritilgan mahsulot — zakaz yaratishda omborga qo'shiladi."""
     name = CharField(max_length=255)
+
     # Kategoriya — import qatoridan yaratiladigan mahsulot uchun MAJBURIY
     category = PrimaryKeyRelatedField(queryset=Category.objects.all())
     serial_number = CharField(required=False, allow_blank=True, default='')
@@ -631,6 +632,17 @@ class ZakazInlineProductSerializer(Serializer):
                                  required=False, allow_null=True)
     delivery_price = DecimalField(max_digits=14, decimal_places=2,
                                   required=False, allow_null=True)
+
+    def validate_serial_number(self, value):
+        """Seriya raqami noyob — band bo'lsa 500 emas, tushunarli 400 qaytadi."""
+        from apps.warehouse.product_utils import (normalize_product_serial,
+                                                  serial_number_is_taken)
+        serial = normalize_product_serial(value)
+        if serial and serial_number_is_taken(serial):
+            raise ValidationError(
+                f'"{serial}" seriya raqami omborda allaqachon mavjud. '
+                f'Ombordagi mahsulotni tanlang yoki boshqa raqam kiriting.')
+        return value
 
 
 class ZakazSerializer(ModelSerializer):

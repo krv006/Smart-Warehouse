@@ -5,7 +5,8 @@ from rest_framework.serializers import (ModelSerializer, ValidationError,
                                         SerializerMethodField)
 
 from apps.warehouse.models import Category, Product, Stock
-from apps.warehouse.product_utils import normalize_product_serial
+from apps.warehouse.product_utils import (normalize_product_serial,
+                                          serial_number_is_taken)
 
 
 class CategorySerializer(ModelSerializer):
@@ -71,6 +72,12 @@ class ProductSerializer(ModelSerializer):
     def validate(self, attrs):
         if 'serial_number' in attrs:
             attrs['serial_number'] = normalize_product_serial(attrs['serial_number'])
+            # Seriya raqami noyob — takrorlansa 500 emas, tushunarli 400 qaytsin
+            if serial_number_is_taken(attrs['serial_number'],
+                                      exclude_pk=getattr(self.instance, 'pk', None)):
+                raise ValidationError({
+                    'serial_number': (f'"{attrs["serial_number"]}" seriya raqami boshqa '
+                                      f'mahsulotda band — boshqa raqam kiriting.')})
         return _validate_stock_fields(attrs)
 
     def create(self, validated_data):
@@ -145,6 +152,12 @@ class ProductOperatorSerializer(ModelSerializer):
     def validate(self, attrs):
         if 'serial_number' in attrs:
             attrs['serial_number'] = normalize_product_serial(attrs['serial_number'])
+            # Seriya raqami noyob — takrorlansa 500 emas, tushunarli 400 qaytsin
+            if serial_number_is_taken(attrs['serial_number'],
+                                      exclude_pk=getattr(self.instance, 'pk', None)):
+                raise ValidationError({
+                    'serial_number': (f'"{attrs["serial_number"]}" seriya raqami boshqa '
+                                      f'mahsulotda band — boshqa raqam kiriting.')})
         return _validate_stock_fields(attrs)
 
     def update(self, instance, validated_data):
