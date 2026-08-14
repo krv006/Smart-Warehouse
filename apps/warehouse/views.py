@@ -44,15 +44,28 @@ class CategoryViewSet(ModelViewSet):
     destroy=extend_schema(summary="Mahsulot o'chirish", tags=["Warehouse"]),
 )
 class ProductViewSet(ModelViewSet):
-    queryset           = Product.objects.select_related('category').all()
+    # stocks/zakazlar — qoldiq va "yo'ldagi import" miqdori uchun (N+1 oldini olish)
+    queryset           = (Product.objects.select_related('category')
+                          .prefetch_related('stocks', 'zakazlar').all())
     permission_classes = (IsOperatorOrManagementWrite,)
     search_fields      = ('name', 'model', 'serial_number', 'source')
     ordering_fields    = ('name', 'purchase_price', 'created_at')
     filterset_fields   = {
-        'category':       ['exact'],
         'purchase_price': ['isnull'],
         'selling_price':  ['isnull'],
     }
+
+    def get_queryset(self):
+        """`?category=<id>` — tanlangan kategoriya VA uning ost-kategoriyalari."""
+        queryset = super().get_queryset()
+        category_id = self.request.query_params.get('category')
+        if category_id:
+            category = Category.objects.filter(pk=category_id).first()
+            if category is None:
+                return queryset.none()
+            queryset = queryset.filter(
+                category__in=category.get_descendants(include_self=True))
+        return queryset
 
     def get_serializer_class(self):
         user = self.request.user

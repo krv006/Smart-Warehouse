@@ -1,9 +1,11 @@
 from django.db import transaction
 from rest_framework.serializers import (ModelSerializer, ValidationError,
-                                        IntegerField, CharField, SerializerMethodField)
+                                        IntegerField, CharField,
+                                        PrimaryKeyRelatedField,
+                                        SerializerMethodField)
 
 from apps.warehouse.models import Category, Product, Stock
-from apps.warehouse.product_utils import ensure_product_serial_number
+from apps.warehouse.product_utils import normalize_product_serial
 
 
 class CategorySerializer(ModelSerializer):
@@ -29,9 +31,15 @@ class ProductSerializer(ModelSerializer):
     quantity_in_stock  = IntegerField(read_only=True)
     reserved_quantity  = IntegerField(read_only=True)
     available_quantity = IntegerField(read_only=True)
+    pending_import_quantity = IntegerField(read_only=True)
     stock_status       = SerializerMethodField()
     category_name      = SerializerMethodField()
     unit_display       = SerializerMethodField()
+    origin_display     = SerializerMethodField()
+    serial_number      = CharField(required=False, allow_blank=True,
+                                   allow_null=True, max_length=255)
+    # Kategoriya — mahsulot qo'shishda MAJBURIY
+    category           = PrimaryKeyRelatedField(queryset=Category.objects.all())
     quantity            = IntegerField(write_only=True, required=False, min_value=1)
     warehouse_location  = CharField(write_only=True, required=False,
                                     allow_blank=True, max_length=255)
@@ -41,9 +49,10 @@ class ProductSerializer(ModelSerializer):
         fields = ('id', 'category', 'category_name', 'name', 'model',
                   'serial_number', 'barcode', 'purchase_price', 'selling_price',
                   'delivery_price', 'vat_percent', 'source',
+                  'origin', 'origin_display',
                   'unit', 'unit_display', 'min_quantity',
                   'quantity_in_stock', 'reserved_quantity',
-                  'available_quantity', 'stock_status',
+                  'available_quantity', 'pending_import_quantity', 'stock_status',
                   'quantity', 'warehouse_location', 'created_at')
         read_only_fields = ('created_at',)
 
@@ -56,7 +65,12 @@ class ProductSerializer(ModelSerializer):
     def get_unit_display(self, obj):
         return obj.get_unit_display()
 
+    def get_origin_display(self, obj):
+        return obj.get_origin_display()
+
     def validate(self, attrs):
+        if 'serial_number' in attrs:
+            attrs['serial_number'] = normalize_product_serial(attrs['serial_number'])
         return _validate_stock_fields(attrs)
 
     def create(self, validated_data):
@@ -64,7 +78,7 @@ class ProductSerializer(ModelSerializer):
         location = validated_data.get('warehouse_location')
         validated_data.pop('quantity', None)
         validated_data.pop('warehouse_location', None)
-        validated_data['serial_number'] = ensure_product_serial_number(
+        validated_data['serial_number'] = normalize_product_serial(
             validated_data.get('serial_number')
         )
         product = super().create(validated_data)
@@ -93,9 +107,15 @@ class ProductOperatorSerializer(ModelSerializer):
     quantity_in_stock  = IntegerField(read_only=True)
     reserved_quantity  = IntegerField(read_only=True)
     available_quantity = IntegerField(read_only=True)
+    pending_import_quantity = IntegerField(read_only=True)
     stock_status       = SerializerMethodField()
     category_name      = SerializerMethodField()
     unit_display       = SerializerMethodField()
+    origin_display     = SerializerMethodField()
+    serial_number      = CharField(required=False, allow_blank=True,
+                                   allow_null=True, max_length=255)
+    # Kategoriya — mahsulot qo'shishda MAJBURIY
+    category           = PrimaryKeyRelatedField(queryset=Category.objects.all())
     quantity            = IntegerField(write_only=True, required=False, min_value=1)
     warehouse_location  = CharField(write_only=True, required=False,
                                     allow_blank=True, max_length=255)
@@ -103,9 +123,10 @@ class ProductOperatorSerializer(ModelSerializer):
     class Meta:
         model  = Product
         fields = ('id', 'category', 'category_name', 'name', 'model',
-                  'serial_number', 'barcode', 'source', 'unit', 'unit_display',
+                  'serial_number', 'barcode', 'source',
+                  'origin', 'origin_display', 'unit', 'unit_display',
                   'quantity_in_stock', 'reserved_quantity',
-                  'available_quantity', 'stock_status', 'quantity',
+                  'available_quantity', 'pending_import_quantity', 'stock_status', 'quantity',
                   'warehouse_location', 'created_at')
         read_only_fields = ('created_at',)
 
@@ -118,7 +139,12 @@ class ProductOperatorSerializer(ModelSerializer):
     def get_unit_display(self, obj):
         return obj.get_unit_display()
 
+    def get_origin_display(self, obj):
+        return obj.get_origin_display()
+
     def validate(self, attrs):
+        if 'serial_number' in attrs:
+            attrs['serial_number'] = normalize_product_serial(attrs['serial_number'])
         return _validate_stock_fields(attrs)
 
     def update(self, instance, validated_data):

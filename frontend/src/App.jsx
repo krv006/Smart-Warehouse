@@ -2634,6 +2634,15 @@ function getGridColumns(title, session, { renderStatus } = {}) {
       ) },
       { key: 'contract', label: 'Shart.', className: 'col-short', render: (row) => tableCellText(row.contract_number) },
       { key: 'quantity', label: 'Zak.', className: 'col-num', render: (row) => row.quantity ?? '—' },
+      { key: 'unit_price', label: 'Kelish', className: 'col-sum', render: (row) => (
+        showPrices && row.unit_price != null ? tableCellText(money(row.unit_price)) : '—'
+      ) },
+      { key: 'selling_price', label: 'Ketish', className: 'col-sum', render: (row) => (
+        showPrices && row.selling_price != null ? tableCellText(money(row.selling_price)) : '—'
+      ) },
+      { key: 'vat_amount', label: 'QQS', className: 'col-sum', render: (row) => (
+        showPrices && row.vat_amount != null ? tableCellText(money(row.vat_amount)) : '—'
+      ) },
       { key: 'total', label: 'Summa', className: 'col-sum', render: (row) => {
         if (!showPrices || row.total == null) return '—'
         return tableCellText(`${money(row.total)} ${row.currency || 'UZS'}`)
@@ -2659,8 +2668,21 @@ function getGridColumns(title, session, { renderStatus } = {}) {
   if (title === 'Ombor') {
     return [
       { key: 'name', label: 'Mahsulot', sortable: true, render: (row) => row.name || '—' },
+      { key: 'category', label: 'Kategoriya', render: (row) => row.category_name || '—' },
+      { key: 'model', label: 'Model', render: (row) => row.model || '—' },
       { key: 'serial', label: 'Seriya', render: (row) => row.serial_number || '—' },
       { key: 'quantity', label: 'Qoldiq', sortable: true, render: (row) => rowValue(title, row, session) },
+      ...(showPrices ? [
+        { key: 'purchase_price', label: 'Kelish narxi', render: (row) => (row.purchase_price != null ? money(row.purchase_price) : '—') },
+        { key: 'selling_price', label: 'Ketish narxi', render: (row) => (row.selling_price != null ? money(row.selling_price) : '—') },
+      ] : []),
+      { key: 'origin', label: 'Holati', render: (row) => (
+        <StatusBadge
+          status={row.origin || 'warehouse'}
+          label={row.origin_display || (row.origin === 'import' ? 'Import' : 'Ombor')}
+          tone={row.origin === 'import' ? 'warning' : 'neutral'}
+        />
+      ) },
       { key: 'created_at', label: 'Joy', render: (row) => row.warehouse_location || '—' },
     ]
   }
@@ -2877,7 +2899,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [searchTerm, setSearchTerm] = useState('')
-  const [listFilters, setListFilters] = useState({ status: '', client: '', date_from: '', date_to: '' })
+  const [listFilters, setListFilters] = useState({ status: '', client: '', category: '', date_from: '', date_to: '' })
   const [page, setPage] = useState(1)
   const [totalCount, setTotalCount] = useState(0)
   const [sortKey, setSortKey] = useState('created_at')
@@ -3329,7 +3351,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
 }
 
 const fields = {
-  Ombor: [['name', 'Mahsulot nomi', true], ['model', 'Model'], ['serial_number', 'Seriya raqami', true], ['barcode', 'Shtrix kod'], ['source', 'Manba / yetkazuvchi'], ['unit', 'O‘lchov birligi'], ['min_quantity', 'Minimal qoldiq'], ['purchase_price', 'Kelish narxi'], ['selling_price', 'Sotuv narxi'], ['delivery_price', 'Yetkazish narxi'], ['vat_percent', 'QQS %'], ['quantity', 'Boshlang‘ich miqdor'], ['warehouse_location', 'Ombordagi joy']],
+  Ombor: [['name', 'Mahsulot nomi', true], ['category', 'Kategoriya', true], ['model', 'Model'], ['serial_number', 'Seriya raqami', true], ['barcode', 'Shtrix kod'], ['source', 'Manba / yetkazuvchi'], ['unit', 'O‘lchov birligi'], ['min_quantity', 'Minimal qoldiq'], ['purchase_price', 'Kelish narxi'], ['selling_price', 'Sotuv narxi'], ['delivery_price', 'Yetkazish narxi'], ['vat_percent', 'QQS %'], ['quantity', 'Boshlang‘ich miqdor'], ['warehouse_location', 'Ombordagi joy']],
   Kategoriyalar: [['name', 'Kategoriya nomi', true], ['parent', 'Ota kategoriya']],
   Qoldiqlar: [['product', 'Mahsulot ID', true], ['quantity', 'Miqdor', true], ['reserved_quantity', 'Bron miqdor'], ['warehouse_location', 'Ombordagi joy', true]],
 }
@@ -3358,11 +3380,17 @@ function Editor({ title, item, path, close, done, notify, session }) {
   const canDelete = Boolean(item?.id && ['Mijozlar', 'Ombor', 'Kategoriyalar', 'Qoldiqlar'].includes(title))
 
   useEffect(() => {
-    if (title !== 'Kategoriyalar') return
+    // Kategoriyalar — daraxt tanlash uchun; Ombor — mahsulot kategoriyasi uchun
+    if (title !== 'Kategoriyalar' && title !== 'Ombor') return
     api.categories({ page_size: 200 })
       .then((data) => setCategories(list(data)))
       .catch((err) => notify(err.message))
   }, [title, notify])
+
+  const categoryOptions = useMemo(
+    () => (title === 'Ombor' ? flattenCategories(categories) : []),
+    [title, categories],
+  )
 
   const parentOptions = useMemo(() => {
     if (title !== 'Kategoriyalar') return []
@@ -3391,6 +3419,7 @@ function Editor({ title, item, path, close, done, notify, session }) {
     setSaving(true)
     const payload = Object.fromEntries(Object.entries(form).filter(([key, value]) => !['id', 'created_at', 'quantity_in_stock', 'available_quantity', 'reserved_quantity', 'stock_status', 'category_name', 'unit_display'].includes(key) && value !== undefined && value !== ''))
     if (title === 'Ombor') {
+      if (payload.category) payload.category = Number(payload.category)
       if (payload.min_quantity) payload.min_quantity = Number(payload.min_quantity)
       if (payload.quantity) payload.quantity = Number(payload.quantity)
       if (!canManagePrices) {
@@ -3513,6 +3542,13 @@ function Editor({ title, item, path, close, done, notify, session }) {
               ) : key === 'vat_percent' ? (
                 <select value={form.vat_percent || 'none'} onChange={(event) => setForm({ ...form, vat_percent: event.target.value })}>
                   {vatOptions.map(([value, name]) => <option value={value} key={value}>{name}</option>)}
+                </select>
+              ) : key === 'category' ? (
+                <select required={required} value={form.category ?? ''} onChange={(event) => setForm({ ...form, category: event.target.value })}>
+                  <option value="">Kategoriyani tanlang</option>
+                  {categoryOptions.map((cat) => (
+                    <option value={cat.id} key={cat.id}>{`${'— '.repeat(cat.depth)}${cat.name}`}</option>
+                  ))}
                 </select>
               ) : key === 'parent' ? (
                 <select value={form.parent ?? ''} onChange={(event) => setForm({ ...form, parent: event.target.value })}>
@@ -3827,38 +3863,56 @@ function ExpenseEditor({ close, done, notify, item = null, session }) {
 }
 
 
-const emptyManualImportLine = () => ({
-  name: '',
-  serial_number: '',
+// Import qatori — buyurtma (SK) hujjatidagi «Mahsulot qatorlari» bilan bir xil
+// tuzilma. `unit_price` — KELISH narxi, `selling_price` — KETISH narxi.
+// QQS har doim KELISH narxi asosida hisoblanadi.
+const emptyImportRow = () => ({
+  key: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+  zakazId: null,
+  product: '',
+  product_name: '',
+  category: '',
+  identification_code: '',
   barcode: '',
   unit: 'piece',
   quantity: '1',
   unit_price: '',
-  vat_percent: 'none',
+  selling_price: '',
   delivery_amount: 0,
+  vat_percent: 'none',
   vat_amount: 0,
   total_amount: 0,
 })
 
-const emptyImportRow = () => ({
-  key: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-  zakazId: null,
-  source: 'existing',
-  product: '',
-  quantity: '1',
-  unit_price: '',
-  manual: emptyManualImportLine(),
-})
-
 const zakazToImportRow = (zakaz) => ({
+  ...emptyImportRow(),
   key: `z-${zakaz.id}`,
   zakazId: zakaz.id,
-  source: 'existing',
-  product: String(zakaz.product),
+  product: zakaz.product ? String(zakaz.product) : '',
   quantity: String(zakaz.quantity),
   unit_price: zakaz.unit_price != null ? String(zakaz.unit_price) : '',
-  manual: emptyManualImportLine(),
+  selling_price: zakaz.selling_price != null ? String(zakaz.selling_price) : '',
+  vat_percent: zakaz.vat_percent || 'none',
 })
+
+function fillImportRowFromProduct(row, product, showPrices) {
+  return {
+    ...row,
+    product: product.id,
+    product_name: product.name,
+    category: product.category ? String(product.category) : (row.category || ''),
+    identification_code: product.serial_number || '',
+    barcode: product.barcode || '',
+    unit: product.unit || 'piece',
+    vat_percent: product.vat_percent || row.vat_percent || 'none',
+    unit_price: showPrices
+      ? (row.unit_price || (product.purchase_price != null ? String(product.purchase_price) : ''))
+      : row.unit_price,
+    selling_price: showPrices
+      ? (row.selling_price || (product.selling_price != null ? String(product.selling_price) : ''))
+      : row.selling_price,
+  }
+}
 
 function splitPartialPayment(totalPaid, lineTotals) {
   const grandTotal = lineTotals.reduce((sum, value) => sum + value, 0)
@@ -3887,15 +3941,20 @@ function ZakazEditor({ close, done, notify, item = null, session }) {
   const productLocked = Boolean(item?.order_contract)
   const canMultiLine = !isBackorder && !productLocked
   const [products, setProducts] = useState([])
+  const [categories, setCategories] = useState([])
   const [saving, setSaving] = useState(false)
   const [batchLoading, setBatchLoading] = useState(Boolean(item?.id && canMultiLine))
   const [importBatchId, setImportBatchId] = useState(item?.import_batch || null)
   const [importRows, setImportRows] = useState([emptyImportRow()])
+  const [importPickerIndex, setImportPickerIndex] = useState(null)
+  const [importReverse, setImportReverse] = useState(false)
+  const [contractNumberEdited, setContractNumberEdited] = useState(Boolean(item?.id))
   const [form, setForm] = useState(() => ({
     product: item?.product || '',
     quantity: item?.quantity || '1',
     received_qty: item?.received_qty || '0',
     unit_price: item?.unit_price || '',
+    selling_price: item?.selling_price || '',
     currency: item?.currency || 'UZS',
     supplier: item?.supplier || '',
     status: item?.status || 'new',
@@ -3912,7 +3971,25 @@ function ZakazEditor({ close, done, notify, item = null, session }) {
 
   useEffect(() => {
     api.products({ page_size: 500 }).then((data) => setProducts(list(data))).catch((err) => notify(err.message))
+    api.categories({ page_size: 200 })
+      .then((data) => setCategories(flattenCategories(list(data))))
+      .catch((err) => notify(err.message))
   }, [notify])
+
+  // Yangi importda shartnoma raqamini oldindan ko‘rsatamiz (o‘sha kunning
+  // keyingi tartib raqami). Yakuniy raqamni saqlashda backend band qiladi.
+  useEffect(() => {
+    if (item?.id || contractNumberEdited || !form.contract_date) return
+    let cancelled = false
+    api.nextContractNumber({ contract_date: form.contract_date })
+      .then((data) => {
+        if (!cancelled) {
+          setForm((current) => ({ ...current, contract_number: data.contract_number || '' }))
+        }
+      })
+      .catch((err) => notify(err.message))
+    return () => { cancelled = true }
+  }, [item?.id, contractNumberEdited, form.contract_date, notify])
 
   useEffect(() => {
     if (!item?.id || !canMultiLine) {
@@ -3934,6 +4011,7 @@ function ZakazEditor({ close, done, notify, item = null, session }) {
           quantity: anchor.quantity || '1',
           received_qty: anchor.received_qty || '0',
           unit_price: anchor.unit_price || '',
+          selling_price: anchor.selling_price || '',
           currency: anchor.currency || 'UZS',
           supplier: anchor.supplier || '',
           status: anchor.status || 'new',
@@ -3957,22 +4035,57 @@ function ZakazEditor({ close, done, notify, item = null, session }) {
     return () => { cancelled = true }
   }, [item, canMultiLine, notify])
 
+  // Ombordan tanlangan qatorlarni mahsulot ma'lumotlari bilan to'ldiradi
+  useEffect(() => {
+    if (!products.length) return
+    setImportRows((rows) => rows.map((row) => {
+      if (!row.product || row.product_name) return row
+      const product = products.find((p) => String(p.id) === String(row.product))
+      if (!product) return row
+      return calcInvoiceLine(fillImportRowFromProduct(row, product, showPrices), false)
+    }))
+  }, [products, showPrices])
+
   const updateImportRow = (index, patch) => {
     setImportRows((rows) => rows.map((row, i) => {
       if (i !== index) return row
       let next = { ...row, ...patch }
-      if (patch.product !== undefined && patch.product) {
-        const product = products.find((p) => String(p.id) === String(patch.product))
-        if (product && showPrices) {
-          next.unit_price = product.purchase_price != null ? String(product.purchase_price) : ''
-        }
+      if (patch.product_name !== undefined) {
+        const matched = products.find(
+          (p) => (p.name || '').trim().toLowerCase() === patch.product_name.trim().toLowerCase())
+        next = matched
+          ? fillImportRowFromProduct({ ...next, unit_price: '', selling_price: '' }, matched, showPrices)
+          : { ...next, product: '' }
       }
-      if (patch.manual) {
-        next.manual = calcInvoiceLine({ ...row.manual, ...patch.manual }, false)
+      if (patch.identification_code !== undefined && patch.identification_code.trim()) {
+        const matched = products.find(
+          (p) => (p.serial_number || '').trim() === patch.identification_code.trim())
+        if (matched) next = fillImportRowFromProduct(next, matched, showPrices)
       }
-      return next
+      // QQS va jami — KELISH narxi (unit_price) asosida
+      return calcInvoiceLine(next, importReverse, Object.keys(patch)[0])
     }))
   }
+
+  const toggleImportReverse = (checked) => {
+    setImportReverse(checked)
+    setImportRows((rows) => rows.map((row) => calcInvoiceLine(row, checked)))
+  }
+
+  const selectImportProduct = (index, product) => {
+    setImportRows((rows) => rows.map((row, i) => (
+      i === index
+        ? calcInvoiceLine(fillImportRowFromProduct(
+            { ...row, unit_price: '', selling_price: '' }, product, showPrices), false)
+        : row
+    )))
+  }
+
+  const importTotals = useMemo(() => importRows.reduce((acc, row) => ({
+    delivery: acc.delivery + Number(row.delivery_amount || 0),
+    vat: acc.vat + Number(row.vat_amount || 0),
+    grand: acc.grand + Number(row.total_amount || 0),
+  }), { delivery: 0, vat: 0, grand: 0 }), [importRows])
 
   const addImportRow = () => setImportRows((rows) => [...rows, emptyImportRow()])
 
@@ -3980,55 +4093,79 @@ function ZakazEditor({ close, done, notify, item = null, session }) {
     setImportRows((rows) => (rows.length <= 1 ? rows : rows.filter((_, i) => i !== index)))
   }
 
-  const buildNewProductPayload = (manual) => {
+  const buildNewProductPayload = (row) => {
     const payload = {
-      name: manual.name.trim(),
-      serial_number: manual.serial_number.trim(),
-      barcode: manual.barcode.trim() || null,
-      unit: manual.unit,
-      vat_percent: manual.vat_percent || 'none',
+      name: (row.product_name || '').trim(),
+      category: Number(row.category),
+      serial_number: (row.identification_code || '').trim(),
+      barcode: (row.barcode || '').trim() || null,
+      unit: row.unit || 'piece',
+      vat_percent: row.vat_percent || 'none',
     }
     if (showPrices) {
-      payload.purchase_price = manual.unit_price || null
-      payload.delivery_price = manual.delivery_amount || null
+      payload.purchase_price = row.unit_price || null
+      payload.selling_price = row.selling_price || null
     }
     return payload
   }
 
   const buildImportItem = (row) => {
-    const quantity = row.source === 'new'
-      ? Number(row.manual?.quantity || row.quantity || 1)
-      : Number(row.quantity || 1)
-    const itemPayload = { quantity }
-    if (showPrices) {
-      const price = row.source === 'new' ? row.manual?.unit_price : row.unit_price
-      itemPayload.unit_price = Number(price || 0)
+    const itemPayload = {
+      quantity: Number(row.quantity || 1),
+      vat_percent: row.vat_percent || 'none',
     }
-    if (row.source === 'new') {
-      itemPayload.new_product = buildNewProductPayload(row.manual)
-    } else {
+    if (showPrices) {
+      itemPayload.unit_price = Number(row.unit_price || 0)
+      itemPayload.selling_price = Number(row.selling_price || 0)
+    }
+    if (row.product) {
       itemPayload.product = Number(row.product)
+    } else {
+      itemPayload.new_product = buildNewProductPayload(row)
     }
     return itemPayload
   }
 
   const validateImportRows = () => {
     for (const [index, row] of importRows.entries()) {
-      const qty = row.source === 'new' ? row.manual.quantity : row.quantity
-      if (Number(qty || 0) < 1) {
+      if (Number(row.quantity || 0) < 1) {
         throw new Error(`${index + 1}-qator: miqdor kamida 1 bo‘lishi kerak.`)
       }
-      if (row.source === 'new') {
-        if (!row.manual.name.trim()) throw new Error(`${index + 1}-qator: tovar nomi kiritilishi shart.`)
-      } else if (!row.product) {
-        throw new Error(`${index + 1}-qator: mahsulotni tanlang.`)
+      if (!row.product && !(row.product_name || '').trim()) {
+        throw new Error(`${index + 1}-qator: tovar nomi kiritilishi shart.`)
+      }
+      // Yangi mahsulot ombor ro'yxatiga qo'shiladi — kategoriyasiz bo'lmaydi
+      if (!row.product && !row.category) {
+        throw new Error(`${index + 1}-qator: yangi mahsulot uchun kategoriya tanlanishi shart.`)
       }
       if (showPrices) {
-        const price = row.source === 'new' ? row.manual.unit_price : row.unit_price
-        if (price === '' || price == null) {
-          throw new Error(`${index + 1}-qator: narx kiritilishi shart.`)
+        if (row.unit_price === '' || row.unit_price == null) {
+          throw new Error(`${index + 1}-qator: kelish narxi kiritilishi shart.`)
+        }
+        if (row.selling_price === '' || row.selling_price == null) {
+          throw new Error(`${index + 1}-qator: ketish narxi kiritilishi shart.`)
         }
       }
+    }
+  }
+
+  // Import jami summasi (kelish narxi × soni) — qisman to'lov shundan oshmasligi kerak
+  const useImportRows = canMultiLine && (isNew || importRows.some((row) => row.zakazId))
+  const importGrandTotal = useImportRows
+    ? importRows.reduce((sum, row) => sum + Number(row.unit_price || 0) * Number(row.quantity || 0), 0)
+    : Number(form.unit_price || 0) * Number(form.quantity || 0)
+
+  const validatePartialPayment = () => {
+    if (!showPayment || form.payment_status !== 'partial') return
+    const paid = Number(form.paid_amount || 0)
+    if (!form.paid_amount || paid <= 0) {
+      throw new Error('Qisman to\'lov uchun summa kiriting.')
+    }
+    if (importGrandTotal <= 0) {
+      throw new Error('Qisman to\'lov uchun avval kelish narxini kiriting.')
+    }
+    if (paid > importGrandTotal) {
+      throw new Error(`Qisman to‘langan summa jami import summasidan (${money(importGrandTotal)}) oshmasligi kerak.`)
     }
   }
 
@@ -4056,14 +4193,24 @@ function ZakazEditor({ close, done, notify, item = null, session }) {
             min="0.01"
             step="0.01"
             type="number"
+            max={importGrandTotal > 0 ? importGrandTotal : undefined}
             value={form.paid_amount}
             onChange={(event) => setForm({ ...form, paid_amount: event.target.value })}
             placeholder="Masalan, 500000"
+            aria-invalid={Number(form.paid_amount || 0) > importGrandTotal && importGrandTotal > 0}
           />
         </label>
       )}
       {form.payment_status === 'partial' && (
-        <p className="muted full-width import-payment-hint">Kiritilgan summa saqlangach kassadan chiqim (xarajat) sifatida yoziladi.</p>
+        importGrandTotal > 0 && Number(form.paid_amount || 0) > importGrandTotal ? (
+          <p className="full-width import-payment-hint field-error">
+            Qisman to‘langan summa jami import summasidan ({money(importGrandTotal)} {form.currency || 'UZS'}) oshmasligi kerak.
+          </p>
+        ) : (
+          <p className="muted full-width import-payment-hint">
+            Jami import summasi: <b>{money(importGrandTotal)} {form.currency || 'UZS'}</b>. Kiritilgan summa saqlangach kassadan chiqim (xarajat) sifatida yoziladi.
+          </p>
+        )
       )}
       {form.payment_status === 'unpaid' && (
         <p className="muted full-width import-payment-hint">To‘lanmagan import summasi kassadan chiqim sifatida yoziladi.</p>
@@ -4072,17 +4219,19 @@ function ZakazEditor({ close, done, notify, item = null, session }) {
   )
 
   const buildCommonPayload = () => Object.fromEntries(
-    Object.entries(form).filter(([key, value]) => !['product', 'quantity', 'unit_price', 'received_qty'].includes(key) && value !== '' && value !== null),
+    Object.entries(form).filter(([key, value]) => !['product', 'quantity', 'unit_price', 'selling_price', 'received_qty'].includes(key) && value !== '' && value !== null),
   )
 
   const applyPaymentPayload = (payload) => {
     if (!showPayment) {
       delete payload.unit_price
+      delete payload.selling_price
       delete payload.currency
       delete payload.payment_status
       delete payload.paid_amount
       if (payload.new_product) {
         delete payload.new_product.purchase_price
+        delete payload.new_product.selling_price
         delete payload.new_product.delivery_price
       }
       return payload
@@ -4103,9 +4252,7 @@ function ZakazEditor({ close, done, notify, item = null, session }) {
       if (canMultiLine && (isNew || importRows.some((row) => row.zakazId))) {
         if (isNew) {
           validateImportRows()
-          if (showPayment && form.payment_status === 'partial' && (!form.paid_amount || Number(form.paid_amount) <= 0)) {
-            throw new Error('Qisman to\'lov uchun summa kiriting.')
-          }
+          validatePartialPayment()
           const bulkPayload = {
             ...buildCommonPayload(),
             items: importRows.map((row) => buildImportItem(row)),
@@ -4120,6 +4267,9 @@ function ZakazEditor({ close, done, notify, item = null, session }) {
           Object.keys(bulkPayload).forEach((key) => {
             if (bulkPayload[key] === undefined || bulkPayload[key] === '') delete bulkPayload[key]
           })
+          // Qo‘lda o‘zgartirilmagan raqamni backend o‘zi band qiladi —
+          // shunda har kun 1/1308, 2/1308 … ketma-ket boradi
+          if (!contractNumberEdited) delete bulkPayload.contract_number
           applyPaymentPayload(bulkPayload)
           await api.zakazBulk(bulkPayload)
           notify('Import yaratildi.', 'success')
@@ -4127,9 +4277,7 @@ function ZakazEditor({ close, done, notify, item = null, session }) {
           return
         }
 
-        if (showPayment && form.payment_status === 'partial' && (!form.paid_amount || Number(form.paid_amount) <= 0)) {
-          throw new Error('Qisman to\'lov uchun summa kiriting.')
-        }
+        validatePartialPayment()
         validateImportRows()
         const common = buildCommonPayload()
         if (common.product) delete common.product
@@ -4144,11 +4292,8 @@ function ZakazEditor({ close, done, notify, item = null, session }) {
           statusPayload.status = form.status
           statusPayload.asos = form.asos
         }
-        const lineTotals = importRows.map((row) => {
-          const price = row.source === 'new' ? row.manual.unit_price : row.unit_price
-          const qty = row.source === 'new' ? row.manual.quantity : row.quantity
-          return Number(price || 0) * Number(qty || 0)
-        })
+        const lineTotals = importRows.map(
+          (row) => Number(row.unit_price || 0) * Number(row.quantity || 0))
         const grandTotal = lineTotals.reduce((sum, value) => sum + value, 0)
         if (showPayment && form.payment_status === 'partial' && grandTotal <= 0) {
           throw new Error('Qisman to\'lov uchun avval barcha qatorlarga narx kiritilishi kerak.')
@@ -4158,10 +4303,12 @@ function ZakazEditor({ close, done, notify, item = null, session }) {
           : null
         for (const [index, row] of importRows.entries()) {
           const rowPayload = {
-            quantity: Number(row.source === 'new' ? row.manual.quantity : row.quantity),
+            quantity: Number(row.quantity || 1),
+            vat_percent: row.vat_percent || 'none',
           }
           if (showPrices) {
-            rowPayload.unit_price = Number(row.source === 'new' ? row.manual.unit_price : row.unit_price)
+            rowPayload.unit_price = Number(row.unit_price || 0)
+            rowPayload.selling_price = Number(row.selling_price || 0)
           }
           if (showPayment) {
             rowPayload.currency = form.currency
@@ -4194,9 +4341,7 @@ function ZakazEditor({ close, done, notify, item = null, session }) {
         return
       }
 
-      if (showPrices && !isBackorder && form.payment_status === 'partial' && (!form.paid_amount || Number(form.paid_amount) <= 0)) {
-        throw new Error('Qisman to\'lov uchun summa kiriting.')
-      }
+      if (!isBackorder) validatePartialPayment()
       const payload = Object.fromEntries(Object.entries(form).filter(([, value]) => value !== '' && value !== null))
       if (payload.product) payload.product = Number(payload.product)
       if (payload.quantity) payload.quantity = Number(payload.quantity)
@@ -4204,6 +4349,7 @@ function ZakazEditor({ close, done, notify, item = null, session }) {
       if (payload.paid_amount) payload.paid_amount = Number(payload.paid_amount)
       if (!showPrices || isBackorder) {
         delete payload.unit_price
+        delete payload.selling_price
         delete payload.currency
         delete payload.payment_status
         delete payload.paid_amount
@@ -4226,89 +4372,166 @@ function ZakazEditor({ close, done, notify, item = null, session }) {
         <div className="editor-head"><div><p className="eyebrow">{item?.id ? 'IMPORT TAHRIRI' : 'YANGI IMPORT'}</p><h3>Yetkazuvchidan import</h3></div><button type="button" className="icon-button" onClick={close} aria-label="Yopish"><X size={20} /></button></div>
         <div className="form-grid">
           {canMultiLine && (isNew || importRows.some((row) => row.zakazId)) ? (
-            <div className="full-width import-lines">
+            <div className="full-width import-lines e-invoice-lines">
               {batchLoading ? (
                 <p className="muted">Mahsulot qatorlari yuklanmoqda…</p>
               ) : (
               <>
               <div className="import-lines-head">
                 <div>
-                  <p className="eyebrow">MAHSULOTLAR</p>
-                  <p className="muted import-lines-hint">Ro‘yxatdagi «raqam» — mahsulot identifikatori (seriya), «Miqdor» esa import soni. Har qator alohida: ombordan yoki yangi mahsulot.</p>
+                  <p className="eyebrow">MAHSULOT QATORLARI</p>
+                  <p className="muted import-lines-hint">Tovar nomi ombordagi mahsulot bilan mos kelsa qator avtomatik bog‘lanadi; mos kelmasa yangi mahsulot ombor ro‘yxatiga qo‘shiladi. QQS kelish narxi asosida hisoblanadi.</p>
                 </div>
-                <button type="button" className="secondary-button" onClick={addImportRow}>
-                  <Plus size={16} />Qator qo‘shish
-                </button>
+                <div className="e-invoice-lines-toolbar-end">
+                  <label className="reverse-check e-invoice-reverse-check">
+                    <input type="checkbox" checked={importReverse} onChange={(e) => toggleImportReverse(e.target.checked)} />
+                    Teskari hisob
+                  </label>
+                  <a href="https://tasnif.soliq.uz/" className="e-invoice-mxik-link" target="_blank" rel="noopener noreferrer">
+                    MXIK kodlari
+                  </a>
+                </div>
               </div>
-              {importRows.map((row, index) => (
-                <div className="import-line-card" key={row.key}>
-                  <div className="import-line-toolbar">
-                    <label>
-                      Manba
-                      <select
-                        value={row.source}
-                        disabled={Boolean(row.zakazId)}
-                        onChange={(e) => updateImportRow(index, {
-                          source: e.target.value,
-                          product: '',
-                          manual: emptyManualImportLine(),
-                        })}
-                      >
-                        <option value="existing">Ombordan tanlash</option>
-                        <option value="new">Yangi mahsulot</option>
-                      </select>
-                    </label>
-                    {importRows.length > 1 && !row.zakazId && (
-                      <button type="button" className="icon-button" aria-label="Qatorni o‘chirish" onClick={() => removeImportRow(index)}>
-                        <X size={18} />
-                      </button>
-                    )}
-                  </div>
-                  {row.source === 'existing' ? (
-                    <div className="import-top-row">
-                      <label className="field-product">
-                        Mahsulot
-                        <select required value={row.product} onChange={(e) => updateImportRow(index, { product: e.target.value })}>
-                          <option value="">Mahsulotni tanlang</option>
-                          {products.map((product) => (
-                            <option value={product.id} key={product.id}>{productOptionLabel(product)}</option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="field-qty">Miqdor<input required min="1" type="number" value={row.quantity} onChange={(e) => updateImportRow(index, { quantity: e.target.value })} /></label>
+              <div className="e-invoice-table-wrap">
+                <table className="e-invoice-table e-invoice-table--light">
+                  <thead>
+                    <tr>
+                      <th>№</th>
+                      <th>Tovar nomi</th>
+                      <th>Kategoriya</th>
+                      <th>Seriya raqami</th>
+                      <th>Shtrix kod</th>
+                      <th>O‘lchov birligi</th>
+                      <th>Soni</th>
                       {showPrices && (
-                        <label>Narx<input required min="0" step="0.01" type="number" value={row.unit_price} onChange={(e) => updateImportRow(index, { unit_price: e.target.value })} /></label>
+                        <>
+                          <th>Kelish narxi</th>
+                          <th>Ketish narxi</th>
+                          <th>Yetkazish qiymati</th>
+                          <th>QQS %</th>
+                          <th>QQS miqdori</th>
+                          <th>Jami</th>
+                        </>
                       )}
-                    </div>
-                  ) : (
-                    <div className="import-manual-block">
-                      <div className="import-top-row">
-                        <label className="field-product">Tovar nomi<input required value={row.manual.name} onChange={(e) => updateImportRow(index, { manual: { name: e.target.value } })} /></label>
-                        <label>Mahsulot raqami<input value={row.manual.serial_number} onChange={(e) => updateImportRow(index, { manual: { serial_number: e.target.value } })} placeholder="Bo‘sh qoldirilsa avtomatik" /></label>
-                        <label>Shtrix kod<input value={row.manual.barcode} onChange={(e) => updateImportRow(index, { manual: { barcode: e.target.value } })} /></label>
-                        <label>O‘lchov birligi
-                          <select value={row.manual.unit} onChange={(e) => updateImportRow(index, { manual: { unit: e.target.value } })}>
-                            {productUnits.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+                      <th className="e-invoice-actions-head" aria-label="Amallar" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {importRows.map((row, index) => (
+                      <tr key={row.key}>
+                        <td className="e-invoice-num">{index + 1}</td>
+                        <td className="e-invoice-product">
+                          <div className="e-invoice-product-field">
+                            <input
+                              required
+                              list={`import-product-${index}`}
+                              value={row.product_name || ''}
+                              onChange={(e) => updateImportRow(index, { product_name: e.target.value })}
+                              placeholder="Tovar nomi"
+                              aria-label="Tovar nomi"
+                            />
+                            <button
+                              type="button"
+                              className="icon-button e-invoice-product-pick"
+                              onClick={() => setImportPickerIndex(index)}
+                              aria-label="Ombordan tovar tanlash"
+                              title="Ombordan tanlash"
+                            >
+                              <Package size={16} />
+                            </button>
+                          </div>
+                          <datalist id={`import-product-${index}`}>
+                            {products.map((p) => <option value={p.name} key={p.id} />)}
+                          </datalist>
+                        </td>
+                        <td>
+                          <select
+                            required={!row.product}
+                            value={row.category ?? ''}
+                            onChange={(e) => updateImportRow(index, { category: e.target.value })}
+                            aria-label="Kategoriya"
+                          >
+                            <option value="">Kategoriya</option>
+                            {categories.map((cat) => (
+                              <option value={cat.id} key={cat.id}>{`${'— '.repeat(cat.depth)}${cat.name}`}</option>
+                            ))}
                           </select>
-                        </label>
-                        <label className="field-qty">Miqdor<input required min="1" type="number" value={row.manual.quantity} onChange={(e) => updateImportRow(index, { manual: { quantity: e.target.value } })} /></label>
-                        {showPrices && <>
-                          <label>Narx<input required min="0" step="0.01" type="number" value={row.manual.unit_price} onChange={(e) => updateImportRow(index, { manual: { unit_price: e.target.value } })} /></label>
-                          <label>QQS %
-                            <select value={row.manual.vat_percent} onChange={(e) => updateImportRow(index, { manual: { vat_percent: e.target.value } })}>
-                              {vatOptions.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
-                            </select>
-                          </label>
-                          <label>Yetkazish<input readOnly value={moneyDecimal(row.manual.delivery_amount)} /></label>
-                          <label>QQS miqdori<input readOnly value={moneyDecimal(row.manual.vat_amount)} /></label>
-                          <label>JAMI<input readOnly value={moneyDecimal(row.manual.total_amount)} /></label>
-                        </>}
-                      </div>
-                      <p className="muted import-manual-note">Yangi mahsulot import bilan birga ombor ro‘yxatiga qo‘shiladi.</p>
-                    </div>
+                        </td>
+                        <td>
+                          <input
+                            list={`import-serial-${index}`}
+                            value={row.identification_code || ''}
+                            onChange={(e) => updateImportRow(index, { identification_code: e.target.value })}
+                            placeholder="Seriya raqami"
+                            aria-label="Seriya raqami"
+                          />
+                          <datalist id={`import-serial-${index}`}>
+                            {products.map((p) => p.serial_number).filter(Boolean).map((code) => (
+                              <option value={code} key={code} />
+                            ))}
+                          </datalist>
+                        </td>
+                        <td><input value={row.barcode || ''} onChange={(e) => updateImportRow(index, { barcode: e.target.value })} placeholder="Shtrix kod" aria-label="Shtrix kod" /></td>
+                        <td className="e-invoice-unit">
+                          <select value={row.unit || 'piece'} onChange={(e) => updateImportRow(index, { unit: e.target.value })} aria-label="O‘lchov birligi">
+                            {productUnits.map(([v, n]) => <option value={v} key={v}>{n}</option>)}
+                          </select>
+                        </td>
+                        <td><input required min="1" type="number" value={row.quantity} onChange={(e) => updateImportRow(index, { quantity: e.target.value })} aria-label="Soni" /></td>
+                        {showPrices && (
+                          <>
+                            <td><input required min="0" step="0.01" type="number" value={row.unit_price} onChange={(e) => updateImportRow(index, { unit_price: e.target.value })} aria-label="Kelish narxi" /></td>
+                            <td><input required min="0" step="0.01" type="number" value={row.selling_price} onChange={(e) => updateImportRow(index, { selling_price: e.target.value })} aria-label="Ketish narxi" /></td>
+                            <td><input type="number" min="0" step="0.01" readOnly={!importReverse} value={row.delivery_amount} onChange={(e) => updateImportRow(index, { delivery_amount: e.target.value })} aria-label="Yetkazish qiymati" /></td>
+                            <td>
+                              <select value={row.vat_percent || 'none'} onChange={(e) => updateImportRow(index, { vat_percent: e.target.value })} aria-label="QQS %">
+                                {vatOptions.map(([v, n]) => <option value={v} key={v}>{n}</option>)}
+                              </select>
+                            </td>
+                            <td><input type="number" min="0" step="0.01" readOnly={!importReverse} value={row.vat_amount} onChange={(e) => updateImportRow(index, { vat_amount: e.target.value })} aria-label="QQS miqdori" /></td>
+                            <td><input type="number" min="0" step="0.01" readOnly={!importReverse} value={row.total_amount} onChange={(e) => updateImportRow(index, { total_amount: e.target.value })} aria-label="Jami" /></td>
+                          </>
+                        )}
+                        <td className="e-invoice-row-actions">
+                          <div className="e-invoice-row-actions-inner">
+                            <button
+                              type="button"
+                              className="e-invoice-row-btn e-invoice-row-btn--delete"
+                              onClick={() => removeImportRow(index)}
+                              disabled={importRows.length <= 1 || Boolean(row.zakazId)}
+                              aria-label="Qatorni o‘chirish"
+                            >
+                              <Trash size={16} />
+                            </button>
+                            <button
+                              type="button"
+                              className="e-invoice-row-btn e-invoice-row-btn--add"
+                              onClick={addImportRow}
+                              aria-label="Qator qo‘shish"
+                            >
+                              <Plus size={16} weight="bold" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  {showPrices && (
+                    <tfoot>
+                      <tr>
+                        <td colSpan={7}>Jami</td>
+                        <td />
+                        <td />
+                        <td>{moneyDecimal(importTotals.delivery)}</td>
+                        <td />
+                        <td>{moneyDecimal(importTotals.vat)}</td>
+                        <td>{moneyDecimal(importTotals.grand)}</td>
+                        <td />
+                      </tr>
+                    </tfoot>
                   )}
-                </div>
-              ))}
+                </table>
+              </div>
               </>
               )}
             </div>
@@ -4337,7 +4560,10 @@ function ZakazEditor({ close, done, notify, item = null, session }) {
           )}
 
           {showPayment && !isBackorder && (item?.id || productLocked) && !canMultiLine && <>
-            <label>Narx<input required={!item?.id && showPrices} min="0" step="0.01" type="number" value={form.unit_price} onChange={(event) => setForm({ ...form, unit_price: event.target.value })} /></label>
+            <label>Kelish narxi<input required={!item?.id && showPrices} min="0" step="0.01" type="number" value={form.unit_price} onChange={(event) => setForm({ ...form, unit_price: event.target.value })} /></label>
+            {showPrices && (
+              <label>Ketish narxi<input required={!item?.id} min="0" step="0.01" type="number" value={form.selling_price} onChange={(event) => setForm({ ...form, selling_price: event.target.value })} /></label>
+            )}
             {importPaymentFields}
           </>}
           {showPayment && !isBackorder && isNew && canMultiLine && importPaymentFields}
@@ -4359,7 +4585,7 @@ function ZakazEditor({ close, done, notify, item = null, session }) {
             )
           )}
           <label>Yetkazuvchi<input value={form.supplier} onChange={(event) => setForm({ ...form, supplier: event.target.value })} /></label>
-          <label>Shartnoma raqami<input value={form.contract_number} onChange={(event) => setForm({ ...form, contract_number: event.target.value.replace(/[^\d/]/g, '') })} placeholder="12/1108" /></label>
+          <label>Shartnoma raqami<input value={form.contract_number} onChange={(event) => { setContractNumberEdited(true); setForm({ ...form, contract_number: event.target.value.replace(/[^\d/]/g, '') }) }} placeholder="12/1108" /></label>
           <label>Shartnoma sanasi<input type="date" value={form.contract_date} onChange={(event) => setForm({ ...form, contract_date: event.target.value })} /></label>
           <label>Faktura<input value={form.faktura} onChange={(event) => setForm({ ...form, faktura: event.target.value })} /></label>
           <label>Kutilgan sana<input type="date" value={form.expected_date} onChange={(event) => setForm({ ...form, expected_date: event.target.value })} /></label>
@@ -4369,6 +4595,16 @@ function ZakazEditor({ close, done, notify, item = null, session }) {
         </div>
         <div className="editor-actions"><button type="button" className="secondary-button" onClick={close}>Bekor qilish</button><button className="primary-button" disabled={saving || batchLoading}>{saving ? <SpinnerGap size={18} className="spin" /> : 'Saqlash'}</button></div>
       </form>
+      {importPickerIndex !== null && (
+        <ProductPickerModal
+          products={products}
+          onClose={() => setImportPickerIndex(null)}
+          onSelect={(product) => {
+            selectImportProduct(importPickerIndex, product)
+            setImportPickerIndex(null)
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -4487,48 +4723,51 @@ function PaymentEditor({ item, close, done, notify }) {
   )
 }
 
+const round2 = (value) => Math.round(Number(value || 0) * 100) / 100
+
+/**
+ * Qator hisobi. NARX ustun: soni yoki narx yoki QQS % o'zgarsa yetkazish
+ * qiymati, QQS miqdori va jami DARHOL qayta hisoblanadi — teskari hisobda
+ * ham. Teskari hisob faqat "jami"/"QQS miqdori"/"yetkazish qiymati" qo'lda
+ * kiritilganda ishlaydi: shunda narx orqaga hisoblanadi.
+ */
 function calcInvoiceLine(line, reverse, editedField = null) {
   const qty = Number(line.quantity || 0)
   const price = Number(line.unit_price || 0)
   const vatRate = line.vat_percent === 'none' || !line.vat_percent ? 0 : Number(line.vat_percent)
+  const REVERSE_FIELDS = ['total_amount', 'vat_amount', 'delivery_amount']
 
-  if (reverse) {
-    let delivery = Number(line.delivery_amount || 0)
-    const totalInput = Number(line.total_amount || 0)
-
+  if (reverse && REVERSE_FIELDS.includes(editedField)) {
+    if (editedField === 'total_amount') {
+      const total = Number(line.total_amount || 0)
+      const delivery = vatRate > 0 ? round2(total / (1 + vatRate / 100)) : total
+      return {
+        ...line,
+        unit_price: qty > 0 ? round2(delivery / qty) : line.unit_price,
+        delivery_amount: delivery,
+        vat_amount: round2(total - delivery),
+        total_amount: total,
+      }
+    }
     if (editedField === 'vat_amount') {
+      const delivery = Number(line.delivery_amount || 0)
       const vat = Number(line.vat_amount || 0)
-      const total = delivery > 0
-        ? Math.round((delivery + vat) * 100) / 100
-        : (totalInput || Math.round((delivery + vat) * 100) / 100)
-      return { ...line, delivery_amount: delivery, vat_amount: vat, total_amount: total }
+      return { ...line, delivery_amount: delivery, vat_amount: vat, total_amount: round2(delivery + vat) }
     }
-
-    if (editedField === 'total_amount' && totalInput > 0 && vatRate > 0) {
-      const netDelivery = Math.round((totalInput / (1 + vatRate / 100)) * 100) / 100
-      const vat = Math.round((totalInput - netDelivery) * 100) / 100
-      return { ...line, delivery_amount: netDelivery, vat_amount: vat, total_amount: totalInput }
+    const delivery = Number(line.delivery_amount || 0)
+    const vat = round2((delivery * vatRate) / 100)
+    return {
+      ...line,
+      unit_price: qty > 0 ? round2(delivery / qty) : line.unit_price,
+      delivery_amount: delivery,
+      vat_amount: vat,
+      total_amount: round2(delivery + vat),
     }
-
-    if (!delivery && qty > 0 && price > 0) {
-      delivery = Math.round(qty * price * 100) / 100
-    }
-
-    if (delivery > 0 && vatRate > 0) {
-      const vat = Math.round(delivery * vatRate) / 100
-      const total = Math.round((delivery + vat) * 100) / 100
-      return { ...line, delivery_amount: delivery, vat_amount: vat, total_amount: total }
-    }
-
-    const vat = Number(line.vat_amount || 0)
-    const total = totalInput || (delivery ? Math.round((delivery + vat) * 100) / 100 : 0)
-    return { ...line, delivery_amount: delivery, vat_amount: vat, total_amount: total }
   }
 
-  const delivery = Math.round(qty * price * 100) / 100
-  const vat = Math.round(delivery * vatRate) / 100
-  const total = Math.round((delivery + vat) * 100) / 100
-  return { ...line, delivery_amount: delivery, vat_amount: vat, total_amount: total }
+  const delivery = round2(qty * price)
+  const vat = round2((delivery * vatRate) / 100)
+  return { ...line, delivery_amount: delivery, vat_amount: vat, total_amount: round2(delivery + vat) }
 }
 
 function findProductForLine(products, line) {
@@ -4561,10 +4800,13 @@ function fillLineFromProduct(line, product, showPrices) {
     ...line,
     product: product.id,
     product_name: product.name,
+    category: product.category ? String(product.category) : (line.category || ''),
     identification_code: product.serial_number || '',
     barcode: product.barcode || '',
     unit: product.unit || 'piece',
-    unit_price: showPrices ? (product.selling_price || product.delivery_price || line.unit_price || '') : line.unit_price,
+    // «Narxi» — kelish narxi (QQS shundan hisoblanadi), alohida «Sotuv narxi»
+    unit_price: showPrices ? (product.purchase_price || product.delivery_price || line.unit_price || '') : line.unit_price,
+    selling_price: showPrices ? (product.selling_price ?? line.selling_price ?? '') : line.selling_price,
     vat_percent: product.vat_percent || line.vat_percent || 'none',
   }
 }
@@ -4581,7 +4823,7 @@ function reconcileLineWithProducts(line, products, showPrices) {
 }
 
 function emptyInvoiceLine(num = 1) {
-  return { line_number: num, product: '', product_name: '', identification_code: '', barcode: '', unit: 'piece', quantity: '1', unit_price: '', delivery_amount: 0, vat_percent: 'none', vat_amount: 0, total_amount: 0 }
+  return { line_number: num, product: '', product_name: '', category: '', identification_code: '', barcode: '', unit: 'piece', quantity: '1', unit_price: '', selling_price: '', delivery_amount: 0, vat_percent: 'none', vat_amount: 0, total_amount: 0 }
 }
 
 function validateEInvoice(editing, { showPrices, company } = {}) {
@@ -5242,6 +5484,13 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
   const [selectedClientDetail, setSelectedClientDetail] = useState(null)
   const [selectedExecutorClientDetail, setSelectedExecutorClientDetail] = useState(null)
   const [products, setProducts] = useState([])
+  const [categories, setCategories] = useState([])
+  // Buyurtmada tanlash uchun — import holatidagi (hali kelmagan) tovarlarsiz.
+  // To'liq `products` ro'yxati mavjud qatorlarni mahsulotga bog'lash uchun qoladi.
+  const selectableProducts = useMemo(
+    () => products.filter((product) => product.origin !== 'import'),
+    [products],
+  )
   const [company, setCompany] = useState(null)
   const [saving, setSaving] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
@@ -5332,13 +5581,15 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [invoiceData, productData, profile] = await Promise.all([
+      const [invoiceData, productData, categoryData, profile] = await Promise.all([
         api.invoices(),
         api.products({ page_size: 500 }),
+        api.categories({ page_size: 200 }),
         api.companyProfile(),
       ])
       setRows(list(invoiceData))
       setProducts(list(productData))
+      setCategories(flattenCategories(list(categoryData)))
       setCompany(profile)
     } catch (err) {
       notifyRef.current(err.message)
@@ -5524,8 +5775,10 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
         lines: (detail.lines?.length ? detail.lines : [emptyInvoiceLine()]).map((line) => ({
           ...line,
           product: line.product || '',
+          category: line.category ? String(line.category) : '',
           quantity: String(line.quantity ?? 1),
           unit_price: line.unit_price ?? '',
+          selling_price: line.selling_price ?? '',
         })),
       })
     } catch (err) {
@@ -5640,12 +5893,14 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
   }
 
   const totals = useMemo(() => {
-    if (!editing?.lines) return { delivery: 0, vat: 0, grand: 0 }
+    if (!editing?.lines) return { delivery: 0, vat: 0, grand: 0, selling: 0 }
     return editing.lines.reduce((acc, line) => ({
       delivery: acc.delivery + Number(line.delivery_amount || 0),
       vat: acc.vat + Number(line.vat_amount || 0),
       grand: acc.grand + Number(line.total_amount || 0),
-    }), { delivery: 0, vat: 0, grand: 0 })
+      // sotuv narxi × soni — qatorlar bo'yicha jami sotuv qiymati
+      selling: acc.selling + Number(line.selling_price || 0) * Number(line.quantity || 0),
+    }), { delivery: 0, vat: 0, grand: 0, selling: 0 })
   }, [editing?.lines])
 
   const handlePreview = async () => {
@@ -5678,7 +5933,11 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
       const payload = {
         document_type: editing.document_type,
         name: editing.name,
-        contract_number: editing.contract_number,
+        // Qo‘lda o‘zgartirilmagan bo‘lsa raqamni backend band qiladi —
+        // shunda bir kunda ketma-ket 1/1308, 2/1308 … chiqadi
+        ...(editing.id || contractNumberEdited
+          ? { contract_number: editing.contract_number }
+          : {}),
         place_signed: editing.place_signed,
         contract_date: editing.contract_date || null,
         valid_until: editing.valid_until || null,
@@ -5699,11 +5958,15 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
             line_number: index + 1,
             product: computed.product || null,
             product_name: computed.product_name,
+            category: computed.category ? Number(computed.category) : null,
             identification_code: computed.identification_code,
             barcode: computed.barcode,
             unit: computed.unit || 'piece',
             quantity: Number(computed.quantity || 1),
             unit_price: computed.unit_price || 0,
+            selling_price: computed.selling_price === '' || computed.selling_price == null
+              ? null
+              : Number(computed.selling_price),
             delivery_amount: computed.delivery_amount || 0,
             vat_percent: computed.vat_percent || 'none',
             vat_amount: computed.vat_amount || 0,
@@ -5947,17 +6210,19 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
                     <tr>
                       <th>№</th>
                       <th>Tovar nomi</th>
+                      <th>Kategoriya</th>
                       <th>Seriya raqami</th>
                       <th>Shtrix kod</th>
                       <th>O‘lchov birligi</th>
                       <th>Soni</th>
                       {showPrices && (
                         <>
-                          <th>Narxi</th>
+                          <th>Narxi (kelish)</th>
                           <th>Yetkazish qiymati</th>
                           <th>QQS %</th>
                           <th>QQS miqdori</th>
                           <th>Jami</th>
+                          <th>Sotuv narxi</th>
                         </>
                       )}
                       <th className="e-invoice-actions-head" aria-label="Amallar" />
@@ -5990,9 +6255,22 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
                             </button>
                           </div>
                           <datalist id={`einv-product-${index}`}>
-                            {products.map((p) => <option value={p.name} key={p.id} />)}
+                            {selectableProducts.map((p) => <option value={p.name} key={p.id} />)}
                           </datalist>
                           <EInvoiceFieldError message={errors[`lines.${index}.product_name`]} />
+                        </td>
+                        <td>
+                          <select
+                            required={!line.product}
+                            value={line.category ?? ''}
+                            onChange={(e) => updateLine(index, { category: e.target.value })}
+                            aria-label="Kategoriya"
+                          >
+                            <option value="">Kategoriya</option>
+                            {categories.map((cat) => (
+                              <option value={cat.id} key={cat.id}>{`${'— '.repeat(cat.depth)}${cat.name}`}</option>
+                            ))}
+                          </select>
                         </td>
                         <td>
                           <input
@@ -6006,7 +6284,7 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
                             className={errors[`lines.${index}.identification_code`] ? 'input-invalid' : ''}
                           />
                           <datalist id={`einv-idcode-${index}`}>
-                            {products.map((p) => p.serial_number).filter(Boolean).map((code) => (
+                            {selectableProducts.map((p) => p.serial_number).filter(Boolean).map((code) => (
                               <option value={code} key={code} />
                             ))}
                           </datalist>
@@ -6038,7 +6316,6 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
                                 type="number"
                                 min="0"
                                 step="0.01"
-                                readOnly={!editing.reverse_calculation}
                                 value={line.unit_price}
                                 onChange={(e) => updateLine(index, { unit_price: e.target.value })}
                                 onBlur={handleFieldBlur}
@@ -6055,6 +6332,17 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
                             </td>
                             <td><input type="number" min="0" step="0.01" readOnly={!editing.reverse_calculation} value={line.vat_amount} onChange={(e) => updateLine(index, { vat_amount: e.target.value })} /></td>
                             <td><input type="number" min="0" step="0.01" readOnly={!editing.reverse_calculation} value={line.total_amount} onChange={(e) => updateLine(index, { total_amount: e.target.value })} /></td>
+                            <td>
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={line.selling_price ?? ''}
+                                onChange={(e) => updateLine(index, { selling_price: e.target.value })}
+                                placeholder="Sotuv narxi"
+                                aria-label="Sotuv narxi"
+                              />
+                            </td>
                           </>
                         )}
                         <td className="e-invoice-row-actions">
@@ -6084,11 +6372,12 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
                   {showPrices && (
                     <tfoot>
                       <tr>
-                        <td colSpan={7}><b>Jami</b></td>
+                        <td colSpan={8}><b>Jami</b></td>
                         <td><b>{moneyDecimal(totals.delivery)}</b></td>
                         <td />
                         <td><b>{moneyDecimal(totals.vat)}</b></td>
                         <td><b>{moneyDecimal(totals.grand)}</b></td>
+                        <td><b>{moneyDecimal(totals.selling)}</b></td>
                         <td />
                       </tr>
                     </tfoot>
@@ -6207,7 +6496,7 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
 
       {productPickerLineIndex !== null && (
         <ProductPickerModal
-          products={products}
+          products={selectableProducts}
           onClose={() => setProductPickerLineIndex(null)}
           onSelect={(product) => {
             updateLine(productPickerLineIndex, { product: product.id })

@@ -42,6 +42,11 @@ class ProductUnit(models.TextChoices):
     SHEET = 'sheet', 'list'
 
 
+class ProductOrigin(models.TextChoices):
+    WAREHOUSE = 'warehouse', 'Ombor'
+    IMPORT = 'import', 'Import'
+
+
 class Category(MPTTModel):
     name   = CharField(max_length=255)
     parent = TreeForeignKey('self', on_delete=CASCADE,
@@ -64,7 +69,9 @@ class Product(TimeStampedModel):
                                    null=True, blank=True, related_name='products')
     name          = CharField(max_length=255)
     model         = CharField(max_length=255, blank=True, null=True)
-    serial_number = CharField(max_length=255, unique=True)
+    serial_number = CharField(max_length=255, unique=True, blank=True, null=True,
+                              help_text='Seriya raqami — qo‘lda kiritiladi, '
+                                        'avtomatik yaratilmaydi')
     barcode       = CharField(max_length=128, blank=True, null=True,
                               help_text='Shtrix kod')
     purchase_price = DecimalField(max_digits=14, decimal_places=2, null=True, blank=True,
@@ -83,6 +90,11 @@ class Product(TimeStampedModel):
                                help_text='O‘lchov birligi')
     min_quantity   = PositiveIntegerField(default=5,
                                           help_text='Minimal qoldiq chegarasi (notification uchun)')
+    origin         = CharField(max_length=20, choices=ProductOrigin.choices,
+                               default=ProductOrigin.WAREHOUSE,
+                               help_text='Mahsulot qayerdan yaratilgan: '
+                                         'ombor yoki import (buyurtma/import '
+                                         'qatoridan avtomatik)')
 
     class Meta:
         db_table = 'warehouse_product'
@@ -91,7 +103,9 @@ class Product(TimeStampedModel):
         verbose_name_plural = 'Mahsulotlar'
 
     def __str__(self):
-        return f'{self.name} ({self.serial_number})'
+        if self.serial_number:
+            return f'{self.name} ({self.serial_number})'
+        return self.name
 
     @property
     def quantity_in_stock(self):
@@ -104,6 +118,21 @@ class Product(TimeStampedModel):
     @property
     def available_quantity(self):
         return self.quantity_in_stock - self.reserved_quantity
+
+    @property
+    def pending_import_quantity(self):
+        """Yo'ldagi (hali qabul qilinmagan) import miqdori.
+
+        Buyurtma yoki import ochilgan, lekin tovar omborga hali kelmagan —
+        qoldiq 0 bo'lsa ham nechta dona kutilayotgani ko'rinib tursin.
+        """
+        from apps.orders.models import Zakaz
+        # prefetch_related('zakazlar') bo'lsa qo'shimcha so'rov ketmasin
+        return sum(
+            max(zakaz.quantity - (zakaz.received_qty or 0), 0)
+            for zakaz in self.zakazlar.all()
+            if zakaz.status in Zakaz.ACTIVE_STATUSES
+        )
 
     @property
     def stock_status(self):

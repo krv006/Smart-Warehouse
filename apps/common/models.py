@@ -10,3 +10,4 @@ class TimeStampedModel(models.Model):
 
 
 from apps.common.company import CompanyProfile  # noqa: E402, F401
+from apps.common.contracts import ContractSequence  # noqa: E402, F401
