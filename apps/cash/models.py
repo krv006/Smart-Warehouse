@@ -86,9 +86,11 @@ class Payment(TimeStampedModel):
 
     def save(self, *args, **kwargs):
         if self.sale_id:
-            if not self.pk:
-                self.total_amount = self.sale.sold_price * self.sale.quantity
-                self.commission   = (self.total_amount * self.COMMISSION_RATE).quantize(Decimal('0.01'))
+            # Sotuv tahrirlansa (narx/miqdor) ham kassa jami summasi qayta
+            # hisoblanishi uchun HAR safar (nafaqat yaratishda) qayta olinadi
+            # — buyurtma (order_id) bilan bir xil qoida.
+            self.total_amount = self.sale.sold_price * self.sale.quantity
+            self.commission   = (self.total_amount * self.COMMISSION_RATE).quantize(Decimal('0.01'))
         elif self.zakaz_id:
             if not self.pk:
                 z = self.zakaz

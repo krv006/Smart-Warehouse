@@ -211,7 +211,7 @@ Timeout: **8 soniya**. Xato klassi: `ApiError(message, status, fields?)` — `fi
 | `salesBulk(payload)` | POST | `/sales/bulk/` | bulk sales body |
 | `payments(params)` | GET | `/cash/payments/` | `page_size=30`, `status`, `order`, `sale`, `client`, `currency`, `include_paid`, `search`, `ordering`, `page` |
 | `paymentsSummary()` | GET | `/cash/payments/summary/` | — |
-| `kassaLedger(params)` | GET | `/cash/payments/ledger/` | `page`, `page_size`, `search`, `source` (`sale`\|`order`\|`import`) |
+| `kassaLedger(params)` | GET | `/cash/payments/ledger/` | `page`, `page_size`, `search`, `source` (`sale`\|`order`\|`import`\|`expense`) |
 | `pay(id, payload)` | POST | `/cash/payments/{id}/pay/` | `{ amount, comment }` |
 | `exchangeRateLatest(refresh)` | GET | `/cash/exchange-rates/latest/` | `refresh=true\|false` |
 | `exchangeRateSettings()` | GET | `/cash/exchange-rates/settings/` | — |
@@ -695,15 +695,17 @@ FIFO ombordan ayiradi. Operator uchun narx/foyda yashirilishi mumkin.
 
 | Method | Path | Query / body | Ruxsat | api.js |
 |---|---|---|---|---|
-| GET | `/` | `page_size`, `status`, `include_paid`, `client`, `currency`, `order`, `sale`, `due_date`, `search` | Accountant/Management read | ✅ `payments` |
-| POST | `/` | payment body | Accountant | ✅ `create` |
-| GET/PATCH | `/{id}/` | — | Accountant/Management | ✅ `retrieve`/`update` |
-| DELETE | `/{id}/` | — | Management | ✅ `remove` |
+| GET | `/` | `page_size`, `status`, `include_paid`, `client`, `currency`, `order`, `sale`, `due_date`, `search` | Auth — Operator ham o‘qiydi (summasiz), Accountant/Management to‘liq | ✅ `payments` |
+| POST | `/` | payment body | Accountant/Management | ✅ `create` |
+| GET/PATCH | `/{id}/` | — | GET: Auth (Operator summasiz); PATCH: Accountant/Management | ✅ `retrieve`/`update` |
+| DELETE | `/{id}/` | — | Accountant/Management | ✅ `remove` |
 | POST | `/{id}/pay/` | `{ amount, comment }` | Accountant/Management | ✅ `pay` |
 | GET | `/summary/` | — | Accountant/Management | ✅ `paymentsSummary` |
-| GET | `/ledger/` | `page`, `page_size`, `search`, `source`, `kind` | Accountant/Management read | ✅ `kassaLedger` |
+| GET | `/ledger/` | `page`, `page_size`, `search`, `source`, `kind` | Accountant/Management (`IsAccountantWithManagementRead`, yozish yo‘q — faqat GET) | ✅ `kassaLedger` |
 
 **Ro‘yxatda `paid` yashirin** — `?status=paid` yoki `?include_paid=true`.
+
+**Operator kassani ko‘radi, lekin pul yo‘q:** `GET /cash/payments/` va `/{id}/` Operatorga ham ochiq (`IsAccountantWithManagementRead`), lekin backend `PaymentOperatorSerializer` qaytaradi — javobda `total_amount`, `commission`, `paid_amount`, `remaining` maydonlari **umuman yo‘q**. Frontend bu maydonlar bo‘lmasligiga tayyor bo‘lsin (§21, qoida 7). Yozish (`POST`/`PATCH`/`DELETE`/`pay`) Operatorga hech qachon ochiq emas — `403`.
 
 **Valyuta kursi** `/exchange-rates/`
 
@@ -782,6 +784,8 @@ Operator uchun narx maydonlari (`unit_price`, `delivery_amount`, `vat_amount`, `
 `prices_view` yo‘q foydalanuvchilar uchun invoice darajasidagi `total_delivery`, `total_vat`, `grand_total` ham qaytmaydi (serializer context `can_view_prices=false`).
 
 Mazmun: `content_title`, `content_body` — frontend preview (`DocumentPreviewModal`) bilan ko‘rsatiladi.
+
+**Shartnoma (SK) → kassaga chiqim (`sync_invoice_expense`, yangi):** `document_type=contract_sk` hujjat yaratilganda/tahrirlanganda, **ombordagi (import bo‘lmagan)** mahsulot qatorlari bo‘yicha summa (`delivery_amount + vat_amount` jami) kassadan **chiqim** (`Expense`, `expenses_expense.invoice` FK) sifatida avtomatik yoziladi. Yangi (shu hujjat orqali birinchi marta ochilgan, `origin=import`) mahsulot qatorlari bu yerda hisoblanmaydi — ular alohida import (Zakaz) oqimi orqali kassaga tushadi (`sync_zakaz_expense`, o‘sha zakaz qabul qilinganda/to‘langanda), shu sabab ikki marta hisoblanmaydi. `document_type=invoice`/`act` hujjatlari kassaga umuman yozilmaydi (ular SK’ga qo‘shimcha hujjat, summani takrorlamasin). Hujjat o‘chirilsa (`DELETE`) bog‘liq chiqim ham o‘chadi. Jurnalda (`GET /cash/payments/ledger/?kind=out`) `source=expense` sifatida ko‘rinadi.
 
 ### Xarajatlar — `/api/v1/expenses/`
 
@@ -1462,6 +1466,8 @@ Yaratilganda:
 - shartnomalar reestriga yoziladi;
 - tarix yoziladi.
 
+**Operator narxi (`unit_price`) e’tiborga olinmaydi (tuzatilgan bug):** Operator buyurtma yaratsa/tahrirlasa, qatorda yuborgan `unit_price` **e’tiborga olinmaydi** — narx mahsulotning belgilangan `selling_price`sidan avtomatik olinadi (Sotuv bilan bir xil qoida). `prepaid_amount` ham Operator uchun `0`ga majburlanadi. Sabab: narxni faqat Management kirita oladi (`prices_manage`); avval bu qatorlar narxsiz (`unit_price=null`) qolib, `Order.total=None` bo‘lib, buyurtma **kassaga umuman tushmasdi** — endi tuzatilgan. Frontend Operator uchun narx inputini ko‘rsatishi shart emas (baribir e’tiborga olinmaydi); Management/`prices_manage` esa har doimgidek `unit_price`ni to‘g‘ridan-to‘g‘ri kiritadi.
+
 ### Bulk buyurtma
 
 ```http
@@ -2097,6 +2103,8 @@ POST /api/v1/warehouse/products/{id}/add-stock/
 
 `asos` majburiy. Kirimdan keyin pending orderlarga bron avtomatik ajratiladi. Javobda `allocated_orders` bo‘lishi mumkin.
 
+**Kassaga chiqim (`record_stock_in_expense`, yangi):** mahsulotning **kelish narxi** (`purchase_price`) belgilangan bo‘lsa, kirim summasi (`narx × miqdor`) kassadan **chiqim** (`Expense`, toifa — Import) sifatida avtomatik yoziladi (har kirim — alohida yozuv). `purchase_price` bo‘lmasa (masalan operator narxsiz mahsulotga kirim qilsa) — hisoblab bo‘lmagani uchun chiqim yozilmaydi, jurnalda ko‘rinmaydi. Xuddi shu qoida `POST /warehouse/products/` da boshlang‘ich `quantity` bilan mahsulot yaratilganda ham ishlaydi.
+
 ### Qoldiqlar
 
 ```http
@@ -2211,7 +2219,11 @@ DELETE /api/v1/sales/{id}/
 POST /api/v1/sales/bulk/
 ```
 
-Sotuv yaratilganda to‘liq summa avtomatik **kassaga tushum** sifatida yoziladi (`Payment` + tranzaksiya, 15% komissiya bilan). Backend: `apps/sales/sale_payment.sync_sale_payment` — har `POST/PATCH` dan keyin chaqiriladi (`apps/sales/serializers.py`).
+Sotuv yaratilganda to‘liq summa avtomatik **kassaga tushum** sifatida yoziladi (`Payment` + tranzaksiya, 15% komissiya bilan). Backend: `apps/sales/sale_payment.sync_sale_payment` — `POST` va `PATCH` dan keyin chaqiriladi (`apps/sales/serializers.py`).
+
+**Tahrirda ham kassa qayta sinxronlanadi (tuzatilgan bug):** narx (`sold_price`) yoki miqdor o‘zgarsa, `Payment.total_amount`/`paid_amount` **qayta hisoblanadi** — oshgan farq qo‘shimcha tranzaksiya, kamaygan farq manfiy korrektsiya tranzaksiyasi bo‘lib yoziladi (avval `PATCH` kassani umuman yangilamas edi, eski summada qolib ketardi). Operator `sold_price`ni tahrirlay olmaydi (backend chetlab o‘tadi) — faqat miqdor orqali summa o‘zgarishi mumkin.
+
+**O‘chirishda kassa yozuvi ham tozalanadi:** `DELETE /sales/{id}/` bog‘liq `Payment`ni ham o‘chiradi (aks holda `Payment.sale` FK `PROTECT` bo‘lgani uchun o‘chirish `500` bilan yiqilardi).
 
 Bitta sotuv:
 
@@ -2282,8 +2294,10 @@ Frontend Kassa sahifasi: `KassaPage` — `api.kassaLedger()` + `api.paymentsSumm
 |---|---|
 | `page`, `page_size` | Pagination (default `page_size=25`, max 100) |
 | `search` | Izoh, mijoz, shartnoma, mahsulot nomi |
-| `source` | `sale` \| `order` \| `import` |
+| `source` | `sale` \| `order` \| `import` \| `expense` (yangi) |
 | `kind` | `in` \| `out` |
+
+`source=import` — zakaz yoki faktura (SK)ga bog‘langan chiqim (`zakaz_id` bor). `source=expense` (yangi) — boshqa barcha rasxod turlari: ofis, transport, komandirovka, oylik, deklaratsiya, sertifikat, boshqa, **va endi ombor kirimi** (`add-stock`/mahsulot yaratish) ham shu yerda ko‘rinadi. `expense_type` maydoni rasxod toifasi kodini ko‘rsatadi (`office`, `import`, `transport`, …).
 
 Javob (pagination):
 
@@ -2309,6 +2323,7 @@ Javob (pagination):
       "id": "out-3",
       "kind": "out",
       "source": "import",
+      "expense_type": "import",
       "amount": "15000000",
       "currency": "UZS",
       "label": "Import #5 — Monitor (Guangzhou)",
@@ -2316,12 +2331,25 @@ Javob (pagination):
       "date": "2026-08-10",
       "created_at": "2026-08-10T09:00:00+05:00",
       "zakaz_id": 5
+    },
+    {
+      "id": "out-9",
+      "kind": "out",
+      "source": "expense",
+      "expense_type": "office",
+      "amount": "1200000",
+      "currency": "UZS",
+      "label": "Ofis ijarasi",
+      "client_name": null,
+      "date": "2026-08-12",
+      "created_at": "2026-08-12T10:00:00+05:00",
+      "zakaz_id": null
     }
   ]
 }
 ```
 
-**`paymentsSummary` qo‘shimcha maydonlar** (`ledger_totals()`):
+**`paymentsSummary` qo‘shimcha maydonlar** (`ledger_totals()`, yangilangan):
 
 ```json
 {
@@ -2329,17 +2357,25 @@ Javob (pagination):
   "sum_in_usd": "0",
   "sum_import_uzs": "20000000",
   "sum_import_usd": "0",
-  "net_balance_uzs": "30000000",
+  "sum_out_uzs": "23200000",
+  "sum_out_usd": "0",
+  "net_balance_uzs": "26800000",
   "net_balance_usd": "0"
 }
 ```
 
-**Kassa balansi** = `net_balance_uzs` = tushumlar − import chiqimlari.
+| Maydon | Ma’nosi |
+|---|---|
+| `sum_import_uzs`/`usd` | **Faqat** import (zakaz/faktura)ga bog‘liq chiqim — eski maydon, moslik uchun saqlangan |
+| `sum_out_uzs`/`usd` | **Barcha** chiqim — import + ofis/transport/oylik/... (yangi) |
+| `net_balance_uzs`/`usd` | **Kassa balansi** = tushumlar − `sum_out_uzs`/`usd` (**barcha** chiqimlar hisobga olinadi — avval faqat import chiqimi ayrilardi, boshqa rasxodlar balansga kirmasdi) |
+
+**Bug tuzatildi:** avval `net_balance` faqat import chiqimini hisobga olardi — ofis/transport/oylik kabi rasxodlar kiritilgan bo‘lsa ham kassa balansi ularni ko‘rsatmasdi. Frontend `KassaPage` balans metrikasi endi to‘g‘ri qiymat qaytaradi — qo‘shimcha o‘zgartirish talab qilinmaydi (backend hisoblab beradi), lekin agar UI qayerdadir `sum_import_uzs`ni "jami chiqim" sifatida ko‘rsatayotgan bo‘lsa, endi `sum_out_uzs`ga o‘tkazish tavsiya etiladi.
 
 **`KassaPage` UI (`prices_view` bo‘lsa):**
 
-- Metrikalar: Tushum, Import chiqim, Kassa balansi, Komissiya
-- Filtrlar: qidiruv, manba (`sale` / `order` / `import`)
+- Metrikalar: Tushum, Import chiqim, Kassa balansi, Komissiya (tavsiya: umumiy chiqim uchun `sum_out_uzs` ham ko‘rsatilsin — yangi rasxod manbalari, quyida)
+- Filtrlar: qidiruv, manba (`sale` / `order` / `import` / `expense` — yangi)
 - Qolgan to‘lov bo‘lsa tushum qatorida **to‘lov qabul qilish** (`api.pay`) — faqat `cash_manage`
 - **Yangi to‘lov** modali — qo‘lda `POST /cash/payments/` (sotuvga bog‘lash)
 
@@ -2536,6 +2572,8 @@ Default bosh sahifa filtri: bugungi sana (`date_from` = `date_to` = bugun).
 | Kechikkan to‘lovlar | `overdue_payments_count` | Payment overdue count | |
 
 **Muhim:** Tushum va Import chiqim **alohida** ko‘rsatiladi; bir xil summa bo‘lishi mumkin (bugun 50M sotuv + 50M import), lekin bu turli operatsiyalar. **Balans** kartochkasi (`Tushum − Import`) haqiqiy kassa o‘zgarishini ko‘rsatadi.
+
+**⚠️ Diqqat — ikki xil `net_balance_uzs` doirasi (nomuvofiqlik):** Ushbu bo‘limdagi `import_paid_uzs`/`net_balance_uzs` (`/reports/summary/`, `_import_paid_totals()`) **faqat zakazga bog‘langan** (`Expense.zakaz`) chiqimni hisoblaydi — ombor kirimi (`add-stock`) va faktura (SK) orqali yozilgan yangi chiqimlar (§17c) bu yerga **kirmaydi**. `/cash/payments/summary/` dagi `net_balance_uzs` esa (§14) endi **barcha** `Expense`ni hisobga oladi. Ya’ni shu ikki endpoint bir xil davr uchun **turli** balans qaytarishi mumkin — bosh sahifa balansi torroq (faqat import), Kassa sahifasi balansi to‘liq. Frontend buni hisobga olsin (masalan tooltip/izoh); ikkalasini birlashtirish alohida backend o‘zgarishi talab qiladi (hozircha qilinmagan).
 
 **Frontend UI:** `Dashboard` — `Filtrlar` + `Yangi buyurtma` (`einvoice_manage`). Mobilda (`≤768px`) tugma qator ichida ixcham (`dashboard-toolbar`): filtr chapda kengayadi, tugma o‘ngda `width: auto`; juda tor ekranda (`≤420px`) faqat `+` ikonka (`aria-label="Yangi buyurtma"`).
 
@@ -2796,11 +2834,16 @@ Biznes qoida (frontend ko‘rsatish):
 
 | Operatsiya | Yo‘nalish | Backend | Jurnal |
 |---|---|---|---|
-| **Sotuv** | Kassaga **tushum** | `apps/sales/sale_payment.py` → `sync_sale_payment` | `kind=in`, `source=sale` |
+| **Sotuv** (yaratish/tahrir/o‘chirish) | Kassaga **tushum** | `apps/sales/sale_payment.py` → `sync_sale_payment` | `kind=in`, `source=sale` |
+| **Buyurtma** (yaratish/tahrir, oldindan to‘lov) | Kassaga **tushum** | `apps/orders/models.py` → `Order.sync_payment` | `kind=in`, `source=order` |
 | **Import (manual zakaz)** | Kassadan **chiqim** | `apps/orders/zakaz_payment.py` → `sync_zakaz_expense` | `kind=out`, `source=import` |
-| **Buyurtma oldindan to‘lov** | Kassaga tushum | `Payment` + tranzaksiya | `kind=in`, `source=order` |
+| **Shartnoma (SK) faktura** — ombordagi mahsulot qatorlari *(yangi)* | Kassadan **chiqim** | `apps/invoices/expense_sync.py` → `sync_invoice_expense` | `kind=out`, `source=import` (`expense_type=import`) |
+| **Ombor kirimi** (`add-stock`, mahsulot yaratish) — kelish narxi bo‘lsa *(yangi)* | Kassadan **chiqim** | `apps/warehouse/stock_expense.py` → `record_stock_in_expense` | `kind=out`, `source=expense` (`expense_type=import`) |
+| **Boshqa rasxod** (ofis, transport, oylik, …) | Kassadan **chiqim** | `apps/expenses/` — qo‘lda kiritiladi | `kind=out`, `source=expense` |
 
-**Kassa balansi** = barcha tushum tranzaksiyalari − barcha import `Expense` summalari (`ledger_totals()`).
+**Kassa balansi** (`/cash/payments/summary/` → `net_balance_uzs`) = barcha tushum tranzaksiyalari − **barcha** `Expense` summalari (`ledger_totals()`, yangilangan — avval faqat import chiqimini hisoblardi). ⚠️ `/reports/summary/` dagi (bosh sahifa) `net_balance_uzs` bundan **farqli**, hali faqat import (zakaz)ni hisoblaydi — yuqoridagi «Diqqat» qutisiga qarang.
+
+**Sotuv o‘chirilsa** bog‘liq kassa yozuvi ham o‘chadi (`PROTECT` xatosining oldi olingan). **Buyurtma bekor qilinsa** (`/cancel/`) — bog‘liq kassa yozuvi hozircha **tegilmaydi** (ochiq savol — refund siyosati aniqlanmagan).
 
 ### Import grid ustunlari (`ResourcePage`, title=`Import`)
 
@@ -2825,10 +2868,13 @@ Tarix tugmasi: zakaz `history` modal.
 
 | Fayl | Vazifa |
 |---|---|
-| `apps/cash/ledger.py` | `build_ledger_entries`, `ledger_totals` |
+| `apps/cash/ledger.py` | `build_ledger_entries`, `ledger_totals` (endi barcha `Expense`ni hisoblaydi) |
 | `apps/reports/excel.py` | Excel generatsiya, meta sarlavhalar, `export_kassa_ledger`, `export_imports` |
-| `apps/sales/sale_payment.py` | Sotuv → Payment |
-| `apps/orders/zakaz_payment.py` | Import → Expense |
+| `apps/sales/sale_payment.py` | Sotuv → Payment (yaratish **va tahrir**) |
+| `apps/orders/models.py` (`Order.sync_payment`) | Buyurtma → Payment |
+| `apps/orders/zakaz_payment.py` | Import (zakaz) → Expense |
+| `apps/invoices/expense_sync.py` *(yangi)* | Shartnoma (SK) faktura → Expense |
+| `apps/warehouse/stock_expense.py` *(yangi)* | Ombor kirimi (`add-stock`, mahsulot yaratish) → Expense |
 
 ---
 
@@ -3004,7 +3050,7 @@ Regressiya testlari: `apps/common/tests/test_role_matrix.py`.
 | 5 | Sotuv yaratish | Operator ✅, Accountant ❌, Management ✅ |
 | 6 | Sotuv summasi | Operator uchun `sold_price`, `total_amount`, `profit` yo‘q |
 | 7 | Kassa/xarajat | Operator faqat GET; summalar yashirin |
-| 8 | Buyurtma yaratish | Operator ✅, Accountant ❌, Management ✅ |
+| 8 | Buyurtma yaratish | Operator ✅, Accountant ❌, Management ✅. Narx (`unit_price`) faqat Management kiritadi — Operator yuborsa e’tiborga olinmaydi, mahsulot `selling_price`sidan avtomatik olinadi |
 | 9 | Import yaratish | Barcha rollar ✅ |
 | 10 | Import status | Faqat Management (`confirmed`, `ordered`, `received`, …) — frontend: `order_status_manage` |
 | 11 | Hisobotlar | Operator ❌, Accountant/Management ✅ |
@@ -3013,7 +3059,7 @@ Frontend `abilities` (`warehouse_create`, `order_status_manage`, `prices_view`, 
 
 ## 22. Hali backendda yo‘q (kelajak modullar)
 
-Buyurtmalar moduli (`/api/v1/invoices/`) — **mavjud:** mazmun, qatorlar, alohida yangi/tahrir sahifalari, preview/ko‘rish modali, teskari hisob, hamkor/tovar tanlash, inline validatsiya, SK → shartnomalar reestri sinx (`invoice_created` / `invoice_edited`).
+Buyurtmalar moduli (`/api/v1/invoices/`) — **mavjud:** mazmun, qatorlar, alohida yangi/tahrir sahifalari, preview/ko‘rish modali, teskari hisob, hamkor/tovar tanlash, inline validatsiya, SK → shartnomalar reestri sinx (`invoice_created` / `invoice_edited`), **SK → kassa (Expense) sinx** (§4, §17c — yangi).
 
 **Hali yo‘q:**
 

@@ -49,7 +49,11 @@ class SaleViewSet(ModelViewSet):
 
     @transaction.atomic
     def perform_destroy(self, instance):
-        # Sotuv o'chirilsa — sotilgan miqdor omborga qaytariladi
+        # Sotuv o'chirilsa — sotilgan miqdor omborga qaytariladi va
+        # sotuvga bog'liq kassa yozuvi (Payment PROTECT qiladi, aks holda
+        # o'chirish xatolik bilan yiqiladi) ham bekor qilinadi
+        from apps.cash.models import Payment
+        Payment.objects.filter(sale=instance).delete()
         _restore_stock(instance.product, instance.quantity)
         instance.delete()
 

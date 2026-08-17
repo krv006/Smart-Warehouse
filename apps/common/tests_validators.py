@@ -36,7 +36,7 @@ class UzValidatorsTests(SimpleTestCase):
         validate_uz_phone('939498849')
 
     def test_jshshir_format(self):
-        validate_jshshir('301019900010017')
+        validate_jshshir('30101990001001')  # 14 ta raqam, '3' bilan boshlanadi
         validate_jshshir('26874128741871')
         with self.assertRaisesMessage(Exception, '14 ta raqam'):
             validate_jshshir('123')

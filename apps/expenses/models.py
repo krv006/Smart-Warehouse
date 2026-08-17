@@ -69,6 +69,9 @@ class Expense(TimeStampedModel):
     zakaz        = ForeignKey('orders.Zakaz', on_delete=SET_NULL,
                               null=True, blank=True, related_name='expenses',
                               help_text='Import (zakaz) bo\'yicha avtomatik chiqim')
+    invoice      = ForeignKey('invoices.ElectronicInvoice', on_delete=SET_NULL,
+                              null=True, blank=True, related_name='expenses',
+                              help_text='Elektron faktura (shartnoma) bo\'yicha avtomatik chiqim')
 
     class Meta:
         db_table = 'expenses_expense'

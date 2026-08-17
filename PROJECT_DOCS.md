@@ -529,6 +529,28 @@ har bir mahsulot bo'yicha to'liq hujjatli asos doim tayyor turadi.
 `/cash/payments/summary/` da buyurtma to'lovlari alohida ko'rinadi:
 `order_payments_count`, `sum_order_total_uzs`, `sum_order_prepaid_uzs`, `sum_order_due_uzs`.
 
+**Kassa jurnali (ledger):** `GET /cash/payments/ledger/` — birlashgan tushum
+(`in`: sotuv/buyurtma) + chiqim (`out`) jurnali. `out` yozuvlari endi
+**BARCHA** `Expense` (rasxod) yozuvlarini o'z ichiga oladi, faqat import
+(zakaz/faktura)ni emas — `source` maydoni `import` (zakaz/faktura bog'liq)
+yoki `expense` (ofis/transport/oylik/boshqa) bo'ladi. `/cash/payments/summary/`
+javobidagi `net_balance_uzs`/`net_balance_usd` ham shu bo'yicha **barcha**
+rasxodlarni ayirib hisoblanadi (`sum_out_uzs`/`sum_out_usd`); eski
+`sum_import_uzs`/`sum_import_usd` maydonlari moslik uchun faqat import
+chiqimini ko'rsatishda davom etadi.
+
+**Kassaga avtomatik chiqim (Expense) yoziladigan boshqa holatlar:**
+
+| Manba | Qachon | Izoh |
+|-------|--------|------|
+| `POST /warehouse/products/{id}/add-stock/` | Kirim qilinganda, agar mahsulotning `purchase_price`i bo'lsa | Summasi = narx × miqdor |
+| `POST /warehouse/products/` (`quantity` bilan) | Mahsulot yaratilib, boshlang'ich qoldiq kiritilganda, agar `purchase_price`i bo'lsa | Summasi = narx × miqdor |
+| `POST/PATCH /invoices/` (`document_type=contract_sk`) | Fakturadagi **ombordagi** (import bo'lmagan) mahsulot qatorlari uchun | Summasi = qator(lar) yetkazish+QQS jami; yangi ochilgan (import) mahsulotlar bu yerda hisoblanmaydi — ular o'z Zakazi orqali alohida kassaga tushadi |
+
+Sotuv o'chirilganda (`DELETE /sales/{id}/`) unga bog'liq kassa yozuvi ham
+avtomatik o'chiriladi (aks holda `Payment.sale` FK `PROTECT` bo'lgani uchun
+o'chirish xatolik bilan yiqilardi).
+
 **Bo'lib to'lash (tranzaksiyalar):**
 
 Har bitta pul harakati alohida **tranzaksiya** (`PaymentTransaction`) bo'lib yoziladi —
@@ -731,6 +753,26 @@ python manage.py seed --clear     # ixtiyoriy — test uchun
 | `cash_payment_transaction` | **yangi jadval** — har bitta to'lov (bo'lib to'lash) tranzaksiyasi |
 | `orders_product_contract` | **yangi jadval** — mahsulot shartnomalari reestri (har holat avtomatik) |
 | `orders_order_item` | **yangi jadval** — buyurtma qatorlari (BITTA buyurtma = ko'p mahsulot); `orders_order` dan `product/quantity/unit_price/reserved_qty` shu yerga ko'chdi |
+
+**Kassa integratsiyasi to'ldirilgan qismlar (keyingi yangilanish):**
+
+| Jadval / joy | O'zgarish |
+|--------------|-----------|
+| `expenses_expense` | `invoice` (FK, nullable) — Elektron faktura (shartnoma) bo'yicha avtomatik chiqim |
+| `apps.invoices.expense_sync.sync_invoice_expense` | Shartnoma (SK) fakturasi — ombordagi mahsulot qatorlari bo'yicha kassadan chiqim yozadi |
+| `apps.warehouse.stock_expense.record_stock_in_expense` | `add-stock` va mahsulot yaratishdagi boshlang'ich qoldiq — kelish narxi bo'lsa kassadan chiqim yozadi |
+| `apps/cash/ledger.py` | `build_ledger_entries`/`ledger_totals` endi **barcha** `Expense`larni (nafaqat importni) hisobga oladi — `net_balance_uzs/usd` to'g'ri balans beradi |
+| `apps/sales/views.py` | Sotuv o'chirilganda bog'liq kassa yozuvi (`Payment`) ham tozalanadi (`PROTECT` xatosining oldi olindi) |
+| `apps/orders/serializers.py` | Operator yaratgan/tahrirlagan buyurtma qatori narxsiz qolib ketmaydi — narx mahsulotning `selling_price`idan avtomatik olinadi (aks holda `Order.total=None` bo'lib, buyurtma kassaga UMUMAN tushmasdi) |
+| `apps/cash/models.py`, `apps/sales/sale_payment.py` | Sotuv narxi/miqdori TAHRIRLANGANDA ham kassadagi yozuv (`Payment.total_amount`/`paid_amount`) qayta sinxronlanadi (avval faqat yaratishda hisoblanardi, tahrirda eski summada qolib ketardi) |
+
+> ⚠️ **Ochiq savol (hal qilinmagan):** Buyurtma `POST /orders/{id}/cancel/` bilan bekor qilinganda kassadagi bog'liq `Payment` (agar oldindan to'lov bo'lgan bo'lsa) hozircha **tegilmaydi** — pul qaytariladimi (refund) yoki oldindan to'lov qaytarilmas hisoblanadimi, biznes qoidasi aniqlanmagani uchun avtomatik o'zgartirilmadi.
+
+**Umumiy backend audit (kassadan tashqari) topilgan va tuzatilgan xato:**
+
+| Fayl | Muammo | Tuzatish |
+|------|--------|----------|
+| `root/celery.py` | `check-overdue-payments-daily` vazifasi butun son (`32400`) bilan rejalashtirilgan edi — Celery buni "har 32400 soniyada" (taxminan 9 soatda bir marta, beat qachon ishga tushganidan siljib boradigan interval) deb tushunadi, izohda yozilgan "har kuni 09:00 UTC" **degani emas**. | `crontab(hour=9, minute=0)` bilan almashtirildi — endi haqiqatan ham har kuni aynan 09:00 UTC da ishlaydi. |
 
 ---
 

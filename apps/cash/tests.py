@@ -6,6 +6,7 @@ from rest_framework.test import APIClient
 
 from apps.cash.models import Payment
 from apps.cash.services import parse_bankxizmatlari_usd_rates
+from apps.expenses.models import Expense
 from apps.sales.models import Sale
 from apps.users.models import User
 from apps.warehouse.models import Product
@@ -51,9 +52,16 @@ class BankxizmatlariParserTests(TestCase):
         self.assertEqual(rates[1]['buy_rate'], Decimal('11870.00'))
 
 
+_sale_payment_counter = 0
+
+
 def _make_sale_payment():
+    # Regressiya: bitta testda ikki marta chaqirilsa ham serial_number
+    # (unique maydon) to'qnashmasin.
+    global _sale_payment_counter
+    _sale_payment_counter += 1
     product = Product.objects.create(
-        name='Monitor', serial_number='MN-1',
+        name='Monitor', serial_number=f'MN-{_sale_payment_counter}',
         purchase_price=Decimal('500000.00'))
     sale = Sale.objects.create(
         product=product, quantity=2, sold_price=Decimal('1000000.00'),
@@ -103,8 +111,11 @@ class PaymentBoundsTests(TestCase):
 
 class PaymentOperatorAccessTests(TestCase):
     """
-    Regressiya: operator to'lovlar ro'yxatini o'qib sotuv narxi/komissiyani
-    ko'ra olardi — endi kassa operator uchun butunlay yopiq.
+    Joriy qoida (`IsAccountantWithManagementRead`, role matrix — 4-bo'lim):
+    Operator kassani **ko'ra oladi** (ro'yxat/detali), lekin pul
+    summalari (`total_amount`/`commission`/`paid_amount`/`remaining`)
+    `PaymentOperatorSerializer` orqali javobdan yashirin turadi — yozish
+    esa faqat Accountant/Management.
     """
 
     def setUp(self):
@@ -115,15 +126,27 @@ class PaymentOperatorAccessTests(TestCase):
             'acc_c2', password='x', role=User.ACCOUNTANT)
         _make_sale_payment()
 
-    def test_operator_cannot_list_payments(self):
+    def test_operator_can_list_payments_without_amounts(self):
         self.api.force_authenticate(self.operator)
         res = self.api.get('/api/v1/cash/payments/')
+        self.assertEqual(res.status_code, 200)
+        row = res.data['results'][0]
+        for field in ('total_amount', 'commission', 'paid_amount', 'remaining'):
+            self.assertNotIn(field, row)
+
+    def test_operator_cannot_write_payments(self):
+        self.api.force_authenticate(self.operator)
+        payment = Payment.objects.order_by('-id').first()
+        res = self.api.patch(f'/api/v1/cash/payments/{payment.pk}/',
+                             {'paid_amount': '100'}, format='json')
         self.assertEqual(res.status_code, 403)
 
     def test_accountant_can_list_payments(self):
         self.api.force_authenticate(self.accountant)
         res = self.api.get('/api/v1/cash/payments/')
         self.assertEqual(res.status_code, 200)
+        row = res.data['results'][0]
+        self.assertIn('total_amount', row)
 
 
 class PaymentListFilterTests(TestCase):
@@ -150,3 +173,47 @@ class PaymentListFilterTests(TestCase):
         self.assertEqual(res.status_code, 200)
         ids = {row['id'] for row in res.data['results']}
         self.assertIn(self.paid.id, ids)
+
+
+class LedgerIncludesAllExpensesTests(TestCase):
+    """
+    Regressiya: umumiy kassa jurnali (ledger) va balans (summary) faqat
+    import (zakaz)ga bog'liq chiqimlarni hisoblardi — ofis/transport/oylik
+    kabi boshqa rasxod turlari kassa balansiga umuman kirmasdi.
+    """
+
+    def setUp(self):
+        from apps.expenses.models import ExpenseType
+
+        self.api = APIClient()
+        self.accountant = User.objects.create_user(
+            'acc_ledger', password='x', role=User.ACCOUNTANT)
+        self.api.force_authenticate(self.accountant)
+
+        payment = _make_sale_payment()  # total = 2 000 000
+        payment.add_payment(Decimal('2000000'))
+
+        office_type, _ = ExpenseType.objects.get_or_create(
+            code=ExpenseType.OFFICE, defaults={'name': 'Ofis rasxod'})
+        Expense.objects.create(
+            expense_type=office_type, amount=Decimal('300000'),
+            currency=Expense.UZS, date=date.today(),
+            comment='Ofis ijarasi',
+        )
+
+    def test_ledger_lists_non_import_expense_as_out(self):
+        res = self.api.get('/api/v1/cash/payments/ledger/?kind=out')
+        self.assertEqual(res.status_code, 200, res.data)
+        labels = [row['label'] for row in res.data['results']]
+        self.assertIn('Ofis ijarasi', labels)
+        row = next(r for r in res.data['results'] if r['label'] == 'Ofis ijarasi')
+        self.assertEqual(row['source'], 'expense')
+
+    def test_summary_net_balance_subtracts_all_expenses(self):
+        res = self.api.get('/api/v1/cash/payments/summary/')
+        self.assertEqual(res.status_code, 200, res.data)
+        # 2 000 000 kirim - 300 000 (ofis) chiqim = 1 700 000
+        self.assertEqual(Decimal(str(res.data['net_balance_uzs'])), Decimal('1700000'))
+        self.assertEqual(Decimal(str(res.data['sum_out_uzs'])), Decimal('300000'))
+        # Eski "faqat import" maydon o'zgarmasin (bu holatda import chiqimi yo'q)
+        self.assertEqual(Decimal(str(res.data['sum_import_uzs'])), Decimal('0'))

@@ -4,6 +4,7 @@ from decimal import Decimal
 from django.test import TestCase
 from rest_framework.test import APIClient
 
+from apps.cash.models import Payment
 from apps.sales.models import Sale
 from apps.sales.serializers import SaleSerializer
 from apps.users.models import User
@@ -143,6 +144,78 @@ class SaleUpdateDeleteAPITests(TestCase):
         self.stock.refresh_from_db()
         self.assertEqual(self.stock.quantity, 10)
         self.assertFalse(Sale.objects.filter(pk=self.sale.pk).exists())
+
+    def test_delete_removes_kassa_payment(self):
+        """
+        Regressiya: sotuv yaratilganda kassada Payment avtomatik ochiladi
+        (`sync_sale_payment`). `Payment.sale` — `on_delete=PROTECT`, shuning
+        uchun sotuvni o'chirish avval bog'liq kassa yozuvini ham
+        tozalashi kerak — aks holda o'chirish `ProtectedError` bilan
+        yiqiladi.
+        """
+        from apps.cash.models import Payment
+        self.assertTrue(Payment.objects.filter(sale=self.sale).exists())
+
+        res = self.client_api.delete(f'/api/v1/sales/{self.sale.id}/')
+        self.assertEqual(res.status_code, 204)
+        self.assertFalse(Payment.objects.filter(sale_id=self.sale.pk).exists())
+
+    def test_decreasing_quantity_lowers_kassa_payment(self):
+        """
+        Regressiya: sotuv miqdori kamaytirilsa kassadagi yozuv eski
+        summada qolib ketardi (`update()` `sync_sale_payment`ni
+        umuman chaqirmasdi).
+        """
+        payment = Payment.objects.get(sale=self.sale)
+        res = self.client_api.patch(
+            f'/api/v1/sales/{self.sale.id}/', {'quantity': 1})
+        self.assertEqual(res.status_code, 200, res.data)
+        payment.refresh_from_db()
+        self.assertEqual(payment.total_amount, Decimal('1300.00'))
+        self.assertEqual(payment.paid_amount, Decimal('1300.00'))
+        self.assertEqual(
+            sum(t.amount for t in payment.transactions.all()),
+            payment.paid_amount)
+
+
+class SalePriceEditKassaSyncTests(TestCase):
+    """
+    Narx faqat Management/Accountant o'zgartira oladi (Operatorda
+    `sold_price` PATCHda chetlab o'tiladi) — shu sabab narx tahriri
+    alohida, Management huquqi bilan tekshiriladi.
+    """
+
+    def setUp(self):
+        self.client_api = APIClient()
+        self.manager = User.objects.create_user(
+            'mng_sale', password='pass1234', role=User.MANAGEMENT)
+        self.client_api.force_authenticate(self.manager)
+        self.product = _make_product(serial='SN-PRICE')
+        Stock.objects.create(
+            product=self.product, quantity=10, warehouse_location='A1')
+        serializer = SaleSerializer(data={
+            'product': self.product.id,
+            'sold_price': '1300.00',
+            'quantity': 3,
+            'sold_date': date.today().isoformat(),
+        })
+        serializer.is_valid(raise_exception=True)
+        self.sale = serializer.save()  # total = 3900
+
+    def test_edit_price_resyncs_kassa_payment(self):
+        payment = Payment.objects.get(sale=self.sale)
+        self.assertEqual(payment.total_amount, Decimal('3900.00'))
+        self.assertEqual(payment.paid_amount, Decimal('3900.00'))
+
+        res = self.client_api.patch(
+            f'/api/v1/sales/{self.sale.id}/', {'sold_price': '1500.00'})
+        self.assertEqual(res.status_code, 200, res.data)
+        payment.refresh_from_db()
+        self.assertEqual(payment.total_amount, Decimal('4500.00'))  # 1500*3
+        self.assertEqual(payment.paid_amount, Decimal('4500.00'))
+        self.assertEqual(
+            sum(t.amount for t in payment.transactions.all()),
+            payment.paid_amount)
 
 
 class ProfitSnapshotTests(TestCase):

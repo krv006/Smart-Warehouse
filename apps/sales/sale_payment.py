@@ -5,8 +5,14 @@ from apps.cash.models import Payment
 
 def sync_sale_payment(sale, user=None):
     """
-    Sotuv tushumini kassaga yozadi (Payment + tranzaksiya).
-    Sotuv yaratilganda to'liq summa kassaga kiradi.
+    Sotuv tushumini kassaga yozadi/yangilaydi (Payment + tranzaksiya).
+
+    Sotuv yaratilganda to'liq summa darhol kassaga kiradi (sotuv har doim
+    to'liq to'langan hisoblanadi — buyurtmadagi kabi qisman to'lov yo'q).
+    Sotuv keyinroq tahrirlansa (narx yoki miqdor o'zgarsa) — kassadagi
+    summa ham shu bo'yicha qayta sinxronlanadi: oshgan farq qo'shimcha
+    tranzaksiya, kamaygan farq esa manfiy korrektsiya tranzaksiyasi
+    bo'lib yoziladi (buyurtma tahriridagi bilan bir xil qoida).
     """
     total = sale.total_amount
     if total is None or total <= 0:
@@ -26,21 +32,18 @@ def sync_sale_payment(sale, user=None):
             comment=comment,
         )
     else:
-        updates = []
-        if payment.client_id != sale.client_id:
-            payment.client = sale.client
-            updates.append('client')
-        if payment.comment != comment:
-            payment.comment = comment
-            updates.append('comment')
-        if updates:
-            payment.save(update_fields=updates)
+        payment.client = sale.client
+        payment.comment = comment
+        payment.save()  # total_amount/commission sotuvdan qayta hisoblanadi
 
     current = payment.paid_amount or Decimal('0')
-    if total > current:
-        payment.add_payment(
-            total - current,
-            user=user,
-            comment='Sotuv tushumi',
-        )
+    diff = total - current
+    if diff > 0:
+        payment.add_payment(diff, user=user, comment='Sotuv tushumi')
+    elif diff < 0:
+        payment.transactions.create(
+            amount=diff, received_by=user,
+            comment='To\'lov korrektsiyasi (sotuv tahriri)')
+        payment.paid_amount = total
+        payment.save()
     return payment

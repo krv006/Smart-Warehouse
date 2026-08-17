@@ -169,6 +169,14 @@ class ProductViewSet(ModelViewSet):
                 user=request.user,
             )
 
+            # Kelish narxi bo'lsa — kirim summasi kassadan chiqim (Expense)
+            # sifatida yoziladi
+            from apps.warehouse.stock_expense import record_stock_in_expense
+            record_stock_in_expense(
+                product, qty, user=request.user, asos=asos,
+                contract_number=contract_number, faktura=faktura,
+            )
+
         # Low-stock bildirishnomani yop (agar qoldiq etarli bo'lsa)
         if product.available_quantity > product.min_quantity:
             Notification.resolve_low_stock_notifications(product)

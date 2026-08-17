@@ -5,6 +5,7 @@ from rest_framework.permissions import BasePermission, SAFE_METHODS
 from rest_framework.viewsets import ModelViewSet
 
 from apps.common.permissions import IsManagement
+from apps.expenses.models import Expense
 from apps.invoices.models import ElectronicInvoice
 from apps.invoices.serializers import ElectronicInvoiceSerializer
 
@@ -50,6 +51,12 @@ class ElectronicInvoiceViewSet(ModelViewSet):
         if self.action == 'destroy':
             return [IsManagement()]
         return super().get_permissions()
+
+    def perform_destroy(self, instance):
+        # Fakturaga bog'liq kassa chiqimi ham o'chirilsin — aks holda
+        # egasiz Expense yozuvi kassada qolib ketadi.
+        Expense.objects.filter(invoice=instance).delete()
+        instance.delete()
 
     def get_serializer_context(self):
         ctx = super().get_serializer_context()

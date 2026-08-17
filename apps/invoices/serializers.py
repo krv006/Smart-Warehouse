@@ -5,6 +5,7 @@ from rest_framework.serializers import (ModelSerializer, ValidationError,
                                         PrimaryKeyRelatedField,
                                         SerializerMethodField)
 
+from apps.invoices.expense_sync import sync_invoice_expense
 from apps.invoices.models import ElectronicInvoice, ExecutorType, InvoiceLineItem, VatPercent
 from apps.invoices.services import sync_invoice_contract_registry
 from apps.warehouse.models import Category, Product, ProductUnit
@@ -181,7 +182,7 @@ class ElectronicInvoiceSerializer(ModelSerializer):
 
         lines = getattr(self, '_auto_import_lines', [])
         if not lines:
-            return
+            return set()
         user = self.context['request'].user
         batch_id = uuid.uuid4()
         asos = (f'Buyurtma №{invoice.contract_number or "—"} qatoridagi yangi '
@@ -215,7 +216,9 @@ class ElectronicInvoiceSerializer(ModelSerializer):
                 contract_date=invoice.contract_date,
                 asos=asos, zakaz=zakaz, user=zakaz.created_by,
             )
+        product_ids = {line['product'].pk for line in lines if line.get('product')}
         self._auto_import_lines = []
+        return product_ids
 
     def _apply_product_defaults(self, line_data):
         product = line_data.get('product')
@@ -308,6 +311,7 @@ class ElectronicInvoiceSerializer(ModelSerializer):
         sync_invoice_contract_registry(invoice, created=True,
                                        user=self.context['request'].user)
         self._create_auto_imports(invoice)
+        sync_invoice_expense(invoice, user=self.context['request'].user)
         return invoice
 
     @transaction.atomic
@@ -354,4 +358,5 @@ class ElectronicInvoiceSerializer(ModelSerializer):
         sync_invoice_contract_registry(invoice, created=False,
                                        user=self.context['request'].user)
         self._create_auto_imports(invoice)
+        sync_invoice_expense(invoice, user=self.context['request'].user)
         return invoice
