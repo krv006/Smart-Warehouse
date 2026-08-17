@@ -1,6 +1,7 @@
 from django.test import TestCase
 from django.urls import reverse
 from rest_framework.test import APIClient
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.users.models import User
 
@@ -80,3 +81,23 @@ class AuthAPITests(TestCase):
             'role': User.OPERATOR,
         })
         self.assertEqual(res.status_code, 400)
+
+    def test_refresh_for_deleted_user_returns_401_not_500(self):
+        """
+        Regressiya: userga tegishli refresh token bazada endi mavjud
+        bo'lmagan (o'chirilgan/reset qilingan) userga ishora qilsa,
+        simplejwt standart serializeri `User.DoesNotExist` bilan 500
+        berardi. Endi toza 401 qaytishi kerak.
+        """
+        refresh = RefreshToken.for_user(self.operator)
+        self.operator.delete()
+        res = self.client_api.post(reverse('token-refresh'),
+                                   {'refresh': str(refresh)})
+        self.assertEqual(res.status_code, 401, res.data)
+
+    def test_refresh_still_works_for_existing_user(self):
+        refresh = RefreshToken.for_user(self.operator)
+        res = self.client_api.post(reverse('token-refresh'),
+                                   {'refresh': str(refresh)})
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertIn('access', res.data)

@@ -16,10 +16,12 @@ from apps.orders.dates import current_year_end
 
 
 def build_contract_number(client=None, *, contract_number=None, contract_date=None):
-    """Shartnoma raqamini avtomatik BAND QILADI: {tartib}/{DDMM}.
+    """Shartnoma raqamini avtomatik BAND QILADI — yagona UMUMIY o'suvchi
+    tartib raqam (1, 2, 3, ...), kunlik qayta boshlanmaydi.
 
-    Tartib raqam har kun uchun alohida hisoblanadi va o'sha kundagi har bir
-    yangi hujjatda bittaga oshadi (1/1308, 2/1308, ...).
+    `contract_number` berilgan bo'lsa (xodim qo'lda kiritgan bo'lsa,
+    istalgan ko'rinishda — masalan "412412412") o'sha aynan ishlatiladi,
+    hech qanday format tekshiruvi qo'llanmaydi.
     """
     from apps.common.contracts import allocate_contract_number
 

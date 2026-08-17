@@ -14,7 +14,7 @@ import {
 import { api } from '../api'
 import DataTable, { TablePagination } from './DataTable'
 import { can } from '../lib/permissions'
-import { formatDateUz, list, money, todayValue } from '../lib/utils'
+import { formatDateUz, list, money, moneyDecimal, todayValue } from '../lib/utils'
 
 function KassaMetric({ icon: Icon, label, value, tone = 'neutral' }) {
   return (
@@ -208,11 +208,104 @@ function ledgerSourceLabel(row) {
   if (row.source === 'import') return 'Import'
   if (row.source === 'order') return 'Buyurtma'
   if (row.source === 'sale') return 'Sotuv'
+  if (row.source === 'expense') return 'Rasxod'
   return row.source || '—'
 }
 
 function ledgerKindLabel(row) {
   return row.kind === 'out' ? 'Chiqim' : 'Tushum'
+}
+
+/** Bankning tanlangan kurs qatori (sotish narxi bo‘yicha, UZS → USD hisob-kitobi uchun). */
+function bankSellRate(bank) {
+  const rate = Number(bank?.sell_rate ?? bank?.buy_rate ?? 0)
+  return Number.isFinite(rate) && rate > 0 ? rate : null
+}
+
+/**
+ * Valyuta konvertori — kiritilgan UZS summasini tanlangan bank kursi
+ * bo‘yicha USD ga aylantirib ko‘rsatadi. Faqat mahalliy hisob-kitob
+ * (bank tanlash hech qanday sozlamani o‘zgartirmaydi, `FxRatePanel`dan
+ * farqli — u yerda bank tanlash butun tizim uchun kursni belgilaydi).
+ */
+function CurrencyConverter({ notify }) {
+  const [snapshot, setSnapshot] = useState(null)
+  const [bankKey, setBankKey] = useState('infinbank')
+  const [amount, setAmount] = useState('')
+
+  useEffect(() => {
+    let active = true
+    api.exchangeRateLatest().then((data) => {
+      if (active) setSnapshot(data)
+    }).catch((err) => {
+      if (active) notify?.(err.message)
+    })
+    return () => { active = false }
+  }, [notify])
+
+  const rateOptions = useMemo(() => {
+    const options = []
+    const infinRate = Number(snapshot?.infinbank?.mb_rate)
+    if (Number.isFinite(infinRate) && infinRate > 0) {
+      options.push({ key: 'infinbank', label: 'Infinbank MB', rate: infinRate })
+    }
+    ;(snapshot?.market_rates?.banks || []).forEach((bank) => {
+      const rate = bankSellRate(bank)
+      if (rate) options.push({ key: `bank:${bank.code}`, label: bank.name, rate })
+    })
+    return options
+  }, [snapshot])
+
+  useEffect(() => {
+    if (rateOptions.length && !rateOptions.some((o) => o.key === bankKey)) {
+      setBankKey(rateOptions[0].key)
+    }
+  }, [rateOptions, bankKey])
+
+  const selected = rateOptions.find((o) => o.key === bankKey) || rateOptions[0] || null
+  const numericAmount = Number(amount)
+  const hasAmount = amount !== '' && Number.isFinite(numericAmount) && numericAmount >= 0
+  const usdResult = selected && hasAmount ? numericAmount / selected.rate : null
+
+  return (
+    <section className="data-panel kassa-converter">
+      <div className="kassa-converter-head">
+        <p className="eyebrow">HISOB-KITOB</p>
+        <h3>Valyuta konvertori</h3>
+      </div>
+      {rateOptions.length === 0 ? (
+        <p className="muted">Kurslar yuklanmoqda…</p>
+      ) : (
+        <div className="kassa-converter-body">
+          <label className="kassa-converter-field">
+            <span>Summa (UZS)</span>
+            <input
+              type="number"
+              min="0"
+              inputMode="decimal"
+              placeholder="Masalan: 15000000"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+            />
+          </label>
+          <label className="kassa-converter-field">
+            <span>Kurs (bank)</span>
+            <select value={bankKey} onChange={(e) => setBankKey(e.target.value)} aria-label="Bank kursi">
+              {rateOptions.map((option) => (
+                <option key={option.key} value={option.key}>
+                  {option.label} — {moneyDecimal(option.rate)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="kassa-converter-result">
+            <span>Natija</span>
+            <strong>{usdResult != null ? `$${moneyDecimal(usdResult)}` : '—'}</strong>
+          </div>
+        </div>
+      )}
+    </section>
+  )
 }
 
 export default function KassaPage({ notify, session, onDataChange, reloadKey = 0 }) {
@@ -328,6 +421,8 @@ export default function KassaPage({ notify, session, onDataChange, reloadKey = 0
         </section>
       )}
 
+      <CurrencyConverter notify={notify} />
+
       <div className="kassa-layout">
         <section className="data-panel kassa-table-panel">
           <div className="panel-head kassa-panel-head">
@@ -346,6 +441,7 @@ export default function KassaPage({ notify, session, onDataChange, reloadKey = 0
                 <option value="sale">Sotuv</option>
                 <option value="order">Buyurtma</option>
                 <option value="import">Import</option>
+                <option value="expense">Rasxod</option>
               </select>
             </div>
           </div>

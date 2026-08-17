@@ -773,6 +773,22 @@ python manage.py seed --clear     # ixtiyoriy — test uchun
 | Fayl | Muammo | Tuzatish |
 |------|--------|----------|
 | `root/celery.py` | `check-overdue-payments-daily` vazifasi butun son (`32400`) bilan rejalashtirilgan edi — Celery buni "har 32400 soniyada" (taxminan 9 soatda bir marta, beat qachon ishga tushganidan siljib boradigan interval) deb tushunadi, izohda yozilgan "har kuni 09:00 UTC" **degani emas**. | `crontab(hour=9, minute=0)` bilan almashtirildi — endi haqiqatan ham har kuni aynan 09:00 UTC da ishlaydi. |
+| `root/settings.py` | `.env`da `DB_ENGINE=postgresql` deb yozilsa, kod faqat aniq `"postgres"`ni tanigani uchun sezilmasdan SQLite'ga tushib qolardi | `postgres`/`postgresql` ikkalasi ham qabul qilinadigan qilindi |
+| `apps/users/` | `/auth/token/refresh/`da userga tegishli bo'lmagan (o'chirilgan) refresh token `500` berardi | `SafeTokenRefreshSerializer`/`SafeTokenRefreshView` — endi toza `401` |
+
+**Shartnoma raqami — kunlik emas, UMUMIY (global) va endi erkin matn:**
+
+Avval har kun uchun alohida (1 dan qayta boshlanadigan, `{tartib}/{DDMM}` formatidagi, masalan `12/1108`) tartib raqam ajratilardi (`ContractSequence` — sana bo'yicha alohida qator). Endi **bitta umumiy (singleton) hisoblagich** ishlatiladi — Buyurtma, Zakaz va Faktura (SK) qaysi kim/qaysi kunda yaratmasin, hammasi BITTA ketma-ket raqamlar qatoridan oladi (`1`, `2`, `3`, ...), kunlik qayta boshlanmaydi.
+
+Bu standart (avtomatik) qiymat — maydon bo'sh qoldirilganda ishlatiladi. Xodim istasa `contract_number`ni **istalgan boshqa ko'rinishda** qo'lda kiritishi mumkin (masalan `124151245124`) — bunga hech qanday format tekshiruvi (na backend, na frontend) qo'llanmaydi; avvalgi `^\d+/\d{4}$` majburiy regex talabi butunlay olib tashlandi.
+
+| Fayl | O'zgarish |
+|------|-----------|
+| `apps/common/contracts.py` | `ContractSequence` — `contract_date`/`date_part` maydonlari olib tashlandi, `last_number` bilan yagona (`pk=1`) qator; birinchi ishga tushganda bazadagi mavjud raqamlardan boshlang'ich qiymat hisoblanadi |
+| `apps/orders/serializers.py` | `OrderSerializer`dagi majburiy `^\d+/\d{4}$` format tekshiruvi olib tashlandi |
+| `frontend/src/App.jsx` | Import/Faktura formalaridagi raqam-only kirim cheklovi va format validatsiyasi olib tashlandi |
+
+**Kassaga valyuta konvertori qo'shildi (yangi, faqat frontend):** `KassaPage`da endi UZS summasini kiritib, mavjud bank kurslaridan (Infinbank MB yoki bankxizmatlari.uz ro'yxatidagi banklar) birini tanlab, natijani $ da ko'rish mumkin. Bu sof mahalliy hisob-kitob — yangi backend endpoint talab qilinmadi, mavjud `GET /cash/exchange-rates/latest/` javobidan foydalanildi. Fayl: `frontend/src/components/KassaPage.jsx` (`CurrencyConverter` komponenti).
 
 ---
 
