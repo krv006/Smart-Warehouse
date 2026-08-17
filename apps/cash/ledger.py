@@ -70,8 +70,7 @@ def build_ledger_entries(search=None, source=None, kind=None,
 
     exp_qs = (
         Expense.objects
-        .filter(zakaz__isnull=False)
-        .select_related('zakaz__product')
+        .select_related('zakaz__product', 'expense_type')
         .order_by('-date', '-created_at')
     )
 
@@ -80,6 +79,7 @@ def build_ledger_entries(search=None, source=None, kind=None,
             Q(comment__icontains=search)
             | Q(zakaz__supplier__icontains=search)
             | Q(zakaz__product__name__icontains=search)
+            | Q(expense_type__name__icontains=search)
         )
     if date_from:
         exp_qs = exp_qs.filter(date__gte=date_from)
@@ -88,17 +88,21 @@ def build_ledger_entries(search=None, source=None, kind=None,
 
     for exp in exp_qs:
         zakaz = exp.zakaz
-        if source and source != 'import':
+        # zakaz/invoice-ga bog'liq chiqim — import; qolgan barcha rasxod
+        # turlari (ofis, transport, oylik, boshqa...) — expense
+        src = 'import' if (exp.zakaz_id or exp.invoice_id) else 'expense'
+        if source and src != source:
             continue
         if kind and kind != 'out':
             continue
         entries.append({
             'id': f'out-{exp.pk}',
             'kind': 'out',
-            'source': 'import',
+            'source': src,
+            'expense_type': exp.expense_type.code if exp.expense_type_id else None,
             'amount': str(exp.amount),
             'currency': exp.currency,
-            'label': exp.comment or (f'Import #{zakaz.pk}' if zakaz else 'Import'),
+            'label': exp.comment or (f'Import #{zakaz.pk}' if zakaz else exp.expense_type.name),
             'client_name': zakaz.supplier if zakaz else None,
             'date': exp.date.isoformat() if exp.date else None,
             'created_at': exp.created_at.isoformat() if exp.created_at else None,
@@ -120,21 +124,36 @@ def ledger_totals():
         .filter(payment__zakaz__isnull=True, payment__currency=Payment.USD)
         .aggregate(s=Sum('amount'))['s'] or Decimal('0')
     )
+    out_import_uzs = (
+        Expense.objects
+        .filter(Q(zakaz__isnull=False) | Q(invoice__isnull=False), currency=Expense.UZS)
+        .aggregate(s=Sum('amount'))['s'] or Decimal('0')
+    )
+    out_import_usd = (
+        Expense.objects
+        .filter(Q(zakaz__isnull=False) | Q(invoice__isnull=False), currency=Expense.USD)
+        .aggregate(s=Sum('amount'))['s'] or Decimal('0')
+    )
     out_uzs = (
         Expense.objects
-        .filter(zakaz__isnull=False, currency=Expense.UZS)
+        .filter(currency=Expense.UZS)
         .aggregate(s=Sum('amount'))['s'] or Decimal('0')
     )
     out_usd = (
         Expense.objects
-        .filter(zakaz__isnull=False, currency=Expense.USD)
+        .filter(currency=Expense.USD)
         .aggregate(s=Sum('amount'))['s'] or Decimal('0')
     )
     return {
         'sum_in_uzs': in_uzs,
         'sum_in_usd': in_usd,
-        'sum_import_uzs': out_uzs,
-        'sum_import_usd': out_usd,
+        # Faqat import (zakaz/faktura) chiqimi — eski maydonlar, moslik uchun
+        'sum_import_uzs': out_import_uzs,
+        'sum_import_usd': out_import_usd,
+        # Barcha rasxodlar (import + ofis/transport/oylik/...)
+        'sum_out_uzs': out_uzs,
+        'sum_out_usd': out_usd,
+        # Kassa umumiy balansi — BARCHA chiqimlar hisobga olingan holda
         'net_balance_uzs': in_uzs - out_uzs,
         'net_balance_usd': in_usd - out_usd,
     }

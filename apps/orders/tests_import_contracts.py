@@ -465,6 +465,138 @@ class InvoiceAutoProductTests(TestCase):
         self.assertEqual(second.data['contract_number'], '2/1308')
 
 
+class InvoiceKassaSyncTests(TestCase):
+    """
+    Regressiya: shartnoma (SK) fakturasi kassaga (Expense — chiqim)
+    umuman ulanmagan edi. Ombordagi (import bo'lmagan) mahsulot bo'yicha
+    qator kassadan chiqim yozishi, yangi (import) mahsulot esa o'z Zakaz
+    oqimi orqali hisoblanib, shu yerda ikki marta hisoblanmasligi kerak.
+    """
+
+    URL = '/api/v1/invoices/'
+
+    def setUp(self):
+        self.api = APIClient()
+        self.manager = User.objects.create_user('mng_inv_kassa', password='x',
+                                                role=User.MANAGEMENT)
+        self.api.force_authenticate(self.manager)
+        self.client_obj = Client.objects.create(company_name='Mijoz OOO')
+        self.category = Category.objects.create(name='Kategoriya')
+        self.product = Product.objects.create(name='Ombordagi divan')
+
+    def _import_payload(self, name):
+        return {
+            'document_type': 'contract_sk',
+            'contract_date': '2026-08-13',
+            'client': str(self.client_obj.pk),
+            'lines': [{
+                'product_name': name,
+                'category': self.category.pk,
+                'unit': 'piece',
+                'quantity': 2,
+                'unit_price': '5000.00',
+                'selling_price': '9000.00',
+                'vat_percent': '12',
+            }],
+        }
+
+    def test_existing_product_line_records_kassa_expense(self):
+        from apps.expenses.models import Expense
+
+        payload = {
+            'document_type': 'contract_sk',
+            'contract_number': 'SH-2026/777',
+            'contract_date': '2026-08-13',
+            'client': str(self.client_obj.pk),
+            'lines': [{
+                'product': self.product.pk,
+                'quantity': 5,
+                'unit_price': '100000.00',
+                'vat_percent': '12',
+            }],
+        }
+        res = self.api.post(self.URL, payload, format='json')
+        self.assertEqual(res.status_code, 201, res.data)
+        expense = Expense.objects.get(invoice_id=res.data['id'])
+        # delivery = 5*100000 = 500000; QQS 12% = 60000; jami = 560000
+        self.assertEqual(expense.amount, Decimal('560000.00'))
+        self.assertIn('SH-2026/777', expense.comment)
+
+    def test_new_import_product_line_is_not_double_counted(self):
+        """Yangi mahsulot — o'z Zakazi orqali hisoblanadi, faktura darajasida emas."""
+        from apps.expenses.models import Expense
+
+        res = self.api.post(self.URL, self._import_payload('Import qator'), format='json')
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertFalse(Expense.objects.filter(invoice_id=res.data['id']).exists())
+
+    def test_non_contract_document_does_not_touch_kassa(self):
+        from apps.expenses.models import Expense
+
+        payload = {
+            'document_type': 'invoice',
+            'client': str(self.client_obj.pk),
+            'lines': [{
+                'product': self.product.pk,
+                'quantity': 3,
+                'unit_price': '50000.00',
+            }],
+        }
+        res = self.api.post(self.URL, payload, format='json')
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertFalse(Expense.objects.filter(invoice_id=res.data['id']).exists())
+
+    def test_editing_quantity_resyncs_expense_amount(self):
+        from apps.expenses.models import Expense
+
+        payload = {
+            'document_type': 'contract_sk',
+            'contract_number': 'SH-2026/778',
+            'client': str(self.client_obj.pk),
+            'lines': [{
+                'product': self.product.pk,
+                'quantity': 2,
+                'unit_price': '100000.00',
+            }],
+        }
+        res = self.api.post(self.URL, payload, format='json')
+        self.assertEqual(res.status_code, 201, res.data)
+        invoice_id = res.data['id']
+        line_id = res.data['lines'][0]['id']
+        expense = Expense.objects.get(invoice_id=invoice_id)
+        self.assertEqual(expense.amount, Decimal('200000.00'))
+
+        res2 = self.api.patch(f'{self.URL}{invoice_id}/', {
+            'lines': [{'id': line_id, 'product': self.product.pk,
+                      'quantity': 4, 'unit_price': '100000.00'}],
+        }, format='json')
+        self.assertEqual(res2.status_code, 200, res2.data)
+        expense.refresh_from_db()
+        self.assertEqual(expense.amount, Decimal('400000.00'))
+
+    def test_deleting_invoice_removes_kassa_expense(self):
+        from apps.expenses.models import Expense
+
+        payload = {
+            'document_type': 'contract_sk',
+            'contract_number': 'SH-2026/779',
+            'client': str(self.client_obj.pk),
+            'lines': [{
+                'product': self.product.pk,
+                'quantity': 1,
+                'unit_price': '100000.00',
+            }],
+        }
+        res = self.api.post(self.URL, payload, format='json')
+        self.assertEqual(res.status_code, 201, res.data)
+        invoice_id = res.data['id']
+        self.assertTrue(Expense.objects.filter(invoice_id=invoice_id).exists())
+
+        del_res = self.api.delete(f'{self.URL}{invoice_id}/')
+        self.assertEqual(del_res.status_code, 204, getattr(del_res, 'data', None))
+        self.assertFalse(Expense.objects.filter(invoice_id=invoice_id).exists())
+
+
 class ProductCategoryFilterTests(TestCase):
     """`?category=` — tanlangan kategoriya va uning ost-kategoriyalari."""
 

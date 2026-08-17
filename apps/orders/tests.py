@@ -205,14 +205,17 @@ class OrderEditKassaSyncTests(TestCase):
 
     def setUp(self):
         self.api = APIClient()
-        self.op = User.objects.create_user('opk', password='x', role=User.OPERATOR)
+        # Narx/oldindan to'lov kiritish — faqat Management (Operator buyurtma
+        # yaratishi mumkin, lekin narxni o'zi belgilay olmaydi — bu test
+        # kassa sinxronizatsiyasining o'zini tekshiradi, narx cheklovini emas).
+        self.manager = User.objects.create_user('mngk', password='x', role=User.MANAGEMENT)
         self.p1 = Product.objects.create(name='server', serial_number='SS1',
                                          purchase_price=Decimal('1'))
         self.p2 = Product.objects.create(name='Test', serial_number='TT1',
                                          purchase_price=Decimal('1'))
         for p in (self.p1, self.p2):
             Stock.objects.create(product=p, quantity=100, warehouse_location='A')
-        self.api.force_authenticate(self.op)
+        self.api.force_authenticate(self.manager)
 
         # 35M + 25M = 60M, oldindan to'lov 5M
         res = self.api.post('/api/v1/orders/', {
@@ -255,6 +258,47 @@ class OrderEditKassaSyncTests(TestCase):
         self.assertEqual(pay.total_amount, Decimal('65000000'))
         self.assertEqual(pay.paid_amount, Decimal('5000000'))
         self.assertEqual(pay.remaining_amount, Decimal('60000000'))
+
+
+class OperatorOrderPriceAutofillTests(TestCase):
+    """
+    Regressiya: Operator narx kirita olmagani uchun buyurtma qatori
+    `unit_price`siz qolib, `Order.total` `None` bo'lib qolardi — natijada
+    buyurtma kassaga (Payment) UMUMAN tushmasdi. Endi Operator yaratgan
+    qatorning narxi mahsulotning belgilangan sotuv narxidan
+    (`Product.selling_price`) avtomatik olinadi (Sale bilan bir xil qoida).
+    """
+
+    def setUp(self):
+        self.api = APIClient()
+        self.op = User.objects.create_user('opk3', password='x', role=User.OPERATOR)
+        self.product = Product.objects.create(
+            name='Shkaf', serial_number='SHK-1',
+            purchase_price=Decimal('1'), selling_price=Decimal('2000000'))
+        Stock.objects.create(product=self.product, quantity=50, warehouse_location='A')
+        self.api.force_authenticate(self.op)
+
+    def test_operator_created_order_still_reaches_kassa(self):
+        # Operator narx yubormasa ham (yoki yuborsa ham — e'tiborga olinmaydi)
+        res = self.api.post('/api/v1/orders/', {
+            'contract_number': '1/1109',
+            'items': [{'product': self.product.pk, 'quantity': 3}],
+        }, format='json')
+        self.assertEqual(res.status_code, 201, res.data)
+        payment = Payment.objects.get(order_id=res.data['id'])
+        # 3 * 2 000 000 (mahsulotning selling_price'i)
+        self.assertEqual(payment.total_amount, Decimal('6000000'))
+
+    def test_operator_cannot_override_price(self):
+        res = self.api.post('/api/v1/orders/', {
+            'contract_number': '1/1110',
+            'items': [{'product': self.product.pk, 'quantity': 1,
+                      'unit_price': '999999999'}],
+        }, format='json')
+        self.assertEqual(res.status_code, 201, res.data)
+        payment = Payment.objects.get(order_id=res.data['id'])
+        # Yuborilgan narx e'tiborga olinmadi — mahsulot narxi ishlatildi
+        self.assertEqual(payment.total_amount, Decimal('2000000'))
 
 
 class ZakazReceivedQtyGuardTests(TestCase):

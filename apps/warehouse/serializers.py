@@ -91,6 +91,13 @@ class ProductSerializer(ModelSerializer):
         product = super().create(validated_data)
         if quantity:
             Stock.objects.create(product=product, quantity=quantity, warehouse_location=location)
+            from apps.warehouse.stock_expense import record_stock_in_expense
+            request = self.context.get('request')
+            record_stock_in_expense(
+                product, quantity,
+                user=getattr(request, 'user', None),
+                asos='Mahsulot yaratishda boshlang\'ich qoldiq',
+            )
         return product
 
     def update(self, instance, validated_data):

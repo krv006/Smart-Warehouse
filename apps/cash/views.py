@@ -132,7 +132,8 @@ class ExchangeRateViewSet(ModelViewSet):
 )
 class PaymentViewSet(ModelViewSet):
     queryset = Payment.objects.all()
-    # Operator kirolmaydi — to'lovlarda narx/summa/komissiya bor
+    # Operator faqat ko'radi (summasiz — PaymentOperatorSerializer);
+    # yozish faqat Accountant/Management
     permission_classes  = (IsAccountantWithManagementRead,)
     filterset_fields    = ('status', 'client', 'currency', 'due_date',
                            'order', 'sale')

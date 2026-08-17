@@ -107,7 +107,7 @@ class SaleSerializer(ModelSerializer):
         sale = super().create(validated_data)
         _deplete_stock(sale.product, sale.quantity)
         from apps.sales.sale_payment import sync_sale_payment
-        sync_sale_payment(sale, user=self.context['request'].user)
+        sync_sale_payment(sale, user=getattr(self.context.get('request'), 'user', None))
         return sale
 
     @transaction.atomic
@@ -122,6 +122,10 @@ class SaleSerializer(ModelSerializer):
         if sale.product_id != old_product.id or sale.quantity != old_quantity:
             _restore_stock(old_product, old_quantity)
             _deplete_stock(sale.product, sale.quantity)
+        # Narx/miqdor o'zgargan bo'lsa kassadagi yozuv ham sinxronlanadi
+        # (aks holda tahrirdan keyin kassa eski summada qolib ketardi)
+        from apps.sales.sale_payment import sync_sale_payment
+        sync_sale_payment(sale, user=getattr(self.context.get('request'), 'user', None))
         return sale
 
 
@@ -142,7 +146,7 @@ class SaleOperatorSerializer(SaleSerializer):
         sale = super(SaleSerializer, self).create(validated_data)
         _deplete_stock(sale.product, sale.quantity)
         from apps.sales.sale_payment import sync_sale_payment
-        sync_sale_payment(sale, user=self.context['request'].user)
+        sync_sale_payment(sale, user=getattr(self.context.get('request'), 'user', None))
         return sale
 
     @transaction.atomic
@@ -229,7 +233,7 @@ class SaleBulkCreateSerializer(Serializer):
             )
             _deplete_stock(sale.product, sale.quantity)
             from apps.sales.sale_payment import sync_sale_payment
-            sync_sale_payment(sale, user=self.context['request'].user)
+            sync_sale_payment(sale, user=getattr(self.context.get('request'), 'user', None))
             created.append(sale)
         return created
 

@@ -126,11 +126,25 @@ def zakaz_serializer_class(user):
     return ZakazOperatorSerializer
 
 
-def _strip_item_prices(items_data):
+def _fill_operator_item_prices(items_data):
+    """
+    Narx kirita olmaydigan foydalanuvchi (Operator) uchun qator narxini
+    boshqaradi: YANGI qator — mahsulotning belgilangan sotuv narxidan
+    (`Product.selling_price`) avtomatik oladi (Sale bilan bir xil qoida —
+    aks holda buyurtma narxsiz qolib, kassaga (Payment) UMUMAN tushmay
+    qolardi, chunki `Order.total` `None` bo'lib qoladi). MAVJUD qatorni
+    operator narxini o'zgartira olmaydi — shu maydon chetlab o'tiladi
+    (eski narx saqlanadi).
+    """
     if not items_data:
         return items_data
     for item in items_data:
-        item.pop('unit_price', None)
+        is_new = not item.get('id')
+        if is_new:
+            product = item.get('product')
+            item['unit_price'] = (product.selling_price if product else None) or 0
+        else:
+            item.pop('unit_price', None)
     return items_data
 
 
@@ -324,14 +338,18 @@ class OrderSerializer(ModelSerializer):
         product    = validated_data.pop('product', None)
         quantity   = validated_data.pop('quantity', None)
         unit_price = validated_data.pop('unit_price', None)
-        if not _can_manage_prices(user):
+        can_manage_prices = _can_manage_prices(user)
+        if not can_manage_prices:
             validated_data['prepaid_amount'] = 0
-            unit_price = None
+            # Operator narx kirita olmaydi — mahsulotning belgilangan sotuv
+            # narxidan avtomatik olinadi (Sale bilan bir xil qoida), aks
+            # holda buyurtma summasiz qolib kassaga umuman tushmay qolardi
+            unit_price = (product.selling_price if product else None) or 0
         if not items_data:
             items_data = [{'product': product, 'quantity': quantity or 1,
                            'unit_price': unit_price}]
-        elif not _can_manage_prices(user):
-            items_data = _strip_item_prices(items_data)
+        elif not can_manage_prices:
+            items_data = _fill_operator_item_prices(items_data)
 
         order = Order.objects.create(**validated_data)
         for item in items_data:
@@ -376,9 +394,11 @@ class OrderSerializer(ModelSerializer):
         legacy_price = validated_data.pop('unit_price', None)
         validated_data.pop('product', None)
         if not _can_manage_prices(user):
+            # Operator mavjud (legacy, bitta qatorli) buyurtmaning narxini
+            # o'zgartira olmaydi — eski narx saqlanadi
             legacy_price = None
             if items_data:
-                items_data = _strip_item_prices(items_data)
+                items_data = _fill_operator_item_prices(items_data)
 
         changes = _diff(instance, validated_data, _ORDER_TRACKED_FIELDS)
 
