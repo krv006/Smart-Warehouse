@@ -5,6 +5,9 @@
 # Config folder (faqat root/ ishlatiladi)
 config/
 
+# Kunlik ish jurnali — lokal eslatma, repога push qilinmaydi
+today_tasks.md
+
 .idea
 ### JetBrains template
 # Covers JetBrains IDEs: IntelliJ, RubyMine, PhpStorm, AppCode, PyCharm, CLion, Android Studio, WebStorm and Rider
