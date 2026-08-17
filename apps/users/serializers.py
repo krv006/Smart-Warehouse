@@ -3,6 +3,8 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework.serializers import (ModelSerializer, Serializer,
                                         ValidationError, CharField)
+from rest_framework_simplejwt.exceptions import InvalidToken
+from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.users.models import User
@@ -82,6 +84,21 @@ class LoginSerializer(Serializer):
             'refresh': str(refresh),
             'user': user_session_payload(user),
         }
+
+
+class SafeTokenRefreshSerializer(TokenRefreshSerializer):
+    """
+    Regressiya: refresh token bazadan o'chirilgan/topilmaydigan foydalanuvchiga
+    tegishli bo'lsa (masalan, baza tozalangan/qayta seed qilingan bo'lsa),
+    simplejwt'ning standart serializeri `User.DoesNotExist` (500) berardi —
+    401 ("session tugagan, qayta kiring") emas. Bu tashqi (frontend/mijoz)
+    tarafda hech qachon ko'rilmasligi kerak bo'lgan xato edi.
+    """
+    def validate(self, attrs):
+        try:
+            return super().validate(attrs)
+        except User.DoesNotExist:
+            raise InvalidToken('Foydalanuvchi topilmadi — qaytadan kiring.')
 
 
 class RegisterOperatorSerializer(ModelSerializer):

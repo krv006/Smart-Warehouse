@@ -8,15 +8,23 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle
 from rest_framework.viewsets import GenericViewSet
+from rest_framework_simplejwt.views import TokenRefreshView
 
 from apps.common.permissions import IsManagement
 from apps.users.models import User
 from apps.users.serializers import (
     LoginSerializer,
     RegisterOperatorSerializer,
+    SafeTokenRefreshSerializer,
     UserSerializer,
     user_session_payload,
 )
+
+
+class SafeTokenRefreshView(TokenRefreshView):
+    """`SafeTokenRefreshSerializer` — o'chirilgan foydalanuvchiga tegishli
+    refresh tokenda 500 emas, toza 401 qaytaradi."""
+    serializer_class = SafeTokenRefreshSerializer
 
 
 class LoginRateThrottle(AnonRateThrottle):

@@ -136,7 +136,11 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'root.wsgi.application'
 
-if os.environ.get('DB_ENGINE') == 'postgres':
+# Regressiya: .env da "postgresql" deb yozilsa ham ("postgres" bilan
+# adashtirilib) haqiqiy bazaga ulanishi kerak — aks holda sezilmasdan
+# SQLite'ga tushib qolib, foydalanuvchi Postgres ishlatyapman deb
+# o'ylab yuradi.
+if (os.environ.get('DB_ENGINE') or '').strip().lower() in ('postgres', 'postgresql'):
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.postgresql',

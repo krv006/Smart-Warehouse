@@ -2517,6 +2517,56 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   margin-top: 12px;
   font-size: var(--text-sm);
 }
+.kassa-converter {
+  margin-bottom: 16px;
+}
+.kassa-converter-head h3 {
+  margin: 2px 0 12px;
+  font-size: var(--text-lg);
+}
+.kassa-converter-body {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(200px, 1fr) minmax(140px, auto);
+  gap: 12px;
+  align-items: end;
+}
+.kassa-converter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: var(--text-sm);
+}
+.kassa-converter-field span {
+  color: var(--muted);
+}
+.kassa-converter-field input,
+.kassa-converter-field select {
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  font-size: var(--text-base);
+}
+.kassa-converter-result {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 4px;
+}
+.kassa-converter-result span {
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+.kassa-converter-result strong {
+  font-size: var(--text-xl);
+  color: var(--success);
+}
+@media (max-width: 720px) {
+  .kassa-converter-body {
+    grid-template-columns: 1fr;
+  }
+}
 .kassa-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(240px, 320px);

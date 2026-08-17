@@ -14,31 +14,42 @@ from apps.warehouse.models import Category, Product, ProductOrigin
 
 
 class ContractSequenceTests(TestCase):
-    """Har kun uchun alohida o'suvchi tartib raqam: 1/1308, 2/1308, ..."""
+    """Yagona UMUMIY o'suvchi tartib raqam: 1, 2, 3, ... — kunlik qayta
+    boshlanmaydi, kim/qaysi kuni yaratishidan qat'i nazar bitta hisoblagich."""
 
-    def test_allocation_increments_per_day(self):
-        day = date(2026, 8, 13)
-        self.assertEqual(allocate_contract_number(day), '1/1308')
-        self.assertEqual(allocate_contract_number(day), '2/1308')
-        self.assertEqual(allocate_contract_number(day), '3/1308')
+    def test_allocation_increments_globally(self):
+        self.assertEqual(allocate_contract_number(), '1')
+        self.assertEqual(allocate_contract_number(), '2')
+        self.assertEqual(allocate_contract_number(), '3')
 
-    def test_new_day_restarts_from_one(self):
-        self.assertEqual(allocate_contract_number(date(2026, 8, 13)), '1/1308')
-        self.assertEqual(allocate_contract_number(date(2026, 8, 14)), '1/1408')
+    def test_does_not_restart_on_different_date(self):
+        self.assertEqual(allocate_contract_number(date(2026, 8, 13)), '1')
+        # contract_date endi raqamga ta'sir qilmaydi — hisoblagich davom etadi
+        self.assertEqual(allocate_contract_number(date(2026, 8, 14)), '2')
 
     def test_peek_does_not_consume(self):
-        day = date(2026, 8, 13)
-        self.assertEqual(peek_contract_number(day), '1/1308')
-        self.assertEqual(peek_contract_number(day), '1/1308')
-        self.assertEqual(allocate_contract_number(day), '1/1308')
+        self.assertEqual(peek_contract_number(), '1')
+        self.assertEqual(peek_contract_number(), '1')
+        self.assertEqual(allocate_contract_number(), '1')
 
-    def test_manual_number_is_taken_into_account(self):
-        day = date(2026, 8, 13)
+    def test_manual_number_is_taken_into_account_on_first_use(self):
+        """Hisoblagich birinchi marta ishga tushganda, bazadagi qo'lda
+        kiritilgan raqamlarni ham hisobga oladi — orqaga qaytib
+        takrorlamaydi."""
         Zakaz.objects.create(
             product=Product.objects.create(name='Kabel'),
-            quantity=1, contract_number='7/1308', contract_date=day,
+            quantity=1, contract_number='7', contract_date=date(2026, 8, 13),
         )
-        self.assertEqual(allocate_contract_number(day), '8/1308')
+        self.assertEqual(allocate_contract_number(), '8')
+
+    def test_free_form_contract_number_is_accepted(self):
+        """Xodim istagan ko'rinishda (masalan '412412412') qo'lda
+        kiritishi mumkin — format tekshirilmaydi."""
+        zakaz = Zakaz.objects.create(
+            product=Product.objects.create(name='Stol'),
+            quantity=1, contract_number='412412412',
+        )
+        self.assertEqual(zakaz.contract_number, '412412412')
 
 
 class ImportContractNumberAPITests(TestCase):
@@ -65,18 +76,32 @@ class ImportContractNumberAPITests(TestCase):
         second = self._bulk()
         self.assertEqual(first.status_code, 201, first.data)
         self.assertEqual(second.status_code, 201, second.data)
-        self.assertEqual(first.data['zakazlar'][0]['contract_number'], '1/1308')
-        self.assertEqual(second.data['zakazlar'][0]['contract_number'], '2/1308')
+        first_number = int(first.data['zakazlar'][0]['contract_number'])
+        second_number = int(second.data['zakazlar'][0]['contract_number'])
+        self.assertEqual(second_number, first_number + 1)
 
     def test_next_contract_number_endpoint_peeks(self):
         res = self.api.get('/api/v1/orders/next-contract-number/',
                            {'contract_date': '2026-08-13'})
         self.assertEqual(res.status_code, 200, res.data)
-        self.assertEqual(res.data['contract_number'], '1/1308')
-        self.assertEqual(
-            self.api.get('/api/v1/orders/next-contract-number/',
-                         {'contract_date': '2026-08-13'}).data['contract_number'],
-            '1/1308')
+        first_peek = res.data['contract_number']
+        second_peek = self.api.get(
+            '/api/v1/orders/next-contract-number/',
+            {'contract_date': '2026-08-13'}).data['contract_number']
+        # Peek band qilmaydi — ikkalasi ham bir xil bo'lishi kerak
+        self.assertEqual(first_peek, second_peek)
+
+    def test_custom_free_form_contract_number_is_accepted(self):
+        """Xodim /orders/zakaz/ orqali ham istagan ko'rinishda raqam
+        kiritishi mumkin — format tekshirilmaydi."""
+        res = self.api.post('/api/v1/orders/zakaz/', {
+            'new_product': {'name': 'Erkin raqamli tovar', 'unit': 'piece',
+                            'category': self.category.pk},
+            'quantity': 1, 'unit_price': '1000.00', 'selling_price': '1500.00',
+            'contract_number': '124151245124',
+        }, format='json')
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(res.data['contract_number'], '124151245124')
 
 
 class ImportPriceTests(TestCase):
@@ -458,11 +483,11 @@ class InvoiceAutoProductTests(TestCase):
         self.assertEqual(Decimal(line['vat_amount']), Decimal('22500.00'))
         self.assertEqual(Decimal(line['total_amount']), Decimal('172500.00'))
 
-    def test_contract_number_is_allocated_per_day(self):
+    def test_contract_number_is_allocated_globally(self):
         first = self.api.post(self.URL, self._payload('A tovar'), format='json')
         second = self.api.post(self.URL, self._payload('B tovar'), format='json')
-        self.assertEqual(first.data['contract_number'], '1/1308')
-        self.assertEqual(second.data['contract_number'], '2/1308')
+        self.assertEqual(int(second.data['contract_number']),
+                         int(first.data['contract_number']) + 1)
 
 
 class InvoiceKassaSyncTests(TestCase):

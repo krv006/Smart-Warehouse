@@ -1,5 +1,4 @@
 import json
-import re
 import uuid
 from decimal import Decimal
 
@@ -21,8 +20,6 @@ from apps.orders.models import (Order, OrderItem, OrderHistory,
                                 ProductContract, register_contract,
                                 allocate_pending_orders, build_contract_number)
 from apps.warehouse.models import Category, Product
-
-CONTRACT_NUMBER_RE = re.compile(r'^\d+/\d{4}$')
 
 # Buyurtma sarlavha tahririda kuzatiladigan maydonlar (tarixga yoziladi)
 _ORDER_TRACKED_FIELDS = ('client', 'prepaid_amount', 'contract_number',
@@ -280,11 +277,8 @@ class OrderSerializer(ModelSerializer):
         if self.instance is None and 'due_date' not in attrs:
             attrs['due_date'] = year_end
 
-        contract_number_value = (attrs.get('contract_number') or '').strip()
-        if contract_number_value and not CONTRACT_NUMBER_RE.match(contract_number_value):
-            raise ValidationError({
-                'contract_number': 'Shartnoma raqami faqat "{raqam}/{DDMM}" formatida bo\'lishi kerak. Masalan: 12/1108.'
-            })
+        # Shartnoma raqami erkin matn — xodim istagan ko'rinishda qo'lda
+        # kiritishi mumkin (masalan "412412412"), format tekshirilmaydi.
         # Bo'sh bo'lsa raqam create() ichida band qilinadi — validatsiya
         # muvaffaqiyatsiz tugasa raqam behuda sarflanmasin.
         # Tahrirlashda asos MAJBURIY — auditda "nima uchun" aniq bo'lishi kerak

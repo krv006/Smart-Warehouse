@@ -82,6 +82,14 @@ Javob:
 { "access": "<new_access_token>" }
 ```
 
+**Yaroqsiz/egasiz refresh token — endi toza `401` (tuzatilgan bug):** agar `refresh` tokeni haqiqiy foydalanuvchiga tegishli bo'lmasa (masalan, baza tozalangan/qayta seed qilingan, yoki user o'chirilgan bo'lsa) — backend endi aniq **`401`** qaytaradi:
+
+```json
+{ "detail": "Foydalanuvchi topilmadi — qaytadan kiring.", "code": "token_not_valid" }
+```
+
+Avval bunday holatda backend **`500`** (server xatosi) berardi — frontend buni tasodifiy server nosozligi deb, `setAuthFailureHandler` chaqirilmasdan, foydalanuvchiga tushunarsiz xato ko'rsatishi mumkin edi. Endi bu doim `401` bo'lgani uchun, mavjud oqim (`request()` → refresh muvaffaqiyatsiz → `setAuthFailureHandler`) to'g'ri ishlab, foydalanuvchini login sahifasiga qaytaradi — frontendda qo'shimcha o'zgartirish shart emas, mavjud 401-handling shu holatni ham to'g'ri qamrab oladi. Backend: `apps/users/serializers.SafeTokenRefreshSerializer` (`apps/users/urls.py`dagi `token/refresh/` shu serializerni ishlatadi).
+
 ### Ro‘yxatlar
 
 Ko‘p ro‘yxat endpointlari pagination qaytaradi:
@@ -139,25 +147,17 @@ Sana:
 YYYY-MM-DD
 ```
 
-Shartnoma raqami:
+**Shartnoma raqami (o'zgardi — endi UMUMIY, erkin matn):**
+
+Avval har kun uchun alohida (`{tartib}/{DDMM}`, kuniga 1 dan qayta boshlanadigan) raqam berilardi. Endi **bitta umumiy, hech qachon qayta boshlanmaydigan** ketma-ket son beriladi — kim, qaysi modulda (buyurtma/zakaz/faktura) va qaysi kunda yaratishidan qat'i nazar, bitta hisoblagichdan olinadi:
 
 ```text
-{kunlik_buyurtma_raqami}/{DDMM}
+1, 2, 3, 4, ...
 ```
 
-Misol:
+Bu — faqat **standart (avtomatik)** qiymat, maydon bo'sh qoldirilganda ishlatiladi. Xodim istasa, shartnoma raqamini **istalgan boshqa ko'rinishda** qo'lda kiritishi mumkin (masalan `124151245124`) — **hech qanday format tekshiruvi endi yo'q** (na backend, na frontendda). Eski `^\d+/\d{4}$` regex talabi butunlay olib tashlandi.
 
-```text
-12/1108
-```
-
-Harf bo‘lmaydi. Backend regex:
-
-```text
-^\d+/\d{4}$
-```
-
-Bo‘sh yuborilsa backend avtomatik yaratadi.
+Bo‘sh yuborilsa backend avtomatik yaratadi (`apps/common/contracts.allocate_contract_number`).
 
 ---
 
@@ -308,7 +308,7 @@ Legacy metodlar (`exportSales`, `exportKassa`, …) ham saqlangan; yangi UI faqa
 |---|---|---|
 | `ReportExportPanel` | `components/ReportExportPanel.jsx` | Hisobotlar → Excel tab: tur tanlash, davr, yuklab olish |
 | `FilterDateRangeCalendar` | `components/FilterDateRangeCalendar.jsx` | Oraliq tanlash kalendari (dashboard filtr, export, grid filtr) |
-| `KassaPage` | `components/KassaPage.jsx` | Kassa jurnali, metrikalar, to‘lov qabul qilish |
+| `KassaPage` | `components/KassaPage.jsx` | Kassa jurnali, metrikalar, to‘lov qabul qilish, valyuta konvertori (yangi) |
 | `BuyurtmalarPage` | `App.jsx` | Invoice CRUD, preview, editor |
 | `ClientDetailPage` | `components/ClientDetailPage.jsx` | Mijoz kartasi tablari |
 | `DataTable` | `components/DataTable.jsx` | Grid, sort, bulk, amallar ustuni |
@@ -586,7 +586,7 @@ Chiqimlar kassa jurnalida `kind=out`, `source=import` ko‘rinadi. Excel export:
 
 **Narxlar (`unit_price` / `selling_price`):** import qatorida **kelish narxi** (`unit_price`) va **ketish narxi** (`selling_price`) `prices_manage` roli uchun MAJBURIY. Ikkalasi ham ombordagi mahsulotga yoziladi (`purchase_price` / `selling_price`) — mavjud mahsulot tanlansa ham yangilanadi. `vat_percent` qatorda beriladi (bo‘lmasa mahsulotniki olinadi); **QQS har doim kelish narxi asosida** hisoblanadi va javobda `vat_amount`, `total_with_vat` bo‘lib qaytadi.
 
-**Shartnoma raqami:** `contract_number` yuborilmasa backend o‘sha kun uchun keyingi tartib raqamni atomar band qiladi (`{tartib}/{DDMM}` — 1/1308, 2/1308 …). `GET /orders/next-contract-number/` faqat ko‘rsatadi (band qilmaydi), shuning uchun forma raqamni oldindan ko‘rsatishi va saqlashda uni yubormasligi kerak.
+**Shartnoma raqami (yangilangan — endi umumiy, erkin matn):** `contract_number` yuborilmasa backend **umumiy** ketma-ket raqamni atomar band qiladi (endi kunlik emas — 1, 2, 3, ... hech qachon qayta boshlanmaydi, barcha modullar — buyurtma/zakaz/faktura — bitta hisoblagichdan oladi). `GET /orders/next-contract-number/` faqat ko‘rsatadi (band qilmaydi), shuning uchun forma raqamni oldindan ko‘rsatishi va saqlashda uni yubormasligi kerak (`contract_date` parametri endi natijaga ta'sir qilmaydi — faqat moslik uchun qabul qilinadi). Xodim istasa maydonga istalgan boshqa qiymatni ham qo‘lda yozishi mumkin — format tekshirilmaydi.
 
 **Manual import — `new_product` inline** (POST body, `product` o‘rniga):
 
@@ -945,7 +945,7 @@ Ko‘rish — `InvoiceContractModal` (jadval + mazmun + «2. Tomonlarni yuridik 
 
 | Maydon | Qoidalar |
 |---|---|
-| `contract_number` | Majburiy; regex `^\d+/\d{4}$` (masalan `12/1108`) |
+| `contract_number` | Majburiy (bo'sh bo'lmasin); format erkin — regex tekshiruvi olib tashlandi, xodim istagan qiymatni yozishi mumkin |
 | `place_signed` | Majburiy |
 | `contract_date` | Majburiy |
 | `valid_until` | Majburiy; `>= contract_date` |
@@ -2374,10 +2374,11 @@ Javob (pagination):
 
 **`KassaPage` UI (`prices_view` bo‘lsa):**
 
-- Metrikalar: Tushum, Import chiqim, Kassa balansi, Komissiya (tavsiya: umumiy chiqim uchun `sum_out_uzs` ham ko‘rsatilsin — yangi rasxod manbalari, quyida)
-- Filtrlar: qidiruv, manba (`sale` / `order` / `import` / `expense` — yangi)
+- Metrikalar: Tushum, Import chiqim, Kassa balansi, Komissiya
+- Filtrlar: qidiruv, manba (`sale` / `order` / `import` / `expense` — qo‘shildi, `ledgerSourceLabel()` `expense` → «Rasxod» deb ko‘rsatadi)
 - Qolgan to‘lov bo‘lsa tushum qatorida **to‘lov qabul qilish** (`api.pay`) — faqat `cash_manage`
 - **Yangi to‘lov** modali — qo‘lda `POST /cash/payments/` (sotuvga bog‘lash)
+- **Valyuta konvertori** (yangi, `CurrencyConverter` — `KassaPage.jsx` ichida): metrikalar tagida, hammaga ko‘rinadi (rol cheklovi yo‘q). `GET /cash/exchange-rates/latest/` orqali kurslarni (Infinbank MB + bank ro‘yxati) yuklaydi, foydalanuvchi UZS summasini kiritadi + banklardan birini tanlaydi (faqat lokal tanlov — `FxRatePanel`dan farqli, hech qanday sozlamani o‘zgartirmaydi/saqlamaydi), natija darhol `$` da ko‘rsatiladi (`summa / tanlangan_kurs`). Yangi backend endpoint talab qilinmadi — mavjud kurs ma'lumotidan foydalanildi.
 
 **Yangi to‘lov modali** (`cash_manage`):
 

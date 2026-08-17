@@ -4616,7 +4616,7 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
             )
           )}
           <label>Yetkazuvchi<input value={form.supplier} onChange={(event) => setForm({ ...form, supplier: event.target.value })} /></label>
-          <label>Shartnoma raqami<input value={form.contract_number} onChange={(event) => { setContractNumberEdited(true); setForm({ ...form, contract_number: event.target.value.replace(/[^\d/]/g, '') }) }} placeholder="12/1108" /></label>
+          <label>Shartnoma raqami<input value={form.contract_number} onChange={(event) => { setContractNumberEdited(true); setForm({ ...form, contract_number: event.target.value }) }} placeholder="Bo‘sh qoldirilsa avtomatik beriladi" /></label>
           <label>Shartnoma sanasi<input type="date" value={form.contract_date} onChange={(event) => setForm({ ...form, contract_date: event.target.value })} /></label>
           <label>Faktura<input value={form.faktura} onChange={(event) => setForm({ ...form, faktura: event.target.value })} /></label>
           <label>Kutilgan sana<input type="date" value={form.expected_date} onChange={(event) => setForm({ ...form, expected_date: event.target.value })} /></label>
@@ -4900,10 +4900,11 @@ function validateEInvoice(editing, { showPrices, company } = {}) {
   const errors = {}
   const trim = (value) => (value ?? '').toString().trim()
 
+  // Shartnoma raqami endi ERKIN matn — xodim istagan ko'rinishda yozishi
+  // mumkin (masalan "124151245124"); bo'sh qoldirilsa umumiy ketma-ketlikdan
+  // avtomatik beriladi, shuning uchun faqat to'liq bo'shligini tekshiramiz.
   if (!trim(editing.contract_number)) {
     errors.contract_number = 'Shartnoma raqamini kiriting'
-  } else if (!/^\d+\/\d{4}$/.test(trim(editing.contract_number))) {
-    errors.contract_number = 'Format: raqam/DDMM (masalan 12/1108)'
   }
 
   if (!trim(editing.place_signed)) {
@@ -6129,11 +6130,9 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
               <label className={errors.contract_number ? 'field-invalid' : ''}>Shartnoma raqami
                 <input
                   value={editing.contract_number || ''}
-                  onChange={(e) => { clearFieldError('contract_number'); setContractNumberEdited(true); setEditing({ ...editing, contract_number: e.target.value.replace(/[^\d/]/g, '') }) }}
+                  onChange={(e) => { clearFieldError('contract_number'); setContractNumberEdited(true); setEditing({ ...editing, contract_number: e.target.value }) }}
                   onBlur={handleFieldBlur}
-                  placeholder="Masalan: 12/1108"
-                  inputMode="numeric"
-                  pattern="[0-9/]*"
+                  placeholder="Bo‘sh qoldirilsa avtomatik beriladi, yoki o‘zingiz yozing"
                   aria-invalid={Boolean(errors.contract_number)}
                 />
                 <EInvoiceFieldError message={errors.contract_number} />
