@@ -829,7 +829,7 @@ class Command(BaseCommand):
         profile = CompanyProfile.get_profile()
         profile.name = 'SwiftCore MChJ'
         profile.stir = '305123456'
-        profile.director_jshshr = '301019900010017'
+        profile.director_jshshr = '30101990001001'
         profile.director_fish = 'Karimov Jasur Akmal o\'g\'li'
         profile.mfo = '00401'
         profile.bank_name = 'Kapitalbank'

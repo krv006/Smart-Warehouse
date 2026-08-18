@@ -5,6 +5,7 @@ from django.db import models, transaction
 from django.db.models import (
     CharField, ForeignKey, CASCADE, PROTECT, SET_NULL,
     PositiveIntegerField, DecimalField, DateField, DateTimeField, TextField, FileField, UUIDField,
+    BooleanField,
 )
 from django.db.models import F
 from django.utils import timezone
@@ -598,6 +599,11 @@ class Zakaz(TimeStampedModel):
     comment            = TextField(blank=True, null=True)
     import_batch       = UUIDField(null=True, blank=True, db_index=True,
                                    help_text='Bir bulk importdagi qatorlarni bog‘laydi')
+    stock_credited      = BooleanField(
+        default=False,
+        help_text='Ombor qoldig\'iga bir marta kiritilganini belgilaydi '
+                  '(status=received yoki payment_status=paid — qaysi biri '
+                  'oldin bo\'lsa) — takror kiritilib qolmasligi uchun.')
 
     class Meta:
         db_table            = 'orders_zakaz'
@@ -669,6 +675,13 @@ class Zakaz(TimeStampedModel):
         from apps.expenses.models import Expense, ExpenseType, ExpenseSubType
         from apps.notifications.models import Notification
 
+        # Ombor qoldig'i faqat BIR MARTA kiritiladi — status=received va
+        # payment_status=paid ikkalasi ham shu metodni chaqirishi mumkin
+        # (masalan avval to'liq to'langan, keyin rasmiy qabul qilingan),
+        # ikkinchi chaqiruv qoldiqni ikki marta oshirib yubormasligi kerak.
+        if self.stock_credited:
+            return
+
         qty = self.received_qty if self.received_qty > 0 else self.quantity
         loc = self.warehouse_location or 'Asosiy ombor'
 
@@ -686,6 +699,9 @@ class Zakaz(TimeStampedModel):
         if self.product.origin == ProductOrigin.IMPORT:
             self.product.origin = ProductOrigin.WAREHOUSE
             self.product.save(update_fields=['origin'])
+
+        self.stock_credited = True
+        self.save(update_fields=['stock_credited'])
 
         # Mustaqil import uchun chiqim sync_zakaz_expense orqali yoziladi —
         # qabul paytida takrorlanmasin.

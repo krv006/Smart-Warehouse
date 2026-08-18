@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ArrowDown,
+  ArrowsLeftRight,
   ArrowUp,
   CalendarBlank,
   CurrencyCircleDollar,
   MagnifyingGlass,
+  PencilSimple,
   Plus,
   SpinnerGap,
   Warning,
@@ -16,7 +18,7 @@ import DataTable, { TablePagination } from './DataTable'
 import { can } from '../lib/permissions'
 import { formatDateUz, list, money, moneyDecimal, todayValue } from '../lib/utils'
 
-function KassaMetric({ icon: Icon, label, value, tone = 'neutral' }) {
+function KassaMetric({ icon: Icon, label, value, tone = 'neutral', onEdit }) {
   return (
     <article className={`metric kassa-metric kassa-metric--${tone}`}>
       <span className={`metric-icon ${tone}`}><Icon size={22} weight="duotone" /></span>
@@ -24,7 +26,93 @@ function KassaMetric({ icon: Icon, label, value, tone = 'neutral' }) {
         <p>{label}</p>
         <h2>{value}</h2>
       </div>
+      {onEdit && (
+        <button
+          type="button"
+          className="icon-button kassa-metric-edit"
+          onClick={onEdit}
+          aria-label={`${label} — qo‘lda tuzatish`}
+          title="Qo‘lda tuzatish"
+        >
+          <PencilSimple size={16} />
+        </button>
+      )}
     </article>
+  )
+}
+
+/**
+ * Kassa balansini (UZS/USD) qo'lda tuzatish — yakuniy qiymat kiritiladi,
+ * farq (delta) backendda hisoblanadi va DBga (`CashBalanceAdjustment`)
+ * yoziladi. `asos` MAJBURIY — kim, qachon, nima uchun tarixda saqlanadi.
+ */
+function AdjustBalanceModal({ currency, currentBalance, close, done, notify }) {
+  const [targetBalance, setTargetBalance] = useState(String(currentBalance ?? ''))
+  const [asos, setAsos] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const submit = async (event) => {
+    event.preventDefault()
+    if (!asos.trim()) return notify('Asos (sabab) kiritilishi shart.')
+    setSaving(true)
+    try {
+      await api.adjustCashBalance({
+        currency,
+        target_balance: targetBalance,
+        asos: asos.trim(),
+      })
+      notify('Kassa balansi tuzatildi.', 'success')
+      done()
+    } catch (err) {
+      notify(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <form className="editor" onSubmit={submit}>
+        <div className="editor-head">
+          <div>
+            <p className="eyebrow">QO‘LDA TUZATISH</p>
+            <h3>Kassa balansi ({currency})</h3>
+          </div>
+          <button type="button" className="icon-button" onClick={close} aria-label="Yopish"><X size={20} /></button>
+        </div>
+        <p className="muted">
+          Joriy balans: <b>{currency === 'USD' ? `$${moneyDecimal(currentBalance)}` : `${money(currentBalance)} UZS`}</b>
+        </p>
+        <div className="form-grid">
+          <label className="full-width">
+            Yangi balans ({currency})
+            <input
+              required
+              type="number"
+              step="0.01"
+              value={targetBalance}
+              onChange={(e) => setTargetBalance(e.target.value)}
+            />
+          </label>
+          <label className="full-width">
+            Asos (sabab) <span aria-hidden="true">*</span>
+            <textarea
+              required
+              rows={3}
+              value={asos}
+              onChange={(e) => setAsos(e.target.value)}
+              placeholder="Masalan: Inventarizatsiya natijasida farq aniqlandi"
+            />
+          </label>
+        </div>
+        <div className="editor-actions">
+          <button type="button" className="secondary-button" onClick={close}>Bekor qilish</button>
+          <button className="primary-button" disabled={saving}>
+            {saving ? <SpinnerGap size={18} className="spin" /> : 'Tuzatishni saqlash'}
+          </button>
+        </div>
+      </form>
+    </div>
   )
 }
 
@@ -209,6 +297,7 @@ function ledgerSourceLabel(row) {
   if (row.source === 'order') return 'Buyurtma'
   if (row.source === 'sale') return 'Sotuv'
   if (row.source === 'expense') return 'Rasxod'
+  if (row.source === 'adjustment') return 'Qo‘lda tuzatish'
   return row.source || '—'
 }
 
@@ -223,15 +312,18 @@ function bankSellRate(bank) {
 }
 
 /**
- * Valyuta konvertori — kiritilgan UZS summasini tanlangan bank kursi
- * bo‘yicha USD ga aylantirib ko‘rsatadi. Faqat mahalliy hisob-kitob
- * (bank tanlash hech qanday sozlamani o‘zgartirmaydi, `FxRatePanel`dan
- * farqli — u yerda bank tanlash butun tizim uchun kursni belgilaydi).
+ * Valyuta konvertori — kiritilgan summani tanlangan bank kursi bo‘yicha
+ * UZS <-> USD ga aylantirib ko‘rsatadi. "Konvertatsiya qilish" bosilsa
+ * natija DBga yoziladi (`CashConversion`) va kassa balansi (UZS/USD)
+ * shunga qarab yangilanadi — manba valyutadan ayiriladi, maqsad
+ * valyutaga qo‘shiladi.
  */
-function CurrencyConverter({ notify }) {
+function CurrencyConverter({ notify, canManage, onConverted }) {
   const [snapshot, setSnapshot] = useState(null)
   const [bankKey, setBankKey] = useState('infinbank')
   const [amount, setAmount] = useState('')
+  const [direction, setDirection] = useState('uzs_to_usd')
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -264,8 +356,31 @@ function CurrencyConverter({ notify }) {
 
   const selected = rateOptions.find((o) => o.key === bankKey) || rateOptions[0] || null
   const numericAmount = Number(amount)
-  const hasAmount = amount !== '' && Number.isFinite(numericAmount) && numericAmount >= 0
-  const usdResult = selected && hasAmount ? numericAmount / selected.rate : null
+  const hasAmount = amount !== '' && Number.isFinite(numericAmount) && numericAmount > 0
+  const isUzsToUsd = direction === 'uzs_to_usd'
+  const result = selected && hasAmount
+    ? (isUzsToUsd ? numericAmount / selected.rate : numericAmount * selected.rate)
+    : null
+
+  const submit = async (event) => {
+    event.preventDefault()
+    if (!selected || !hasAmount) return
+    setSaving(true)
+    try {
+      await api.cashConvert({
+        direction,
+        amount: String(numericAmount),
+        rate: String(selected.rate),
+      })
+      notify?.('Konvertatsiya bajarildi va kassa balansiga yozildi.', 'success')
+      setAmount('')
+      onConverted?.()
+    } catch (err) {
+      notify?.(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
     <section className="data-panel kassa-converter">
@@ -276,14 +391,31 @@ function CurrencyConverter({ notify }) {
       {rateOptions.length === 0 ? (
         <p className="muted">Kurslar yuklanmoqda…</p>
       ) : (
-        <div className="kassa-converter-body">
+        <form className="kassa-converter-body" onSubmit={submit}>
+          <div className="kassa-converter-direction" role="group" aria-label="Yo‘nalish">
+            <button
+              type="button"
+              className={isUzsToUsd ? 'period-tab is-active' : 'period-tab'}
+              onClick={() => setDirection('uzs_to_usd')}
+            >
+              UZS <ArrowsLeftRight size={14} /> USD
+            </button>
+            <button
+              type="button"
+              className={!isUzsToUsd ? 'period-tab is-active' : 'period-tab'}
+              onClick={() => setDirection('usd_to_uzs')}
+            >
+              USD <ArrowsLeftRight size={14} /> UZS
+            </button>
+          </div>
           <label className="kassa-converter-field">
-            <span>Summa (UZS)</span>
+            <span>Summa ({isUzsToUsd ? 'UZS' : 'USD'})</span>
             <input
               type="number"
               min="0"
+              step="0.01"
               inputMode="decimal"
-              placeholder="Masalan: 15000000"
+              placeholder={isUzsToUsd ? 'Masalan: 15000000' : 'Masalan: 1000'}
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
             />
@@ -300,9 +432,14 @@ function CurrencyConverter({ notify }) {
           </label>
           <div className="kassa-converter-result">
             <span>Natija</span>
-            <strong>{usdResult != null ? `$${moneyDecimal(usdResult)}` : '—'}</strong>
+            <strong>{result != null ? (isUzsToUsd ? `$${moneyDecimal(result)}` : `${moneyDecimal(result)} UZS`) : '—'}</strong>
           </div>
-        </div>
+          {canManage && (
+            <button type="submit" className="primary-button" disabled={!hasAmount || saving}>
+              {saving ? <SpinnerGap size={18} className="spin" /> : 'Konvertatsiya qilish'}
+            </button>
+          )}
+        </form>
       )}
     </section>
   )
@@ -311,6 +448,7 @@ function CurrencyConverter({ notify }) {
 export default function KassaPage({ notify, session, onDataChange, reloadKey = 0 }) {
   const showPrices = can(session, 'prices_view')
   const canManage = can(session, 'cash_manage')
+  const canAdjustBalance = Boolean(session?.is_management)
   const [rows, setRows] = useState([])
   const [summary, setSummary] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -321,6 +459,7 @@ export default function KassaPage({ notify, session, onDataChange, reloadKey = 0
   const [totalCount, setTotalCount] = useState(0)
   const [paying, setPaying] = useState(null)
   const [creating, setCreating] = useState(false)
+  const [adjusting, setAdjusting] = useState(null)
   const pageSize = 25
 
   const load = useCallback(async (silent = false) => {
@@ -394,6 +533,8 @@ export default function KassaPage({ notify, session, onDataChange, reloadKey = 0
 
   const netBalance = summary ? Number(summary.net_balance_uzs || 0) : 0
   const netTone = netBalance >= 0 ? 'success' : 'danger'
+  const netBalanceUsd = summary ? Number(summary.net_balance_usd || 0) : 0
+  const netToneUsd = netBalanceUsd >= 0 ? 'success' : 'danger'
 
   return (
     <div className="page kassa-page">
@@ -414,14 +555,21 @@ export default function KassaPage({ notify, session, onDataChange, reloadKey = 0
 
       {showPrices && summary && (
         <section className="metric-grid kassa-metrics">
+          <KassaMetric
+            icon={Wallet} label="Kassa balansi (UZS)" value={`UZS ${money(summary.net_balance_uzs)}`} tone={netTone}
+            onEdit={canAdjustBalance ? () => setAdjusting('UZS') : null}
+          />
+          <KassaMetric
+            icon={Wallet} label="Kassa balansi (USD)" value={`$${moneyDecimal(summary.net_balance_usd)}`} tone={netToneUsd}
+            onEdit={canAdjustBalance ? () => setAdjusting('USD') : null}
+          />
           <KassaMetric icon={ArrowUp} label="Tushum (UZS)" value={`UZS ${money(summary.sum_in_uzs ?? summary.sum_paid_uzs)}`} tone="success" />
           <KassaMetric icon={ArrowDown} label="Import chiqim (UZS)" value={`UZS ${money(summary.sum_import_uzs)}`} tone="warning" />
-          <KassaMetric icon={Wallet} label="Kassa balansi (UZS)" value={`UZS ${money(summary.net_balance_uzs)}`} tone={netTone} />
           <KassaMetric icon={CurrencyCircleDollar} label="Komissiya (UZS)" value={`UZS ${money(summary.total_commission_uzs)}`} />
         </section>
       )}
 
-      <CurrencyConverter notify={notify} />
+      <CurrencyConverter notify={notify} canManage={canManage} onConverted={refresh} />
 
       <div className="kassa-layout">
         <section className="data-panel kassa-table-panel">
@@ -442,6 +590,7 @@ export default function KassaPage({ notify, session, onDataChange, reloadKey = 0
                 <option value="order">Buyurtma</option>
                 <option value="import">Import</option>
                 <option value="expense">Rasxod</option>
+                <option value="adjustment">Qo‘lda tuzatish</option>
               </select>
             </div>
           </div>
@@ -496,6 +645,15 @@ export default function KassaPage({ notify, session, onDataChange, reloadKey = 0
           item={paying}
           close={() => setPaying(null)}
           done={() => { setPaying(null); refresh() }}
+          notify={notify}
+        />
+      )}
+      {adjusting && (
+        <AdjustBalanceModal
+          currency={adjusting}
+          currentBalance={adjusting === 'USD' ? summary?.net_balance_usd : summary?.net_balance_uzs}
+          close={() => setAdjusting(null)}
+          done={() => { setAdjusting(null); refresh() }}
           notify={notify}
         />
       )}

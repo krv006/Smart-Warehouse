@@ -217,3 +217,117 @@ class LedgerIncludesAllExpensesTests(TestCase):
         self.assertEqual(Decimal(str(res.data['sum_out_uzs'])), Decimal('300000'))
         # Eski "faqat import" maydon o'zgarmasin (bu holatda import chiqimi yo'q)
         self.assertEqual(Decimal(str(res.data['sum_import_uzs'])), Decimal('0'))
+
+
+class CashConversionTests(TestCase):
+    """UZS <-> USD kassa balansi konvertatsiyasi — DBda saqlanadi va
+    ikkala valyuta balansiga ham ta'sir qiladi."""
+
+    def setUp(self):
+        self.api = APIClient()
+        self.manager = User.objects.create_user(
+            'mng_conv', password='x', role=User.MANAGEMENT)
+        self.api.force_authenticate(self.manager)
+        payment = _make_sale_payment()  # total = 2 000 000 UZS
+        payment.add_payment(Decimal('2000000'))
+
+    def test_uzs_to_usd_moves_balance_between_currencies(self):
+        res = self.api.post('/api/v1/cash/payments/convert/', {
+            'direction': 'uzs_to_usd', 'amount': '1185735', 'rate': '11857.35',
+        }, format='json')
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(Decimal(res.data['amount_to']), Decimal('100.00'))
+
+        summary = self.api.get('/api/v1/cash/payments/summary/').data
+        self.assertEqual(Decimal(str(summary['net_balance_uzs'])), Decimal('814265'))
+        self.assertEqual(Decimal(str(summary['net_balance_usd'])), Decimal('100.00'))
+
+    def test_usd_to_uzs_reverses_the_move(self):
+        self.api.post('/api/v1/cash/payments/convert/', {
+            'direction': 'uzs_to_usd', 'amount': '1185735', 'rate': '11857.35',
+        }, format='json')
+        res = self.api.post('/api/v1/cash/payments/convert/', {
+            'direction': 'usd_to_uzs', 'amount': '40', 'rate': '11857.35',
+        }, format='json')
+        self.assertEqual(res.status_code, 201, res.data)
+        summary = self.api.get('/api/v1/cash/payments/summary/').data
+        self.assertEqual(Decimal(str(summary['net_balance_usd'])), Decimal('60.00'))
+
+    def test_conversion_above_balance_is_rejected(self):
+        res = self.api.post('/api/v1/cash/payments/convert/', {
+            'direction': 'uzs_to_usd', 'amount': '99999999', 'rate': '11857.35',
+        }, format='json')
+        self.assertEqual(res.status_code, 400, res.data)
+
+    def test_converting_usd_without_balance_is_rejected(self):
+        res = self.api.post('/api/v1/cash/payments/convert/', {
+            'direction': 'usd_to_uzs', 'amount': '10', 'rate': '11857.35',
+        }, format='json')
+        self.assertEqual(res.status_code, 400, res.data)
+
+
+class CashBalanceAdjustmentTests(TestCase):
+    """Kassa balansini qo'lda tuzatish — asos majburiy, tarixi saqlanadi."""
+
+    URL = '/api/v1/cash/payments/adjust-balance/'
+
+    def setUp(self):
+        self.api = APIClient()
+        self.manager = User.objects.create_user(
+            'mng_adj', password='x', role=User.MANAGEMENT)
+        self.accountant = User.objects.create_user(
+            'acc_adj', password='x', role=User.ACCOUNTANT)
+        payment = _make_sale_payment()  # total = 2 000 000 UZS
+        payment.add_payment(Decimal('2000000'))
+
+    def test_management_can_adjust_balance_up(self):
+        self.api.force_authenticate(self.manager)
+        res = self.api.post(self.URL, {
+            'currency': 'UZS', 'target_balance': '2500000',
+            'asos': 'Inventarizatsiya natijasida farq aniqlandi',
+        }, format='json')
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(Decimal(res.data['amount']), Decimal('500000.00'))
+        self.assertEqual(res.data['created_by_name'], 'mng_adj')
+
+        summary = self.api.get('/api/v1/cash/payments/summary/').data
+        self.assertEqual(Decimal(str(summary['net_balance_uzs'])), Decimal('2500000'))
+
+    def test_adjust_down_computes_negative_delta(self):
+        self.api.force_authenticate(self.manager)
+        res = self.api.post(self.URL, {
+            'currency': 'UZS', 'target_balance': '1000000',
+            'asos': 'Xatolik tuzatildi',
+        }, format='json')
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(Decimal(res.data['amount']), Decimal('-1000000.00'))
+        summary = self.api.get('/api/v1/cash/payments/summary/').data
+        self.assertEqual(Decimal(str(summary['net_balance_uzs'])), Decimal('1000000'))
+
+    def test_asos_is_required(self):
+        self.api.force_authenticate(self.manager)
+        res = self.api.post(self.URL, {
+            'currency': 'UZS', 'target_balance': '1000000', 'asos': '   ',
+        }, format='json')
+        self.assertEqual(res.status_code, 400, res.data)
+
+    def test_accountant_cannot_adjust_balance(self):
+        self.api.force_authenticate(self.accountant)
+        res = self.api.post(self.URL, {
+            'currency': 'UZS', 'target_balance': '1000000', 'asos': 'sabab',
+        }, format='json')
+        self.assertEqual(res.status_code, 403, res.data)
+
+    def test_adjustment_appears_in_ledger(self):
+        self.api.force_authenticate(self.manager)
+        self.api.post(self.URL, {
+            'currency': 'UZS', 'target_balance': '2500000',
+            'asos': 'Inventarizatsiya natijasida farq aniqlandi',
+        }, format='json')
+        res = self.api.get('/api/v1/cash/payments/ledger/?source=adjustment')
+        self.assertEqual(res.status_code, 200, res.data)
+        rows = res.data['results']
+        self.assertEqual(len(rows), 1)
+        self.assertIn('Inventarizatsiya', rows[0]['label'])
+        self.assertEqual(rows[0]['client_name'], 'mng_adj')
+        self.assertEqual(rows[0]['kind'], 'in')

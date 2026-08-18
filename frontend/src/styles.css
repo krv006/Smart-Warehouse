@@ -2498,6 +2498,16 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .kassa-metric h2 {
   font-size: clamp(18px, 2.4vw, 24px);
 }
+.kassa-metric {
+  position: relative;
+}
+.kassa-metric-edit {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 28px;
+  height: 28px;
+}
 .kassa-metric--success .metric-icon.success { background: color-mix(in srgb, var(--success) 14%, var(--surface)); color: var(--success); }
 .kassa-metric--danger .metric-icon.danger { background: color-mix(in srgb, var(--error) 14%, var(--surface)); color: var(--error); }
 .kassa-metric--warning .metric-icon.warning { background: color-mix(in srgb, var(--warning) 14%, var(--surface)); color: var(--warning); }
@@ -2529,6 +2539,16 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   grid-template-columns: minmax(160px, 1fr) minmax(200px, 1fr) minmax(140px, auto);
   gap: 12px;
   align-items: end;
+}
+.kassa-converter-direction {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 8px;
+}
+.kassa-converter-body > button[type="submit"] {
+  grid-column: 1 / -1;
+  justify-self: start;
+  min-height: 44px;
 }
 .kassa-converter-field {
   display: flex;
@@ -4122,6 +4142,8 @@ label.field-invalid textarea:focus,
 .document-preview-toolbar {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
   margin-bottom: 10px;
 }
 

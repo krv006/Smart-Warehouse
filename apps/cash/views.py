@@ -9,7 +9,10 @@ from rest_framework.viewsets import ModelViewSet
 
 from apps.cash.ledger import build_ledger_entries, ledger_totals
 from apps.cash.models import ExchangeRate, ExchangeRateSettings, Payment
-from apps.cash.serializers import (ExchangeRateSerializer, ExchangeRateSettingsSerializer,
+from apps.cash.serializers import (CashBalanceAdjustmentCreateSerializer,
+                                   CashBalanceAdjustmentSerializer,
+                                   CashConversionCreateSerializer, CashConversionSerializer,
+                                   ExchangeRateSerializer, ExchangeRateSettingsSerializer,
                                    PaymentSerializer, PaymentOperatorSerializer,
                                    PaymentUpdateSerializer,
                                    PaymentPaySerializer)
@@ -258,6 +261,54 @@ class PaymentViewSet(ModelViewSet):
         }
         data.update(ledger_totals())
         return Response(data)
+
+    @extend_schema(
+        summary="Valyuta konvertatsiyasi (UZS ↔ USD, kassa balansi)",
+        description=(
+            "Kassa balansi orasida UZS↔USD ko'chiradi va DBda saqlaydi. "
+            "`direction`: `uzs_to_usd` yoki `usd_to_uzs`. `amount` — manba "
+            "valyutadagi summa (ayiriladi), `rate` — 1 USD necha UZS "
+            "ekanligi (natija shunga qarab hisoblanadi). Balans yetarli "
+            "bo'lmasa 400 qaytadi.\n\n"
+            "```json\n"
+            "{ \"direction\": \"uzs_to_usd\", \"amount\": \"15000000\", "
+            "\"rate\": \"11857.35\" }\n"
+            "```"
+        ),
+        request=CashConversionCreateSerializer,
+        tags=["Cash / Kassa"],
+    )
+    @action(detail=False, methods=['post'], url_path='convert',
+            permission_classes=[IsAccountantOrManagement])
+    def convert(self, request):
+        serializer = CashConversionCreateSerializer(
+            data=request.data, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        conversion = serializer.save()
+        return Response(CashConversionSerializer(conversion).data, status=201)
+
+    @extend_schema(
+        summary="Kassa balansini qo'lda tuzatish (Management)",
+        description=(
+            "Kassa balansi (UZS yoki USD) qo'lda kerakli qiymatga o'zgartiriladi "
+            "— joriy balansdan farqi avtomatik hisoblanadi va DBga (`CashBalanceAdjustment`) "
+            "yoziladi (kim, qachon, qancha, nima uchun). `asos` MAJBURIY.\n\n"
+            "```json\n"
+            "{ \"currency\": \"UZS\", \"target_balance\": \"4800000000\", "
+            "\"asos\": \"Inventarizatsiya natijasida farq aniqlandi\" }\n"
+            "```"
+        ),
+        request=CashBalanceAdjustmentCreateSerializer,
+        tags=["Cash / Kassa"],
+    )
+    @action(detail=False, methods=['post'], url_path='adjust-balance',
+            permission_classes=[IsManagement])
+    def adjust_balance(self, request):
+        serializer = CashBalanceAdjustmentCreateSerializer(
+            data=request.data, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        adjustment = serializer.save()
+        return Response(CashBalanceAdjustmentSerializer(adjustment).data, status=201)
 
     @extend_schema(
         summary="Kassa harakatlari (tushum + import chiqim)",

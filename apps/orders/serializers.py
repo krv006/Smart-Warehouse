@@ -894,6 +894,8 @@ class ZakazSerializer(ModelSerializer):
         if zakaz.zakaz_type == Zakaz.MANUAL and zakaz.total:
             from apps.orders.zakaz_payment import sync_zakaz_expense
             sync_zakaz_expense(zakaz, user=zakaz.created_by)
+        if zakaz.payment_status == Zakaz.PAID:
+            zakaz.receive(user=zakaz.created_by)
         return zakaz
 
     # Har bir status o'zgarishi → reestrga qaysi turda yozilishi
@@ -974,8 +976,9 @@ class ZakazSerializer(ModelSerializer):
             if new_status == Zakaz.CONFIRMED:
                 validated_data['confirmed_at'] = timezone.now()
 
-        old_status   = instance.status
-        was_received = instance.status == Zakaz.RECEIVED
+        old_status         = instance.status
+        was_received       = instance.status == Zakaz.RECEIVED
+        old_payment_status = instance.payment_status
         changes      = _diff(instance, validated_data, _ZAKAZ_TRACKED_FIELDS)
 
         zakaz = super().update(instance, validated_data)
@@ -1016,6 +1019,13 @@ class ZakazSerializer(ModelSerializer):
         # Birinchi marta 'received' ga o'tganda ombor to'ldir + buyurtmalar
         # qismini yangilash (shartnoma asosida, tarix bilan)
         if zakaz.status == Zakaz.RECEIVED and not was_received:
+            zakaz.receive(user=user)
+
+        # To'lov holati "To'landi" ga o'tganda ham — rasmiy qabul (received)
+        # bosqichidan o'tmagan bo'lsa ham — tovar omborga kiritiladi: manba
+        # "Import"dan "Ombor"ga o'zgaradi, qoldiq ko'rinadi (receive() ichida
+        # stock_credited bilan himoyalangan, ikki marta kiritilib qolmaydi).
+        if zakaz.payment_status == Zakaz.PAID and old_payment_status != Zakaz.PAID:
             zakaz.receive(user=user)
 
         if zakaz.zakaz_type == Zakaz.MANUAL and zakaz.total:
@@ -1161,17 +1171,6 @@ class ZakazBulkCreateSerializer(Serializer):
                             f'seriya raqami takrorlanmasligi kerak.')
                     else:
                         seen_serials[serial] = index
-
-            product = item.get('product')
-            if not product:
-                continue
-            has_active = product.zakazlar.filter(
-                status__in=Zakaz.ACTIVE_STATUSES
-            ).exists()
-            if has_active:
-                errors.append(
-                    f'"{product.name}" — bu mahsulot uchun faol zakaz allaqachon mavjud.'
-                )
         if errors:
             raise ValidationError(errors)
         return value
@@ -1265,6 +1264,8 @@ class ZakazBulkCreateSerializer(Serializer):
             if zakaz.total:
                 from apps.orders.zakaz_payment import sync_zakaz_expense
                 sync_zakaz_expense(zakaz, user=zakaz.created_by)
+            if zakaz.payment_status == Zakaz.PAID:
+                zakaz.receive(user=zakaz.created_by)
             created.append(zakaz)
         return created
 
