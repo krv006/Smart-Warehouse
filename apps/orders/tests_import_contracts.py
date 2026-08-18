@@ -10,7 +10,7 @@ from apps.clients.models import Client
 from apps.invoices.models import InvoiceLineItem
 from apps.orders.models import Zakaz
 from apps.users.models import User
-from apps.warehouse.models import Category, Product, ProductOrigin
+from apps.warehouse.models import Category, Product, ProductOrigin, Stock
 
 
 class ContractSequenceTests(TestCase):
@@ -725,3 +725,120 @@ class DuplicateSerialTests(TestCase):
                             format='json')
         self.assertEqual(res.status_code, 400, res.data)
         self.assertFalse(Product.objects.filter(serial_number='SN-TAKROR').exists())
+
+
+class RepeatZakazForActiveProductTests(TestCase):
+    """Bir mahsulot uchun faol (yakunlanmagan) zakaz allaqachon mavjud
+    bo'lsa ham, o'sha mahsulotga yana zakaz berish mumkin bo'lishi kerak
+    — turli buyurtmalar/holatlar bir xil mahsulotni talab qilishi mumkin,
+    global "faol zakaz bor" taqig'i noto'g'ri edi (endi olib tashlandi)."""
+
+    BULK_URL = '/api/v1/orders/zakaz/bulk/'
+
+    def setUp(self):
+        self.api = APIClient()
+        self.manager = User.objects.create_user('mng_repeat', password='x',
+                                                role=User.MANAGEMENT)
+        self.api.force_authenticate(self.manager)
+        self.category = Category.objects.create(name='Kategoriya')
+        self.product = Product.objects.create(
+            name='Canon Printer', serial_number='SN-REPEAT',
+            category=self.category)
+
+    def _bulk(self, qty):
+        return self.api.post(self.BULK_URL, {
+            'items': [{'product': self.product.pk, 'quantity': qty,
+                       'unit_price': '10000.00', 'selling_price': '15000.00'}],
+        }, format='json')
+
+    def test_second_zakaz_for_same_product_is_allowed(self):
+        first = self._bulk(5)
+        self.assertEqual(first.status_code, 201, first.data)
+        second = self._bulk(3)
+        self.assertEqual(second.status_code, 201, second.data)
+        self.assertEqual(
+            Zakaz.objects.filter(product=self.product, status=Zakaz.NEW).count(), 2)
+
+
+class PaymentPaidCreditsStockTests(TestCase):
+    """payment_status 'paid' ga o'tganda — rasmiy qabul (status=received)
+    bosqichidan o'tmagan bo'lsa ham — mahsulot manbasi Import'dan Ombor'ga
+    o'zgarishi va ombor qoldig'iga miqdor qo'shilishi kerak."""
+
+    def setUp(self):
+        self.api = APIClient()
+        self.manager = User.objects.create_user('mng_pay_stock', password='x',
+                                                role=User.MANAGEMENT)
+        self.api.force_authenticate(self.manager)
+        self.category = Category.objects.create(name='Kategoriya')
+        self.product = Product.objects.create(
+            name='Canon Canon-XX651', serial_number='SN-CANON-1',
+            category=self.category, origin=ProductOrigin.IMPORT)
+        self.zakaz = Zakaz.objects.create(
+            product=self.product, quantity=7, zakaz_type=Zakaz.MANUAL,
+            unit_price=Decimal('100000'), selling_price=Decimal('150000'),
+            status=Zakaz.NEW, payment_status=Zakaz.UNPAID,
+        )
+
+    def test_marking_paid_flips_origin_and_adds_stock(self):
+        res = self.api.patch(f'/api/v1/orders/zakaz/{self.zakaz.pk}/',
+                             {'payment_status': 'paid'}, format='json')
+        self.assertEqual(res.status_code, 200, res.data)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.origin, ProductOrigin.WAREHOUSE)
+        stock = Stock.objects.get(product=self.product)
+        self.assertEqual(stock.quantity, 7)
+        self.zakaz.refresh_from_db()
+        self.assertTrue(self.zakaz.stock_credited)
+
+    def test_marking_paid_twice_does_not_double_stock(self):
+        self.api.patch(f'/api/v1/orders/zakaz/{self.zakaz.pk}/',
+                       {'payment_status': 'paid'}, format='json')
+        res = self.api.patch(f'/api/v1/orders/zakaz/{self.zakaz.pk}/',
+                             {'comment': 'yangilandi'}, format='json')
+        self.assertEqual(res.status_code, 200, res.data)
+        stock = Stock.objects.get(product=self.product)
+        self.assertEqual(stock.quantity, 7)
+
+    def test_receive_after_paid_does_not_double_credit(self):
+        self.api.patch(f'/api/v1/orders/zakaz/{self.zakaz.pk}/',
+                       {'payment_status': 'paid'}, format='json')
+        self.api.patch(f'/api/v1/orders/zakaz/{self.zakaz.pk}/',
+                       {'status': 'confirmed', 'asos': 'Tasdiqlandi',
+                        'contract_number': 'SH-1'}, format='json')
+        self.api.patch(f'/api/v1/orders/zakaz/{self.zakaz.pk}/',
+                       {'status': 'ordered', 'asos': 'Yuborildi'}, format='json')
+        res = self.api.patch(f'/api/v1/orders/zakaz/{self.zakaz.pk}/',
+                             {'status': 'received', 'asos': 'Qabul qilindi',
+                              'faktura': 'F-1', 'received_qty': 7}, format='json')
+        self.assertEqual(res.status_code, 200, res.data)
+        stock = Stock.objects.get(product=self.product)
+        self.assertEqual(stock.quantity, 7)
+
+
+class BulkCreatePaidCreditsStockTests(TestCase):
+    """Bulk import yaratilishida to'lov holati darhol 'paid' bo'lsa —
+    mahsulot yaratilgan zahoti ombor qoldig'iga tushishi kerak."""
+
+    BULK_URL = '/api/v1/orders/zakaz/bulk/'
+
+    def setUp(self):
+        self.api = APIClient()
+        self.manager = User.objects.create_user('mng_bulk_paid', password='x',
+                                                role=User.MANAGEMENT)
+        self.api.force_authenticate(self.manager)
+        self.category = Category.objects.create(name='Kategoriya')
+
+    def test_paid_on_create_credits_stock_immediately(self):
+        res = self.api.post(self.BULK_URL, {
+            'payment_status': 'paid',
+            'items': [{'new_product': {'name': 'Darhol tolangan tovar',
+                                       'category': self.category.pk},
+                       'quantity': 4, 'unit_price': '20000.00',
+                       'selling_price': '30000.00'}],
+        }, format='json')
+        self.assertEqual(res.status_code, 201, res.data)
+        product = Product.objects.get(name='Darhol tolangan tovar')
+        self.assertEqual(product.origin, ProductOrigin.WAREHOUSE)
+        stock = Stock.objects.get(product=product)
+        self.assertEqual(stock.quantity, 4)

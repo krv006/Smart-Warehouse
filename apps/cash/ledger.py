@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from django.db.models import Q, Sum
 
-from apps.cash.models import Payment, PaymentTransaction
+from apps.cash.models import CashBalanceAdjustment, CashConversion, Payment, PaymentTransaction
 from apps.expenses.models import Expense
 
 
@@ -109,6 +109,32 @@ def build_ledger_entries(search=None, source=None, kind=None,
             'zakaz_id': zakaz.pk if zakaz else None,
         })
 
+    adj_qs = CashBalanceAdjustment.objects.select_related('created_by').order_by('-created_at')
+    if search:
+        adj_qs = adj_qs.filter(asos__icontains=search)
+    if date_from:
+        adj_qs = adj_qs.filter(created_at__date__gte=date_from)
+    if date_to:
+        adj_qs = adj_qs.filter(created_at__date__lte=date_to)
+
+    for adj in adj_qs:
+        adj_kind = 'in' if adj.amount >= 0 else 'out'
+        if source and source != 'adjustment':
+            continue
+        if kind and kind != adj_kind:
+            continue
+        entries.append({
+            'id': f'adj-{adj.pk}',
+            'kind': adj_kind,
+            'source': 'adjustment',
+            'amount': str(abs(adj.amount)),
+            'currency': adj.currency,
+            'label': f'Qo\'lda tuzatish: {adj.asos}',
+            'client_name': str(adj.created_by) if adj.created_by_id else None,
+            'date': adj.created_at.date().isoformat(),
+            'created_at': adj.created_at.isoformat(),
+        })
+
     entries.sort(key=lambda row: row.get('created_at') or '', reverse=True)
     return entries
 
@@ -144,6 +170,32 @@ def ledger_totals():
         .filter(currency=Expense.USD)
         .aggregate(s=Sum('amount'))['s'] or Decimal('0')
     )
+
+    # Valyuta konvertatsiyalari — UZS→USD manba balansdan ayiradi, maqsad
+    # balansga qo'shadi (va aksincha), ikkala kassa balansiga ta'sir qiladi
+    conv_uzs_to_usd = CashConversion.objects.filter(
+        direction=CashConversion.UZS_TO_USD
+    ).aggregate(frm=Sum('amount_from'), to=Sum('amount_to'))
+    conv_usd_to_uzs = CashConversion.objects.filter(
+        direction=CashConversion.USD_TO_UZS
+    ).aggregate(frm=Sum('amount_from'), to=Sum('amount_to'))
+    conv_uzs_out = conv_uzs_to_usd['frm'] or Decimal('0')
+    conv_usd_in  = conv_uzs_to_usd['to'] or Decimal('0')
+    conv_usd_out = conv_usd_to_uzs['frm'] or Decimal('0')
+    conv_uzs_in  = conv_usd_to_uzs['to'] or Decimal('0')
+
+    # Qo'lda kiritilgan balans tuzatishlari (manfiy bo'lishi mumkin)
+    adj_uzs = (
+        CashBalanceAdjustment.objects
+        .filter(currency=CashBalanceAdjustment.UZS)
+        .aggregate(s=Sum('amount'))['s'] or Decimal('0')
+    )
+    adj_usd = (
+        CashBalanceAdjustment.objects
+        .filter(currency=CashBalanceAdjustment.USD)
+        .aggregate(s=Sum('amount'))['s'] or Decimal('0')
+    )
+
     return {
         'sum_in_uzs': in_uzs,
         'sum_in_usd': in_usd,
@@ -153,7 +205,8 @@ def ledger_totals():
         # Barcha rasxodlar (import + ofis/transport/oylik/...)
         'sum_out_uzs': out_uzs,
         'sum_out_usd': out_usd,
-        # Kassa umumiy balansi — BARCHA chiqimlar hisobga olingan holda
-        'net_balance_uzs': in_uzs - out_uzs,
-        'net_balance_usd': in_usd - out_usd,
+        # Kassa umumiy balansi — BARCHA chiqimlar, valyuta konvertatsiyalari
+        # VA qo'lda kiritilgan tuzatishlar hisobga olingan holda
+        'net_balance_uzs': in_uzs - out_uzs - conv_uzs_out + conv_uzs_in + adj_uzs,
+        'net_balance_usd': in_usd - out_usd + conv_usd_in - conv_usd_out + adj_usd,
     }

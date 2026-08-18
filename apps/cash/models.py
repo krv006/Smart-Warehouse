@@ -206,6 +206,73 @@ class PaymentTransaction(TimeStampedModel):
         return f'Txn #{self.pk} — {self.amount} (payment #{self.payment_id})'
 
 
+class CashConversion(TimeStampedModel):
+    """
+    Kassadagi UZS <-> USD valyuta konvertatsiyasi.
+
+    Har bir konvertatsiya kassa balansi orasida pul ko'chiradi: manba
+    valyutadan `amount_from` ayiriladi, maqsad valyutaga `amount_to`
+    qo'shiladi (`ledger.ledger_totals()` ikkalasini ham hisobga oladi).
+    """
+    UZS_TO_USD = 'uzs_to_usd'
+    USD_TO_UZS = 'usd_to_uzs'
+    DIRECTION_CHOICES = (
+        (UZS_TO_USD, 'UZS → USD'),
+        (USD_TO_UZS, 'USD → UZS'),
+    )
+
+    direction   = CharField(max_length=16, choices=DIRECTION_CHOICES)
+    amount_from = DecimalField(max_digits=18, decimal_places=2,
+                               help_text='Manba valyutadan ayiriladigan summa')
+    amount_to   = DecimalField(max_digits=18, decimal_places=2,
+                               help_text='Maqsad valyutaga qo\'shiladigan summa')
+    rate        = DecimalField(max_digits=14, decimal_places=4,
+                               help_text='Ishlatilgan kurs (1 USD = necha UZS)')
+    comment     = TextField(blank=True, null=True)
+    created_by  = ForeignKey(settings.AUTH_USER_MODEL, on_delete=SET_NULL,
+                             null=True, blank=True, related_name='cash_conversions')
+
+    class Meta:
+        db_table            = 'cash_conversion'
+        ordering            = ('-created_at',)
+        verbose_name        = 'Valyuta konvertatsiyasi'
+        verbose_name_plural = 'Valyuta konvertatsiyalari'
+
+    def __str__(self):
+        return f'{self.get_direction_display()}: {self.amount_from} → {self.amount_to}'
+
+
+class CashBalanceAdjustment(TimeStampedModel):
+    """
+    Kassa balansini (UZS yoki USD) qo'lda tuzatish.
+
+    Balans o'zi saqlanmaydi (`ledger.ledger_totals()` orqali hisoblanadi) —
+    bu yozuv shunchaki balansga qo'shiladigan/ayiriladigan farqni (`amount`,
+    manfiy bo'lishi mumkin) va MAJBURIY asosni saqlaydi. Har bir tuzatish
+    kassa jurnalida (`build_ledger_entries`) alohida qator sifatida ko'rinadi
+    — kim, qachon, qancha, nima uchun.
+    """
+    UZS = 'UZS'
+    USD = 'USD'
+    CURRENCY_CHOICES = ((UZS, 'UZS'), (USD, 'USD'))
+
+    currency   = CharField(max_length=3, choices=CURRENCY_CHOICES)
+    amount     = DecimalField(max_digits=18, decimal_places=2,
+                              help_text='Balansga qo\'shiladigan farq (manfiy — ayiriladi)')
+    asos       = TextField(help_text='Tuzatish sababi — MAJBURIY')
+    created_by = ForeignKey(settings.AUTH_USER_MODEL, on_delete=SET_NULL,
+                            null=True, blank=True, related_name='cash_balance_adjustments')
+
+    class Meta:
+        db_table            = 'cash_balance_adjustment'
+        ordering            = ('-created_at',)
+        verbose_name        = 'Kassa balansi tuzatishi'
+        verbose_name_plural = 'Kassa balansi tuzatishlari'
+
+    def __str__(self):
+        return f'{self.currency} {self.amount:+} — {self.asos[:40]}'
+
+
 class ExchangeRateSettings(TimeStampedModel):
     """Valyuta kursi sozlamalari (singleton)."""
 

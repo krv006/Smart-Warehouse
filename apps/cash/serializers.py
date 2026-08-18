@@ -4,9 +4,10 @@ from django.db import transaction
 from rest_framework.serializers import (ModelSerializer, Serializer,
                                         SerializerMethodField,
                                         ValidationError, ReadOnlyField,
-                                        DecimalField, CharField)
+                                        DecimalField, CharField, ChoiceField)
 
-from apps.cash.models import ExchangeRate, ExchangeRateSettings, Payment, PaymentTransaction
+from apps.cash.models import (CashBalanceAdjustment, CashConversion, ExchangeRate,
+                              ExchangeRateSettings, Payment, PaymentTransaction)
 
 
 class ExchangeRateSerializer(ModelSerializer):
@@ -285,3 +286,123 @@ class PaymentPaySerializer(Serializer):
     """Qo'shimcha to'lov qabul qilish uchun body."""
     amount  = DecimalField(max_digits=14, decimal_places=2, min_value=Decimal('0.01'))
     comment = CharField(required=False, allow_blank=True, allow_null=True)
+
+
+class CashConversionSerializer(ModelSerializer):
+    """Amalga oshirilgan valyuta konvertatsiyasi (javob uchun)."""
+    created_by_name = SerializerMethodField()
+
+    class Meta:
+        model  = CashConversion
+        fields = ('id', 'direction', 'amount_from', 'amount_to', 'rate',
+                  'comment', 'created_by', 'created_by_name', 'created_at')
+        read_only_fields = fields
+
+    def get_created_by_name(self, obj):
+        return str(obj.created_by) if obj.created_by else None
+
+
+class CashConversionCreateSerializer(Serializer):
+    """
+    Kassa balansi orasida UZS <-> USD konvertatsiya qilish.
+
+    `amount` — manba valyutadagi summa (ayiriladi), `rate` — 1 USD necha
+    UZS ekanligi. Maqsad valyutadagi summa (`amount_to`) shu yerda
+    hisoblanadi va kassa balansi yetarli bo'lmasa rad etiladi.
+    """
+    direction = ChoiceField(choices=CashConversion.DIRECTION_CHOICES)
+    amount    = DecimalField(max_digits=18, decimal_places=2, min_value=Decimal('0.01'))
+    rate      = DecimalField(max_digits=14, decimal_places=4, min_value=Decimal('0.0001'))
+    comment   = CharField(required=False, allow_blank=True, allow_null=True)
+
+    def validate(self, attrs):
+        from apps.cash.ledger import ledger_totals
+
+        totals    = ledger_totals()
+        direction = attrs['direction']
+        amount    = attrs['amount']
+        rate      = attrs['rate']
+
+        if direction == CashConversion.UZS_TO_USD:
+            available = totals['net_balance_uzs']
+            amount_to = (amount / rate).quantize(Decimal('0.01'))
+            if amount > available:
+                raise ValidationError({
+                    'amount': (f'Kassa balansida yetarli UZS mablag\' yo\'q '
+                              f'(mavjud: {available} UZS).')})
+        else:
+            available = totals['net_balance_usd']
+            amount_to = (amount * rate).quantize(Decimal('0.01'))
+            if amount > available:
+                raise ValidationError({
+                    'amount': (f'Kassa balansida yetarli USD mablag\' yo\'q '
+                              f'(mavjud: {available} USD).')})
+
+        attrs['amount_to'] = amount_to
+        return attrs
+
+    @transaction.atomic
+    def create(self, validated_data):
+        request = self.context.get('request')
+        user = request.user if request else None
+        return CashConversion.objects.create(
+            direction=validated_data['direction'],
+            amount_from=validated_data['amount'],
+            amount_to=validated_data['amount_to'],
+            rate=validated_data['rate'],
+            comment=validated_data.get('comment') or '',
+            created_by=user,
+        )
+
+
+class CashBalanceAdjustmentSerializer(ModelSerializer):
+    """Amalga oshirilgan qo'lda balans tuzatishi (javob/tarix uchun)."""
+    created_by_name = SerializerMethodField()
+
+    class Meta:
+        model  = CashBalanceAdjustment
+        fields = ('id', 'currency', 'amount', 'asos',
+                  'created_by', 'created_by_name', 'created_at')
+        read_only_fields = fields
+
+    def get_created_by_name(self, obj):
+        return str(obj.created_by) if obj.created_by else None
+
+
+class CashBalanceAdjustmentCreateSerializer(Serializer):
+    """
+    Kassa balansini (UZS yoki USD) qo'lda kerakli qiymatga o'zgartirish.
+
+    `target_balance` — balans YETIB BORISHI kerak bo'lgan yakuniy qiymat
+    (joriy balansdan farqi avtomatik hisoblanadi va saqlanadi). `asos`
+    MAJBURIY — nima uchun tuzatilayotgani.
+    """
+    currency       = ChoiceField(choices=CashBalanceAdjustment.CURRENCY_CHOICES)
+    target_balance = DecimalField(max_digits=18, decimal_places=2)
+    asos           = CharField(max_length=2000)
+
+    def validate_asos(self, value):
+        if not value.strip():
+            raise ValidationError('Asos (sabab) kiritilishi shart.')
+        return value.strip()
+
+    @transaction.atomic
+    def create(self, validated_data):
+        from apps.cash.ledger import ledger_totals
+
+        request  = self.context.get('request')
+        user     = request.user if request else None
+        currency = validated_data['currency']
+        target   = validated_data['target_balance']
+
+        totals  = ledger_totals()
+        current = (totals['net_balance_uzs'] if currency == CashBalanceAdjustment.UZS
+                  else totals['net_balance_usd'])
+        delta   = target - current
+
+        return CashBalanceAdjustment.objects.create(
+            currency=currency,
+            amount=delta,
+            asos=validated_data['asos'],
+            created_by=user,
+        )

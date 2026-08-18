@@ -213,6 +213,8 @@ Timeout: **8 soniya**. Xato klassi: `ApiError(message, status, fields?)` — `fi
 | `paymentsSummary()` | GET | `/cash/payments/summary/` | — |
 | `kassaLedger(params)` | GET | `/cash/payments/ledger/` | `page`, `page_size`, `search`, `source` (`sale`\|`order`\|`import`\|`expense`) |
 | `pay(id, payload)` | POST | `/cash/payments/{id}/pay/` | `{ amount, comment }` |
+| `cashConvert(payload)` | POST | `/cash/payments/convert/` | `{ direction: 'uzs_to_usd'\|'usd_to_uzs', amount, rate }` |
+| `adjustCashBalance(payload)` | POST | `/cash/payments/adjust-balance/` | `{ currency: 'UZS'\|'USD', target_balance, asos }` |
 | `exchangeRateLatest(refresh)` | GET | `/cash/exchange-rates/latest/` | `refresh=true\|false` |
 | `exchangeRateSettings()` | GET | `/cash/exchange-rates/settings/` | — |
 | `updateExchangeRateSettings(payload)` | PATCH | `/cash/exchange-rates/settings/` | `{ auto_fetch_enabled?, preferred_rate_source?, preferred_bank_code?, preferred_bank_side? }` (`infinbank` \| `manual` \| `bank`; `preferred_bank_side`: `buy` \| `sell`) |
@@ -702,8 +704,14 @@ FIFO ombordan ayiradi. Operator uchun narx/foyda yashirilishi mumkin.
 | POST | `/{id}/pay/` | `{ amount, comment }` | Accountant/Management | ✅ `pay` |
 | GET | `/summary/` | — | Accountant/Management | ✅ `paymentsSummary` |
 | GET | `/ledger/` | `page`, `page_size`, `search`, `source`, `kind` | Accountant/Management (`IsAccountantWithManagementRead`, yozish yo‘q — faqat GET) | ✅ `kassaLedger` |
+| POST | `/convert/` | `{ direction: 'uzs_to_usd'\|'usd_to_uzs', amount, rate }` | Accountant/Management | ✅ `cashConvert` |
+| POST | `/adjust-balance/` | `{ currency: 'UZS'\|'USD', target_balance, asos }` | **Management** (`IsManagement`) | ✅ `adjustCashBalance` |
 
 **Ro‘yxatda `paid` yashirin** — `?status=paid` yoki `?include_paid=true`.
+
+**Valyuta konvertatsiyasi (`/payments/convert/`)** — kassa balansi (UZS/USD) orasida pul ko'chiradi va DBga (`CashConversion`) yozadi. `amount` — manba valyutadagi summa (kassadan ayiriladi), `rate` — 1 USD necha UZS ekanligi. `uzs_to_usd`: `amount_to = amount / rate` (USD balansga qo'shiladi). `usd_to_uzs`: `amount_to = amount * rate` (UZS balansga qo'shiladi). Manba valyutada balans yetarli bo'lmasa `400` (`{amount: "..."}`). Javob: `{id, direction, amount_from, amount_to, rate, comment, created_by, created_by_name, created_at}`. `GET /payments/summary/` javobidagi `net_balance_uzs`/`net_balance_usd` konvertatsiyalarni ham hisobga oladi.
+
+**Balansni qo'lda tuzatish (`/payments/adjust-balance/`)** — kassa balansi (UZS yoki USD) ko'rsatilgan `target_balance`ga o'zgartiriladi; farq (`target_balance − joriy balans`) backendda hisoblanadi va DBga (`CashBalanceAdjustment`) yoziladi. `asos` **MAJBURIY** (bo'sh/faqat probel — `400`). Faqat **Management** (Accountant ham `403` oladi — pul konvertatsiyasidan farqli). Javob: `{id, currency, amount, asos, created_by, created_by_name, created_at}` (`amount` — hisoblangan farq, manfiy bo'lishi mumkin). Har bir tuzatish `GET /payments/ledger/` jurnalida `source=adjustment` sifatida ko'rinadi (kim/`client_name` = `created_by_name`, izoh = `asos`) — shu orqali "kim, qachon, nima uchun" tarixi saqlanadi. Frontend: `KassaMetric` balans kartalarining qalam (✏️) tugmasi — faqat `session.is_management` bo'lganda ko'rinadi.
 
 **Operator kassani ko‘radi, lekin pul yo‘q:** `GET /cash/payments/` va `/{id}/` Operatorga ham ochiq (`IsAccountantWithManagementRead`), lekin backend `PaymentOperatorSerializer` qaytaradi — javobda `total_amount`, `commission`, `paid_amount`, `remaining` maydonlari **umuman yo‘q**. Frontend bu maydonlar bo‘lmasligiga tayyor bo‘lsin (§21, qoida 7). Yozish (`POST`/`PATCH`/`DELETE`/`pay`) Operatorga hech qachon ochiq emas — `403`.
 
@@ -938,6 +946,8 @@ Backend mahsulotdan `product_name`, `barcode`, `identification_code`, `unit`, na
 **Hamkor paneli:** `ClientPickerField` → `ClientPickerModal` (xuddi shu oqim; saqlashda `client`).
 
 Ko‘rish — `InvoiceContractModal` (jadval + mazmun + «2. Tomonlarni yuridik manzillari va rekvizitlari»). Tahrir/yangi — `DocumentPreviewModal` («Hujjatni ko‘rsatish»). Preview/modalda bajaruvchi: `executorPartyData()` — profil yoki tanlangan `executor_client`.
+
+**Hujjatni yuklab olish («Yuklab olish» tugmasi, ikkala modalda ham):** backendga so‘rov yubormaydi — `downloadInvoiceDocument()` (`App.jsx`) joriy `invoice`/`company`/`client`/`executorClient` ma’lumotlaridan `buildDocumentPrintHtml()` orqali to‘liq standalone HTML hujjat quradi, ko‘rinmas `<iframe>`ga yozadi va uning ichida `print()` chaqiradi (foydalanuvchi «Save as PDF» tanlaydi). `window.open` ishlatilmaydi — popup-bloklagichga qaram emas.
 
 **Validatsiya:** `validateEInvoice()` — xatoliklar input ostida; «Hujjatni ko‘rsatish» / «Saqlash» da toast o‘rniga scroll birinchi qizil maydonga.
 
@@ -1655,6 +1665,10 @@ Bir nechta mahsulot uchun zakaz yaratadi. Har bir `items` qatori mavjud `product
 ```
 
 `payment_status` / `paid_amount` / `currency` bulk so‘rovda umumiy maydon — barcha qatorlarga qo‘llanadi. `partial` bo‘lganda `paid_amount` qatorlar jami summasiga **proporsional** taqsimlanadi; yaxlitlash qoldig‘i **oxirgi qator** `paid_amount` ga qo‘shiladi (yig‘indi doim kiritilgan summa bilan teng). **`paid_amount` jami summadan oshmasligi** va **narx (`unit_price`) bo‘lmasa qisman to‘lov qabul qilinmaydi** (`400`). To‘lov maydonlarini faqat **Management** yoki **Buxgalter** (`prices_manage` / `cash_manage`) yuboradi — Operator API orqali ham yubora olmaydi (backend strip qiladi).
+
+**Bir xil mahsulotga bir nechta faol zakaz — ruxsat etilgan:** avval `product` uchun faol (`new`/`confirmed`/`ordered`) zakaz mavjud bo‘lsa bulk endpoint butunlay rad etardi («bu mahsulot uchun faol zakaz allaqachon mavjud»); bu global taqiq noto‘g‘ri edi (turli buyurtmalar/holatlar bir xil mahsulotni talab qilishi mumkin) — **olib tashlandi**. Endi bir xil `product`ga istalgancha zakaz ochish mumkin. Faqat bitta so‘rov ICHIDA takrorlangan **seriya raqami** (`new_product.serial_number`) hali ham `400` bilan rad etiladi.
+
+**`payment_status=paid` → ombor avtomatik to‘ldiriladi:** zakaz yaratilganda YOKI keyinroq `PATCH /orders/zakaz/{id}/` orqali `payment_status` `paid`ga o‘zgartirilganda — rasmiy qabul (`status=received`) bosqichidan o‘tmagan bo‘lsa ham — `Zakaz.receive()` avtomatik chaqiriladi: mahsulot `origin` (`import` → `warehouse`) o‘zgaradi, `Stock` qatoriga `quantity` (yoki `received_qty`, agar berilgan bo‘lsa) qo‘shiladi. Idempotent (`Zakaz.stock_credited` bayrog‘i) — `status=received` orqali ham, `payment_status=paid` orqali ham faqat **bir marta** kiritiladi.
 
 **`import_batch` (ixtiyoriy):** berilmasa har bir bulk yaratishda yangi UUID — barcha `items` qatorlariga bir xil yoziladi. Mavjud guruhga qator qo‘shishda shu UUID yuboriladi.
 

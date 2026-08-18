@@ -5082,6 +5082,150 @@ function ContractPartyRequisites({ title, data }) {
   )
 }
 
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (ch) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]
+  ))
+}
+
+/** Hujjatni (shartnoma) yangi oynada yozib, brauzer print/"Save as PDF"
+ * dialogini ochadi — alohida kutubxonasiz "Yuklab olish" imkonini beradi. */
+function buildDocumentPrintHtml(invoice, company, client, executorClient, showPrices) {
+  const lines = (invoice.lines || []).map((line) => calcInvoiceLine(line, invoice.reverse_calculation))
+  const totals = buildInvoiceTotals(invoice)
+  const amountWords = numberToWordsUzbek(totals.grand)
+  const docTitle = invoice.name || documentTypeLabel(invoice.document_type)
+  const executorData = executorPartyData(invoice, company, executorClient)
+  const executorName = executorData.name || 'Bajaruvchi'
+  const executorDirector = executorData.director_fish || executorName
+  const customerName = client?.company_name || client?.full_name || invoice.client_name || 'Buyurtmachi'
+  const customerDirector = client?.director_fish || client?.full_name || customerName
+  const clientData = clientPartyData(client) || { name: invoice.client_name }
+
+  const partyRows = (data) => `
+    <div><dt>Nomi</dt><dd>${escapeHtml(data.name || '—')}</dd></div>
+    <div><dt>Manzil</dt><dd>${escapeHtml(data.address || '—')}</dd></div>
+    <div><dt>Telefon</dt><dd>${escapeHtml(data.phone || '—')}</dd></div>
+    <div><dt>Faks</dt><dd>${escapeHtml(data.fax || '—')}</dd></div>
+    <div><dt>STIR</dt><dd>${escapeHtml(data.stir || '—')}</dd></div>
+    <div><dt>IFUT/OKED</dt><dd>${escapeHtml(data.oked || '—')}</dd></div>
+    <div><dt>X/R</dt><dd>${escapeHtml(data.bank_account || '—')}</dd></div>
+    <div><dt>Bank</dt><dd>${escapeHtml(data.bank_name || '—')}</dd></div>
+    <div><dt>MFO</dt><dd>${escapeHtml(data.mfo || '—')}</dd></div>
+  `
+
+  const rowsHtml = lines.map((line, index) => `
+    <tr>
+      <td>${index + 1}</td>
+      <td>${escapeHtml(line.product_name || '—')}</td>
+      <td>${escapeHtml(line.identification_code || '—')}</td>
+      <td>${escapeHtml(line.barcode || '—')}</td>
+      <td>${escapeHtml(unitLabel(line.unit))}</td>
+      <td>${escapeHtml(money(line.quantity))}</td>
+      ${showPrices ? `
+        <td>${escapeHtml(moneyDecimal(line.unit_price))}</td>
+        <td>${escapeHtml(moneyDecimal(line.delivery_amount))}</td>
+        <td>${escapeHtml(vatLabel(line.vat_percent))} / ${escapeHtml(moneyDecimal(line.vat_amount))}</td>
+        <td>${escapeHtml(moneyDecimal(line.total_amount))}</td>
+      ` : ''}
+    </tr>
+  `).join('')
+
+  return `<!doctype html>
+<html lang="uz">
+<head>
+<meta charset="utf-8" />
+<title>${escapeHtml(docTitle)} ${escapeHtml(invoice.contract_number || '')}</title>
+<style>
+  body { font-family: 'Times New Roman', Times, serif; color: #111; padding: 32px; }
+  h2, h3, h4 { margin: 0 0 8px; }
+  .doc-title { text-transform: uppercase; letter-spacing: .05em; color: #555; font-size: 13px; margin-bottom: 4px; }
+  .contract-no { font-size: 22px; margin-bottom: 8px; }
+  .meta { color: #555; font-size: 13px; margin-bottom: 20px; display: flex; gap: 16px; }
+  .intro { margin-bottom: 20px; line-height: 1.5; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
+  th, td { border: 1px solid #ccc; padding: 6px 8px; font-size: 12px; text-align: left; }
+  th { background: #f2f2f2; }
+  .total-words { font-style: italic; margin-bottom: 16px; }
+  .clauses { white-space: pre-wrap; line-height: 1.5; margin-bottom: 24px; }
+  .parties { display: flex; gap: 24px; margin-top: 24px; }
+  .party { flex: 1; }
+  .party dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 12px; margin: 0; }
+  .party dt { color: #666; }
+  .party dd { margin: 0; }
+  @media print { body { padding: 0; } }
+</style>
+</head>
+<body>
+  <p class="doc-title">${escapeHtml(docTitle)}</p>
+  <h2 class="contract-no">Shartnoma №${escapeHtml(invoice.contract_number || '—')}</h2>
+  <div class="meta">
+    <span>${escapeHtml(invoice.place_signed || '—')}</span>
+    <span>${escapeHtml(formatDateUz(invoice.contract_date))}${invoice.valid_until ? ` — ${escapeHtml(formatDateUz(invoice.valid_until))} gacha` : ''}</span>
+  </div>
+  <p class="intro"><b>Bajaruvchi</b> ${escapeHtml(executorDirector)} (${escapeHtml(executorName)}) va <b>Buyurtmachi</b> ${escapeHtml(customerDirector)} (${escapeHtml(customerName)}) o‘rtasida tuzilgan shartnoma.</p>
+  <h3>${escapeHtml(invoice.content_title || '1.')}</h3>
+  <table>
+    <thead><tr>
+      <th>№</th><th>Mahsulot nomi</th><th>Seriya raqami</th><th>Barcode</th><th>O‘lchov birligi</th><th>Miqdori</th>
+      ${showPrices ? '<th>Narx</th><th>Etkazib berish qiymati</th><th>QQS (Stavka/Summa)</th><th>Etkazib berish narxi QQS bilan</th>' : ''}
+    </tr></thead>
+    <tbody>${rowsHtml}</tbody>
+    ${showPrices ? `<tfoot><tr>
+      <td colspan="7"><b>Jami</b></td>
+      <td><b>${escapeHtml(moneyDecimal(totals.delivery))}</b></td>
+      <td><b>${escapeHtml(moneyDecimal(totals.vat))}</b></td>
+      <td><b>${escapeHtml(moneyDecimal(totals.grand))}</b></td>
+    </tr></tfoot>` : ''}
+  </table>
+  ${showPrices ? `<p class="total-words">Shartnomaning umumiy miqdori ${escapeHtml(amountWords.sumWords)} sum ${escapeHtml(amountWords.tiyinWords)} tiyin (${escapeHtml(moneyDecimal(totals.grand))} so‘m).</p>` : ''}
+  ${invoice.content_body ? `<div class="clauses">${escapeHtml(invoice.content_body)}</div>` : ''}
+  <h3>2. Tomonlarni yuridik manzillari va rekvizitlari</h3>
+  <div class="parties">
+    <div class="party"><h4>Bajaruvchi</h4><dl>${partyRows(executorData)}</dl></div>
+    <div class="party"><h4>Buyurtmachi</h4><dl>${partyRows(clientData)}</dl></div>
+  </div>
+</body>
+</html>`
+}
+
+/**
+ * `window.open`ga tayanmaydi — brauzer popup-bloklagichi avtomatlashtirilgan
+ * yoki "ishonchsiz" click hodisalarida uni jimgina bloklab qo‘yishi mumkin.
+ * Buning o‘rniga ko‘rinmas `iframe`ga hujjatni yozib, uning ichida
+ * `print()` chaqiramiz — popup ochilmaydi, bloklanish xavfi yo‘q.
+ */
+function downloadInvoiceDocument(invoice, company, client, executorClient, showPrices) {
+  const html = buildDocumentPrintHtml(invoice, company, client, executorClient, showPrices)
+  const iframe = document.createElement('iframe')
+  iframe.style.position = 'fixed'
+  iframe.style.right = '0'
+  iframe.style.bottom = '0'
+  iframe.style.width = '0'
+  iframe.style.height = '0'
+  iframe.style.border = '0'
+  iframe.setAttribute('aria-hidden', 'true')
+  document.body.appendChild(iframe)
+
+  const cleanup = () => {
+    if (iframe.parentNode) iframe.parentNode.removeChild(iframe)
+  }
+
+  iframe.onload = () => {
+    try {
+      iframe.contentWindow.focus()
+      iframe.contentWindow.print()
+    } finally {
+      setTimeout(cleanup, 1000)
+    }
+  }
+
+  const doc = iframe.contentWindow.document
+  doc.open()
+  doc.write(html)
+  doc.close()
+}
+
 function InvoiceContractModal({ invoice, company, client, executorClient, showPrices, onClose, onEdit, canEdit }) {
   const lines = (invoice.lines || []).map((line) => calcInvoiceLine(line, invoice.reverse_calculation))
   const totals = buildInvoiceTotals(invoice)
@@ -5186,6 +5330,13 @@ function InvoiceContractModal({ invoice, company, client, executorClient, showPr
           {canEdit && onEdit && (
             <button type="button" className="secondary-button" onClick={onEdit}>Tahrirlash</button>
           )}
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => downloadInvoiceDocument(invoice, company, client, executorClient, showPrices)}
+          >
+            <DownloadSimple size={18} />Yuklab olish
+          </button>
           <button type="button" className="primary-button" onClick={onClose}>Yopish</button>
         </div>
       </div>
@@ -5224,6 +5375,13 @@ function DocumentPreviewModal({ invoice, company, client, executorClient, totals
     <div className="modal-backdrop document-preview-backdrop" role="presentation" onClick={onClose}>
       <div className="document-preview-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
         <div className="document-preview-toolbar">
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => downloadInvoiceDocument(invoice, company, client, executorClient, showPrices)}
+          >
+            <DownloadSimple size={18} />Yuklab olish
+          </button>
           <button type="button" className="icon-button" onClick={onClose} aria-label="Yopish"><X size={20} /></button>
         </div>
 
