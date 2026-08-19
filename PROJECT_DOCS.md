@@ -247,7 +247,8 @@ Buyurtmani **bir necha bor** tahrirlash mumkin (bu zakaz bilan bog'liq emas):
 | `quantity_in_stock` | Ombordagi jami |
 | `reserved_quantity` | Bron qilingan |
 | `available_quantity` | Sotish mumkin (`jami − bron`) |
-| `stock_status` | `in_stock` / `low_stock` / `out_of_stock` |
+| `stock_status` | `in_stock` / `low_stock` / `out_of_stock` / `on_the_way` (qoldiq 0, lekin faol Zakaz/Kirim yo'lda) |
+| `pending_import_quantity` | Faol (hali qabul qilinmagan) Zakaz/Kirim'dagi jami miqdor |
 
 Filtr: `?category=3` · `?purchase_price__isnull=true` · `?selling_price__isnull=true`
 
@@ -287,6 +288,12 @@ POST /warehouse/products/{id}/add-stock/
 | GET/PATCH/DELETE | `/warehouse/stocks/{id}/` | Bitta |
 
 Filtr: `?product=1` · `?category=3` · `?status=low_stock` · `?date_from=...&date_to=...`
+
+> Standart ko'rinishda (status berilmasa) qoldig'i 0 VA yo'lda hech narsasi
+> yo'q mahsulotlar yashiriladi; yo'lda (faol Zakaz/Kirim) importi bor
+> mahsulot — hatto birorta ham Stock qatori bo'lmasa ham (sintetik qator,
+> `id: null`) — `status: "on_the_way"` bilan ro'yxatda qoladi.
+> `?status=out_of_stock` chinakam bo'sh qatorlarni aniq so'raganda ishlaydi.
 
 #### Category
 `/warehouse/categories/` — MPTT daraxt (`parent → children`).

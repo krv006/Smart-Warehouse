@@ -2463,7 +2463,15 @@ function rowValue(title, row, session) {
   return row.total_amount ? `${money(row.total_amount)} so‘m` : (row.available_quantity ?? row.total ?? '—')
 }
 
-const GRID_PAGES = new Set(['Mijozlar', 'Sotuvlar', 'Import', 'Ombor', 'Kassa', 'Xarajatlar'])
+const GRID_PAGES = new Set(['Mijozlar', 'Sotuvlar', 'Import', 'Ombor', 'Qoldiqlar', 'Kassa', 'Xarajatlar'])
+
+// Qoldiq holati — Product.stock_status bilan mos (apps/warehouse/models.py)
+const STOCK_STATUS_BADGES = {
+  in_stock:     { label: 'Yetarli',  tone: 'success' },
+  low_stock:    { label: 'Kam qoldi', tone: 'warning' },
+  out_of_stock: { label: 'Tugagan',  tone: 'danger' },
+  on_the_way:   { label: 'Yo‘lda',   tone: 'info' },
+}
 
 const ORDER_STATUS_BADGES = {
   pending: { label: 'Kutilmoqda', tone: 'warning' },
@@ -2490,6 +2498,7 @@ const GRID_SORT_FIELDS = {
   Sotuvlar: { product: 'sold_date', created_at: 'sold_date', total: 'sold_date' },
   Import: { id: 'id', product: 'created_at', created_at: 'created_at', status: 'status', supplier: 'supplier', expected_date: 'expected_date' },
   Ombor: { name: 'name', created_at: 'created_at', quantity: 'name' },
+  Qoldiqlar: { name: 'product__name', created_at: 'created_at', quantity: 'quantity' },
   Kassa: { client: 'due_date', created_at: 'created_at', status: 'status' },
   Xarajatlar: { amount: 'date', created_at: 'date' },
 }
@@ -2661,7 +2670,8 @@ function getGridColumns(title, session, { renderStatus } = {}) {
       { key: 'name', label: 'Mahsulot', sortable: true, render: (row) => row.name || '—' },
       // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
       // { key: 'category', label: 'Kategoriya', render: (row) => row.category_name || '—' },
-      { key: 'model', label: 'Model', render: (row) => row.model || '—' },
+      // Model funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+      // { key: 'model', label: 'Model', render: (row) => row.model || '—' },
       { key: 'serial', label: 'Seriya', render: (row) => row.serial_number || '—' },
       { key: 'quantity', label: 'Qoldiq', sortable: true, render: (row) => rowValue(title, row, session) },
       ...(showPrices ? [
@@ -2676,6 +2686,21 @@ function getGridColumns(title, session, { renderStatus } = {}) {
         />
       ) },
       { key: 'created_at', label: 'Joy', render: (row) => row.warehouse_location || '—' },
+    ]
+  }
+  if (title === 'Qoldiqlar') {
+    return [
+      { key: 'name', label: 'Mahsulot', sortable: true, render: (row) => row.product_name || `Qoldiq #${row.id}` },
+      { key: 'location', label: 'Joylashuv', render: (row) => row.warehouse_location || (row.id == null ? 'Hali kirim bo‘lmagan' : '—') },
+      { key: 'quantity', label: 'Qoldiq', sortable: true, render: (row) => quantityWithUnit(row.quantity || 0, row) },
+      { key: 'reserved', label: 'Bron', render: (row) => quantityWithUnit(row.reserved_quantity || 0, row) },
+      { key: 'pending', label: 'Yo‘lda', render: (row) => (
+        row.pending_import_quantity ? quantityWithUnit(row.pending_import_quantity, row) : '—'
+      ) },
+      { key: 'status', label: 'Holati', render: (row) => {
+        const meta = STOCK_STATUS_BADGES[row.stock_status] || { label: row.stock_status, tone: 'neutral' }
+        return <StatusBadge status={row.stock_status} label={meta.label} tone={meta.tone} />
+      } },
     ]
   }
   if (title === 'Kassa') {
@@ -3135,7 +3160,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
           <ClockCounterClockwise size={18} />
         </button>
       )}
-      {canEditRows && <button className="row-action" disabled={opening} onClick={() => handleEdit(row)} aria-label="Tahrirlash"><PencilSimple size={18} /></button>}
+      {canEditRows && row.id != null && <button className="row-action" disabled={opening} onClick={() => handleEdit(row)} aria-label="Tahrirlash"><PencilSimple size={18} /></button>}
       {can(session, 'warehouse_manage') && title === 'Ombor' && <button className="row-action" onClick={() => setStockProduct(row)} aria-label="Kirim">Kirim</button>}
       {can(session, 'cash_manage') && title === 'Kassa' && row.remaining !== '0' && (
         <button className="row-action" onClick={() => setPaying(row)} aria-label="To‘lov"><CurrencyCircleDollar size={18} /></button>
@@ -3355,7 +3380,8 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
 
 const fields = {
   // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi: ['category', 'Kategoriya', true] olib tashlandi.
-  Ombor: [['name', 'Mahsulot nomi', true], ['model', 'Model'], ['serial_number', 'Seriya raqami', true], ['barcode', 'Shtrix kod'], ['source', 'Manba / yetkazuvchi'], ['unit', 'O‘lchov birligi'], ['min_quantity', 'Minimal qoldiq'], ['purchase_price', 'Kelish narxi'], ['selling_price', 'Sotuv narxi'], ['delivery_price', 'Yetkazish narxi'], ['vat_percent', 'QQS %'], ['quantity', 'Boshlang‘ich miqdor'], ['warehouse_location', 'Ombordagi joy']],
+  // Model funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi: ['model', 'Model'] olib tashlandi.
+  Ombor: [['name', 'Mahsulot nomi', true], ['serial_number', 'Seriya raqami', true], ['barcode', 'Shtrix kod'], ['source', 'Manba / yetkazuvchi'], ['unit', 'O‘lchov birligi'], ['min_quantity', 'Minimal qoldiq'], ['purchase_price', 'Kelish narxi'], ['selling_price', 'Sotuv narxi'], ['delivery_price', 'Yetkazish narxi'], ['vat_percent', 'QQS %'], ['quantity', 'Boshlang‘ich miqdor'], ['warehouse_location', 'Ombordagi joy']],
   // Kategoriyalar: [['name', 'Kategoriya nomi', true], ['parent', 'Ota kategoriya']],
   Qoldiqlar: [['product', 'Mahsulot ID', true], ['quantity', 'Miqdor', true], ['reserved_quantity', 'Bron miqdor'], ['warehouse_location', 'Ombordagi joy', true]],
 }

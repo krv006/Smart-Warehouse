@@ -206,7 +206,7 @@ Timeout: **8 soniya**. Xato klassi: `ApiError(message, status, fields?)` — `fi
 | `productContracts(id)` | GET | `/warehouse/products/{id}/contracts/` | — |
 | ~~`categories(params)`~~ | ~~GET~~ | ~~`/warehouse/categories/`~~ | **O'chirilgan** — kategoriya funksiyasi vaqtincha yo'q, backendda kod comment qilingan, keyinchalik qaytariladi |
 | `products(params)` | GET | `/warehouse/products/` | `page_size=30`, `search` (`category` filtri olib tashlangan) |
-| `stocks(params)` | GET | `/warehouse/stocks/` | `page_size=30`, `product`, `status` (`category` filtri olib tashlangan) |
+| `stocks(params)` | GET | `/warehouse/stocks/` | `page_size=30`, `product`, `warehouse_location`, `status` (`in_stock`\|`low_stock`\|`out_of_stock`\|`on_the_way`), `date_from`, `date_to`, `search`, `ordering` (`category` filtri olib tashlangan) |
 | `addStock(id, payload)` | POST | `/warehouse/products/{id}/add-stock/` | kirim body |
 | `clients(params)` | GET | `/clients/` | `page_size=30`, `search` (F.I.Sh, INN, JSHSHIR, passport, kompaniya, email), `is_active`, `date_from`, `date_to` |
 | `sales(params)` | GET | `/sales/` | `page_size=30`, `product`, `client`, `sold_date`, `date_from`, `date_to`, `search`, `ordering`, `page` |
@@ -337,7 +337,7 @@ Yordamchi kutubxonalar: `lib/utils.js` (`money`, `todayValue`, `formatDateUz`, `
 | Korxona profili | `companyProfile`, `updateCompanyProfile` | `/company-profile/` | Profil dropdown |
 | Ombor | `products`, `create`, `update`, `addStock`, `productContracts` | `/warehouse/products/` | `warehouse_create` ability |
 | ~~Kategoriyalar~~ | ~~`categories`~~ | ~~`/warehouse/categories/`~~ | **O'chirilgan** — nav/resource yozuvi comment qilingan |
-| Qoldiqlar | `stocks` | `/warehouse/stocks/` | |
+| Qoldiqlar | `stocks` | `/warehouse/stocks/` | Grid + status filtr (`in_stock`/`low_stock`/`out_of_stock`/`on_the_way`, §11 pastda) |
 | Mijozlar (ro‘yxat) | `clients`, `create`, `update`, `remove` | `/clients/` | Grid + filtr; qator → mijoz kartasi |
 | Mijoz kartasi | `retrieve`, `orders`, `sales`, `payments`, `invoices` | `/clients/{uuid}/`, `/orders/`, … | URL: `/mijozlar/{id}[/{tab}]` — `ClientDetailPage` |
 | Sotuvlar | `sales`, `salesBulk`, `create`, `update` | `/sales/` | Yaratilganda avtomatik kassaga tushum (`sync_sale_payment`, §17c) |
@@ -400,7 +400,7 @@ Ro‘yxatdan **ko‘z** ikonkasi URL o‘zgartirmaydi — `loadInvoiceForView(id
 
 ### Grid ro‘yxatlar, filtr, pagination (`ResourcePage` + `listFilters.js`)
 
-**Grid sahifalar** (`GRID_PAGES` — `App.jsx`): Mijozlar, Sotuvlar, Import, Ombor, Xarajatlar. **Kassa** va **Buyurtmalar** alohida: `KassaPage` (`/moliya/kassa`), `BuyurtmalarPage` (`/invoices/`).
+**Grid sahifalar** (`GRID_PAGES` — `App.jsx`): Mijozlar, Sotuvlar, Import, Ombor, Qoldiqlar, Xarajatlar. **Kassa** va **Buyurtmalar** alohida: `KassaPage` (`/moliya/kassa`), `BuyurtmalarPage` (`/invoices/`).
 
 | Parametr | Qiymat |
 |---|---|
@@ -416,6 +416,7 @@ Filtr paneli: `ListFiltersPanel` + `frontend/src/listFilters.js`.
 | Sotuvlar | — | ✅ | — | ✅ |
 | Import | `status` | — | — | ✅ |
 | Ombor | — | — | ~~✅ `category`~~ (o'chirilgan) | — |
+| Qoldiqlar | `status` (`in_stock`/`low_stock`/`out_of_stock`/`on_the_way`) | — | — | ✅ |
 | Kassa | `status` | ✅ | — | ✅ (UI yuboradi; backend `/cash/payments/` hozircha e’tiborsiz) |
 | Xarajatlar | — | — | — | ✅ |
 
@@ -2042,7 +2043,6 @@ So‘rov:
 ```json
 {
   "name": "Samsung Odyssey G5 monitor",
-  "model": "G55C",
   "serial_number": "SM-G55C-2026-001",
   "purchase_price": "2100000",
   "selling_price": "2600000",
@@ -2054,6 +2054,11 @@ So‘rov:
 ```
 
 `quantity` yuborilsa `warehouse_location` majburiy va Stock yaratiladi.
+
+> **`model` maydoni vaqtincha o‘chirilgan** (backend + frontend, kategoriya
+> funksiyasi kabi) — API javobida qaytmaydi, so‘rovda yuborilsa e’tiborsiz
+> qoldiriladi (400 bermaydi, shunchaki saqlanmaydi). DB ustuni
+> (`Product.model`) o‘chirilmagan, keyinchalik qaytarilishi mumkin.
 
 Javob maydonlari:
 
@@ -2067,6 +2072,10 @@ origin
 origin_display
 unit_display
 ```
+
+`stock_status`: `in_stock` | `low_stock` | `out_of_stock` | `on_the_way`
+(qoldiq 0, lekin faol Zakaz/Kirim bilan yo‘lda miqdor bor — §11 pastda,
+Qoldiqlar bilan bir xil mantiq).
 
 Operator uchun `purchase_price`, `selling_price` qaytmasligi mumkin.
 
@@ -2102,7 +2111,35 @@ PATCH /api/v1/warehouse/stocks/{id}/
 DELETE /api/v1/warehouse/stocks/{id}/
 ```
 
-`status`: `in_stock` | `low_stock` | `out_of_stock`. `reserved_quantity` read-only. Broni bor qatorni o‘chirib bo‘lmaydi.
+`status`: `in_stock` | `low_stock` | `out_of_stock` | `on_the_way`. `reserved_quantity` read-only. Broni bor qatorni o‘chirib bo‘lmaydi.
+
+**Standart ko‘rinish (default filtering, `?status` berilmasa):** qoldig‘i 0
+VA hech qanday faol (hali qabul qilinmagan) Zakaz/Kirim'i yo‘q mahsulotlar
+ro‘yxatdan yashiriladi — bo‘sh ombor ro‘yxatni chalkashtirmaydi. Qoldig‘i 0
+bo‘lsa-da yo‘lda (faol Zakaz/Kirim) miqdori bor mahsulot ro‘yxatda qoladi,
+`stock_status: "on_the_way"` bilan ("Yo‘lda"). Bu **hatto birorta ham
+`Stock` qatori hali yaratilmagan** (mahsulot butunlay import qilinmagan,
+hammasi yo‘lda) mahsulot uchun ham ishlaydi — bunday holatda backend
+DB'ga yozilmagan, sintetik bir qator qo‘shadi (`id: null`, `quantity: 0`,
+`warehouse_location: ""`); frontend bunday qatorlarda tahrirlash/o‘chirish
+tugmasini ko‘rsatmaydi (`id` yo‘q). Sintetik qatorlar `?warehouse_location=`
+filtri bilan birga qaytmaydi (haqiqiy joylashuvi yo‘q).
+
+`?status=out_of_stock` — chinakam bo‘sh (yo‘lda ham hech narsa yo‘q)
+qatorlarni ko‘rish uchun **aniq** so‘ralishi kerak (standart ko‘rinishda
+bunday qatorlar allaqachon yashirin). `?status=on_the_way` — faqat
+"Yo‘lda" qatorlarni qaytaradi.
+
+Bu filtrlash faqat `list` (ro‘yxat) amaliga tegishli — mavjud qatorni
+to‘g‘ridan-to‘g‘ri `retrieve`/`update`/`destroy` qilish (masalan tahrirlash
+formasi) qoldig‘idan qat’i nazar har doim ishlaydi.
+
+Javobda (`StockSerializer`) qo‘shimcha `pending_import_quantity` maydoni
+bor — shu mahsulotning yo‘ldagi umumiy miqdori (Ombor sahifasidagi
+`Product.pending_import_quantity` bilan bir xil).
+
+> **`product_model` maydoni vaqtincha o‘chirilgan** — `Product.model`
+> UI'dan olib tashlanishi bilan birga bu javobdan ham olib tashlandi.
 
 ## 12. Mijozlar
 

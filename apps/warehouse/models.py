@@ -7,9 +7,11 @@ from mptt.models import MPTTModel, TreeForeignKey
 
 from apps.common.models import TimeStampedModel
 
-STATUS_IN_STOCK  = 'in_stock'
-STATUS_LOW_STOCK = 'low_stock'
-STATUS_OUT       = 'out_of_stock'
+STATUS_IN_STOCK   = 'in_stock'
+STATUS_LOW_STOCK  = 'low_stock'
+STATUS_OUT        = 'out_of_stock'
+# Qoldiq 0, lekin faol (hali qabul qilinmagan) Zakaz/Kirim bor — "Yo'lda"
+STATUS_ON_THE_WAY = 'on_the_way'
 
 
 class VatPercent(models.TextChoices):
@@ -138,6 +140,10 @@ class Product(TimeStampedModel):
     def stock_status(self):
         avail = self.available_quantity
         if avail <= 0:
+            # Qoldiq yo'q, lekin yo'lda (faol Zakaz/Kirim) miqdor bor —
+            # "tugagan" emas, "Yo'lda" deb ko'rsatiladi
+            if self.pending_import_quantity > 0:
+                return STATUS_ON_THE_WAY
             return STATUS_OUT
         if avail <= self.min_quantity:
             return STATUS_LOW_STOCK
