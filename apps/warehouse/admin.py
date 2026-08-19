@@ -23,10 +23,11 @@ class StockInline(admin.TabularInline):
 
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
-    list_display    = ('id', 'name', 'model', 'serial_number',
+    # Model funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi: 'model' olib tashlandi.
+    list_display    = ('id', 'name', 'serial_number',
                        'source', 'purchase_price_fmt', 'selling_price_fmt',
                        'unit', 'min_quantity', 'stock_badge', 'created_at')
-    search_fields   = ('name', 'model', 'serial_number', 'source')
+    search_fields   = ('name', 'serial_number', 'source')
     list_filter     = ('created_at',)
     ordering        = ('-created_at',)
     list_per_page   = 25
@@ -35,7 +36,7 @@ class ProductAdmin(admin.ModelAdmin):
     inlines         = (StockInline,)
 
     fieldsets = (
-        ('Asosiy', {'fields': ('name', 'model', 'serial_number', 'source', 'unit')}),
+        ('Asosiy', {'fields': ('name', 'serial_number', 'source', 'unit')}),
         ('Narx',   {'fields': ('purchase_price', 'selling_price')}),
         ('Qoldiq', {'fields': ('min_quantity',)}),
         ('Vaqt',   {'fields': ('created_at', 'updated_at'), 'classes': ('collapse',)}),

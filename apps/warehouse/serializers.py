@@ -48,7 +48,9 @@ class ProductSerializer(ModelSerializer):
 
     class Meta:
         model  = Product
-        fields = ('id', 'name', 'model',
+        fields = ('id', 'name',
+                  # Model funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+                  # 'model',
                   'serial_number', 'barcode', 'purchase_price', 'selling_price',
                   'delivery_price', 'vat_percent', 'source',
                   'origin', 'origin_display',
@@ -136,7 +138,9 @@ class ProductOperatorSerializer(ModelSerializer):
 
     class Meta:
         model  = Product
-        fields = ('id', 'name', 'model',
+        fields = ('id', 'name',
+                  # Model funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+                  # 'model',
                   'serial_number', 'barcode', 'source',
                   'origin', 'origin_display', 'unit', 'unit_display',
                   'quantity_in_stock', 'reserved_quantity',
@@ -196,17 +200,21 @@ class ProductAccountantSerializer(ProductSerializer):
 
 class StockSerializer(ModelSerializer):
     product_name      = SerializerMethodField()
-    product_model     = SerializerMethodField()
+    # Model funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+    # product_model     = SerializerMethodField()
     min_quantity      = SerializerMethodField()
     stock_status      = SerializerMethodField()
     unit              = SerializerMethodField()
     unit_display      = SerializerMethodField()
+    pending_import_quantity = SerializerMethodField()
 
     class Meta:
         model  = Stock
-        fields = ('id', 'product', 'product_name', 'product_model',
+        fields = ('id', 'product', 'product_name',
+                  # 'product_model',
                   'quantity', 'reserved_quantity', 'warehouse_location',
-                  'min_quantity', 'stock_status', 'unit', 'unit_display')
+                  'min_quantity', 'stock_status', 'unit', 'unit_display',
+                  'pending_import_quantity')
         # reserved_quantity faqat buyurtma (bron) mexanizmi orqali o'zgaradi —
         # qo'lda o'zgartirish order.reserved_qty bilan mosligini buzadi
         read_only_fields = ('reserved_quantity',)
@@ -214,8 +222,11 @@ class StockSerializer(ModelSerializer):
     def get_product_name(self, obj):
         return str(obj.product)
 
-    def get_product_model(self, obj):
-        return obj.product.model
+    # def get_product_model(self, obj):
+    #     return obj.product.model
+
+    def get_pending_import_quantity(self, obj):
+        return obj.product.pending_import_quantity
 
     def get_min_quantity(self, obj):
         return obj.product.min_quantity

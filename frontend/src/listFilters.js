@@ -16,6 +16,12 @@ export const MODULE_STATUS_OPTIONS = {
     { value: 'paid', label: 'To‘langan' },
     { value: 'overdue', label: 'Muddati o‘tgan' },
   ],
+  Qoldiqlar: [
+    { value: 'in_stock', label: 'Yetarli' },
+    { value: 'low_stock', label: 'Kam qoldi' },
+    { value: 'out_of_stock', label: 'Tugagan' },
+    { value: 'on_the_way', label: 'Yo‘lda' },
+  ],
 }
 
 export const MODULE_FILTER_FEATURES = {
@@ -24,6 +30,7 @@ export const MODULE_FILTER_FEATURES = {
   Import: { status: true, client: false, date: true },
   // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi: category: true olib tashlandi.
   Ombor: { status: false, client: false, date: false },
+  Qoldiqlar: { status: true, client: false, date: true },
   Kassa: { status: true, client: true, date: true },
   Xarajatlar: { status: false, client: false, date: true },
 }
@@ -54,6 +61,7 @@ export function emptyStateConfig(title) {
     Sotuvlar: { label: 'Hali sotuv yo‘q', cta: 'Birinchi sotuvni qo‘shish' },
     Import: { label: 'Hali import yozuvi yo‘q', cta: 'Import qo‘shish' },
     Ombor: { label: 'Hali mahsulot yo‘q', cta: 'Birinchi mahsulotni qo‘shish' },
+    Qoldiqlar: { label: 'Qoldiq topilmadi', cta: null },
     Kassa: { label: 'To‘lov yozuvi topilmadi', cta: null },
     Xarajatlar: { label: 'Hali xarajat yo‘q', cta: 'Xarajat qo‘shish' },
   }
