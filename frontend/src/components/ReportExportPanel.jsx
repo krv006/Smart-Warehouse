@@ -14,8 +14,8 @@ import FilterDateRangeCalendar from './FilterDateRangeCalendar'
 
 const REPORT_TYPES = [
   { id: 'sales', label: 'Sotuvlar', icon: TrendUp, hasPeriod: true, hint: 'Sotuv sanasi bo‘yicha filtrlanadi.' },
-  { id: 'kassa', label: 'Kassa', icon: CurrencyCircleDollar, hasPeriod: true, hint: 'Tushum va import chiqimlari bir jadvalda.' },
-  { id: 'import', label: 'Import', icon: Truck, hasPeriod: true, hint: 'Chet eldan kelgan mustaqil zakazlar.' },
+  { id: 'kassa', label: 'Kassa', icon: CurrencyCircleDollar, hasPeriod: true, hint: 'Tushum va kirim chiqimlari bir jadvalda.' },
+  { id: 'import', label: 'Kirim', icon: Truck, hasPeriod: true, hint: 'Chet eldan kelgan mustaqil zakazlar.' },
   { id: 'expenses', label: 'Xarajatlar', icon: ClipboardText, hasPeriod: true, hint: 'Rasxod sanasi bo‘yicha.' },
   { id: 'stock', label: 'Ombor holati', icon: Package, hasPeriod: false, hint: 'Joriy qoldiqlar — davr tanlanmaydi.' },
 ]

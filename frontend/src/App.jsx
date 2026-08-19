@@ -39,7 +39,7 @@ const NAV_GROUPS = {
 const SIDEBAR_NAV = [
   ['Bosh sahifa', House, 'dashboard'],
   ['Buyurtmalar', FileText, 'einvoice_view'],
-  ['Import', Truck, 'procurement_view'],
+  ['Kirim', Truck, 'procurement_view'],
   ['Shartnomalar', ClipboardText, 'contracts_view'],
   ['Ombor', Package, '__group_ombor__'],
   ['Mijozlar', Users, 'clients_view'],
@@ -1503,16 +1503,16 @@ function App() {
             <KassaPage notify={notify} session={session} reloadKey={resourceReloadKey} onDataChange={() => loadDashboard(true)} />
           </>
         )}
-        {(routeInfo.kind === 'import-new' || routeInfo.kind === 'import-edit') && active === 'Import' && can(session, 'procurement_view') && (
+        {(routeInfo.kind === 'import-new' || routeInfo.kind === 'import-edit') && active === 'Kirim' && can(session, 'procurement_view') && (
           <ImportEditorPage
             zakazId={routeInfo.zakazId || null}
             session={session}
             notify={notify}
-            onClose={() => routerNavigate(pathForPage('Import'))}
+            onClose={() => routerNavigate(pathForPage('Kirim'))}
             onDone={() => {
               setResourceReloadKey((value) => value + 1)
               loadDashboard(true)
-              routerNavigate(pathForPage('Import'))
+              routerNavigate(pathForPage('Kirim'))
             }}
           />
         )}
@@ -2129,7 +2129,7 @@ function Dashboard({ data, loading, period, onPeriodChange, onCreateBuyurtma, on
 
       <section className="metric-grid">
         <Metric icon={CurrencyCircleDollar} label="Tushum" value={kassaValue} note={kassaNote} trend="up" />
-        <Metric icon={Truck} label="Import chiqim" value={importPeriodLabel(summary)} note={importNote} trend="down" />
+        <Metric icon={Truck} label="Kirim chiqim" value={importPeriodLabel(summary)} note={importNote} trend="down" />
         <Metric icon={Wallet} label="Kassa balansi" value={netValue} note={balanceNote} trend={netTone} />
         <Metric icon={ClipboardText} label="Savdo" value={`${salesValue} so‘m`} note={salesNote} trend="up" />
         <Metric icon={Package} label="Ombordagi birliklar" value={money(warehouse.total_quantity)} note={`${warehouse.total_product_types || 0} turdagi mahsulot · hozirgi holat`} trend="neutral" />
@@ -2162,7 +2162,7 @@ function Dashboard({ data, loading, period, onPeriodChange, onCreateBuyurtma, on
               <tr>
                 <th>Oy</th>
                 <th>Tushum</th>
-                <th>Import chiqim</th>
+                <th>Kirim chiqim</th>
                 <th>Balans</th>
                 <th>Savdo</th>
               </tr>
@@ -2406,7 +2406,9 @@ function Empty({ label }) {
 }
 
 const resources = {
-  'Import': { load: api.zakaz, path: '/orders/zakaz/' },
+  // "Import" — foydalanuvchiga "Kirim" nomi bilan ko'rsatiladi (backend
+  // hali ham zakaz/import atamalarini ichki ishlatadi).
+  'Kirim': { load: api.zakaz, path: '/orders/zakaz/' },
   'Shartnomalar': { load: api.contracts, path: '/orders/contracts/', readonly: true },
   'Ombor': { load: api.products, path: '/warehouse/products/' },
   // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
@@ -2422,7 +2424,7 @@ const resources = {
 
 function rowTitle(title, row) {
   if (title === 'Shartnomalar') return row.contract_number || `Reestr #${row.id}`
-  if (title === 'Import') return row.product_name || `Import #${row.id}`
+  if (title === 'Kirim') return row.product_name || `Kirim #${row.id}`
   if (title === 'Qoldiqlar') return row.product_name || row.product || `Qoldiq #${row.id}`
   if (title === 'Foydalanuvchilar') return row.username
   return row.company_name || row.full_name || row.client_name || row.name || `Hujjat #${row.id}`
@@ -2434,7 +2436,7 @@ function rowMeta(title, row) {
     if (row.asos && row.asos !== row.source_type_display) parts.push(row.asos)
     return parts.filter(Boolean).join(' • ') || row.created_at || '—'
   }
-  if (title === 'Import') return [row.status_display || row.status, row.supplier, row.expected_date].filter(Boolean).join(' • ') || '—'
+  if (title === 'Kirim') return [row.status_display || row.status, row.supplier, row.expected_date].filter(Boolean).join(' • ') || '—'
   if (title === 'Qoldiqlar') return [row.warehouse_location, `bron: ${row.reserved_quantity || 0}`].filter(Boolean).join(' • ')
   if (title === 'Foydalanuvchilar') return [row.role, row.is_active ? 'faol' : 'bloklangan'].filter(Boolean).join(' • ')
   if (title === 'Mijozlar') return [row.phone, row.inn, row.pinfl, row.passport_number, row.director_jshshr].filter(Boolean).join(' • ') || row.created_at || '—'
@@ -2443,7 +2445,7 @@ function rowMeta(title, row) {
 
 function rowValue(title, row, session) {
   const showPrices = can(session, 'prices_view')
-  if (title === 'Import') {
+  if (title === 'Kirim') {
     if (!showPrices || !row.total) return `${row.quantity || 0} dona`
     return `${money(row.total)} ${row.currency || ''}`
   }
@@ -2463,7 +2465,7 @@ function rowValue(title, row, session) {
   return row.total_amount ? `${money(row.total_amount)} so‘m` : (row.available_quantity ?? row.total ?? '—')
 }
 
-const GRID_PAGES = new Set(['Mijozlar', 'Sotuvlar', 'Import', 'Ombor', 'Qoldiqlar', 'Kassa', 'Xarajatlar'])
+const GRID_PAGES = new Set(['Mijozlar', 'Sotuvlar', 'Kirim', 'Ombor', 'Qoldiqlar', 'Kassa', 'Xarajatlar'])
 
 // Qoldiq holati — Product.stock_status bilan mos (apps/warehouse/models.py)
 const STOCK_STATUS_BADGES = {
@@ -2496,7 +2498,7 @@ const IMPORT_PAYMENT_BADGES = {
 const GRID_SORT_FIELDS = {
   Mijozlar: { name: 'company_name', created_at: 'created_at', status: 'is_active' },
   Sotuvlar: { product: 'sold_date', created_at: 'sold_date', total: 'sold_date' },
-  Import: { id: 'id', product: 'created_at', created_at: 'created_at', status: 'status', supplier: 'supplier', expected_date: 'expected_date' },
+  Kirim: { id: 'id', product: 'created_at', created_at: 'created_at', status: 'status', supplier: 'supplier', expected_date: 'expected_date' },
   Ombor: { name: 'name', created_at: 'created_at', quantity: 'name' },
   Qoldiqlar: { name: 'product__name', created_at: 'created_at', quantity: 'quantity' },
   Kassa: { client: 'due_date', created_at: 'created_at', status: 'status' },
@@ -2620,7 +2622,7 @@ function getGridColumns(title, session, { renderStatus } = {}) {
       { key: 'created_at', label: 'Sana', sortable: true, render: (row) => formatDateUz(row.sold_date || row.created_at) },
     ]
   }
-  if (title === 'Import') {
+  if (title === 'Kirim') {
     const showPrices = can(session, 'prices_view')
     return [
       { key: 'id', label: 'ID', sortable: true, className: 'col-id', render: (row) => row._idLabel || row.id },
@@ -2777,7 +2779,7 @@ function ContractDetailModal({ id, close, onNavigate, navigateToPath }) {
               <div className="contract-detail-wide"><dt>Asos</dt><dd>{detail.asos || '—'}</dd></div>
               <div><dt>Faktura</dt><dd>{detail.faktura || '—'}</dd></div>
               <div><dt>Buyurtma</dt><dd>{detail.order ? `#${detail.order}` : '—'}</dd></div>
-              <div><dt>Import</dt><dd>{detail.zakaz ? `#${detail.zakaz}` : '—'}</dd></div>
+              <div><dt>Kirim</dt><dd>{detail.zakaz ? `#${detail.zakaz}` : '—'}</dd></div>
               <div><dt>Buyurtma (SK)</dt><dd>{detail.invoice ? detail.contract_number || `#${detail.invoice}` : '—'}</dd></div>
               <div><dt>Yaratgan</dt><dd>{detail.created_by_name || '—'}</dd></div>
               <div><dt>Yaratilgan vaqt</dt><dd>{detail.created_at || '—'}</dd></div>
@@ -2795,8 +2797,8 @@ function ContractDetailModal({ id, close, onNavigate, navigateToPath }) {
                   </button>
                 )}
                 {detail.zakaz && (
-                  <button type="button" className="secondary-button" onClick={() => goTo('Import')}>
-                    Importga o‘tish
+                  <button type="button" className="secondary-button" onClick={() => goTo('Kirim')}>
+                    Kirimga o‘tish
                   </button>
                 )}
               </div>
@@ -2877,8 +2879,8 @@ function ImportHistoryModal({ item, close }) {
     })))
     : (item?.history || [])
   const title = item?._grouped
-    ? `${item._items?.length || item._groupIds?.length || ''} ta mahsulot — import tarixi`
-    : (item?.product_name || `Import #${item?.id}`)
+    ? `${item._items?.length || item._groupIds?.length || ''} ta mahsulot — kirim tarixi`
+    : (item?.product_name || `Kirim #${item?.id}`)
   return (
     <div className="modal-backdrop" role="presentation">
       <div className="editor import-history-modal">
@@ -2972,7 +2974,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
   }
 
   const manageAbilities = {
-    'Import': 'procurement_manage',
+    'Kirim': 'procurement_manage',
     'Ombor': 'warehouse_manage',
     'Kategoriyalar': 'warehouse_manage',
     'Qoldiqlar': 'warehouse_manage',
@@ -2987,7 +2989,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
   }
   const canManage = can(session, manageAbilities[title])
   const canCreate = (can(session, createAbilities[title] || manageAbilities[title]))
-    && ['Mijozlar', 'Ombor', 'Import', 'Kategoriyalar', 'Qoldiqlar', 'Sotuvlar', 'Xarajatlar', 'Foydalanuvchilar'].includes(title)
+    && ['Mijozlar', 'Ombor', 'Kirim', 'Kategoriyalar', 'Qoldiqlar', 'Sotuvlar', 'Xarajatlar', 'Foydalanuvchilar'].includes(title)
   const canEditRows = canManage && !resources[title]?.readonly
 
   const handleMarkRead = async (id) => {
@@ -3017,8 +3019,8 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
 
   const handleEdit = async (row) => {
     if (!resources[title]) return
-    // Import — ko'p ma'lumotli forma, alohida sahifada ochiladi
-    if (title === 'Import') {
+    // Kirim — ko'p ma'lumotli forma, alohida sahifada ochiladi
+    if (title === 'Kirim') {
       navigateToPath(importEditPath(row.id))
       return
     }
@@ -3047,12 +3049,12 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
   }
 
   const displayRows = useMemo(
-    () => (title === 'Import' ? groupImportRows(rows) : rows),
+    () => (title === 'Kirim' ? groupImportRows(rows) : rows),
     [title, rows],
   )
 
   const selectedRows = useMemo(() => {
-    if (title !== 'Import') {
+    if (title !== 'Kirim') {
       return rows.filter((row) => selectedIds.includes(row.id))
     }
     const expanded = []
@@ -3066,7 +3068,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
 
   const gridColumns = useMemo(() => getGridColumns(title, session, {
     renderStatus: (row) => {
-      if (title === 'Import' && can(session, 'order_status_manage')) {
+      if (title === 'Kirim' && can(session, 'order_status_manage')) {
         const locked = ['received', 'cancelled'].includes(row.status) || row.status === 'mixed'
         const transitions = {
           new: ['new', 'confirmed', 'cancelled'],
@@ -3107,7 +3109,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
   }
 
   const handleBulkStatus = () => {
-    if (!selectedRows.length || title !== 'Import') return
+    if (!selectedRows.length || title !== 'Kirim') return
     setStatusChange({ mode: 'import', rows: selectedRows, targetStatus: listFilters.status || 'confirmed' })
   }
 
@@ -3125,7 +3127,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
         if (targetStatus === 'received') body.received_qty = payload.received_qty || row.quantity
         await api.update('/orders/zakaz/', row.id, body)
       }
-      notify('Import statusi yangilandi.', 'success')
+      notify('Kirim statusi yangilandi.', 'success')
     }
     setStatusChange(null)
     refreshAfterChange()
@@ -3155,7 +3157,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
 
   const renderRowActions = (row) => (
     <>
-      {title === 'Import' && (
+      {title === 'Kirim' && (
         <button type="button" className="row-action" disabled={opening} onClick={() => openImportHistory(row)} aria-label="Tarix">
           <ClockCounterClockwise size={18} />
         </button>
@@ -3169,7 +3171,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
   )
 
   return (
-    <div className={`page resource-page${title === 'Import' ? ' resource-page--import' : ''}`}>
+    <div className={`page resource-page${title === 'Kirim' ? ' resource-page--import' : ''}`}>
       <div className="page-heading">
         <div>
           <p className="eyebrow">MODUL</p>
@@ -3187,7 +3189,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
           {canCreate && (
             <button
               className="primary-button"
-              onClick={() => (title === 'Import' ? navigateToPath(importNewPath()) : setEditing({}))}
+              onClick={() => (title === 'Kirim' ? navigateToPath(importNewPath()) : setEditing({}))}
             >
               <Plus size={20} />Yangi qo‘shish
             </button>
@@ -3196,7 +3198,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
       </div>
       <section className="data-panel">
         <div className="panel-head">
-          <div><p className="eyebrow">RO‘YXAT</p><h3>{title === 'Import' && useGrid ? `${displayRows.length} ta import · ${totalCount} qator` : `${useGrid ? totalCount : rows.length} ta yozuv`}</h3></div>
+          <div><p className="eyebrow">RO‘YXAT</p><h3>{title === 'Kirim' && useGrid ? `${displayRows.length} ta kirim · ${totalCount} qator` : `${useGrid ? totalCount : rows.length} ta yozuv`}</h3></div>
           <div className="panel-head-actions">
             {useGrid && <ListFiltersPanel title={title} filters={listFilters} onChange={setListFilters} />}
             <form className="resource-search" onSubmit={handleSearch}>
@@ -3211,7 +3213,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
               <DownloadSimple size={18} />
               Eksport
             </button>
-            {title === 'Import' && can(session, 'order_status_manage') && (
+            {title === 'Kirim' && can(session, 'order_status_manage') && (
               <button type="button" className="secondary-button" disabled={!selectedIds.length} onClick={handleBulkStatus}>
                 Status o‘zgartirish
               </button>
@@ -3221,7 +3223,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
         {useGrid ? (
           <>
             <DataTable
-              wrapClassName={title === 'Import' ? 'data-table-wrap--import' : ''}
+              wrapClassName={title === 'Kirim' ? 'data-table-wrap--import' : ''}
               columns={gridColumns}
               rows={displayRows}
               sortKey={sortKey}
@@ -3234,7 +3236,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
               emptyCta={showEmptyCta && emptyCfg.cta ? {
                 label: emptyCfg.label,
                 ctaLabel: emptyCfg.cta,
-                onCta: () => (title === 'Import' ? navigateToPath(importNewPath()) : setEditing({})),
+                onCta: () => (title === 'Kirim' ? navigateToPath(importNewPath()) : setEditing({})),
               } : null}
               selectable={useGrid}
               selectedIds={selectedIds}
@@ -3970,6 +3972,47 @@ function splitPartialPayment(totalPaid, lineTotals) {
   return splits
 }
 
+// Oldindan to'lov foizi — 5/10/15/30% tayyor variantlar + o'zi kiritish.
+// Kirim (Zakaz) va Buyurtma (Order) editorlarida bir xil ishlatiladi.
+const PREPAID_PERCENT_PRESETS = ['5', '10', '15', '30']
+
+function PrepaidPercentField({ value, onChange, label = 'Oldindan to‘lov (%)' }) {
+  const isPreset = PREPAID_PERCENT_PRESETS.includes(String(value ?? ''))
+  const selectValue = value === '' || value == null ? '' : (isPreset ? String(value) : 'custom')
+  return (
+    <label>
+      {label}
+      <div className="prepaid-percent-field">
+        <select
+          value={selectValue}
+          onChange={(event) => {
+            const next = event.target.value
+            onChange(next === 'custom' ? (isPreset ? '' : String(value ?? '')) : next)
+          }}
+        >
+          <option value="">—</option>
+          {PREPAID_PERCENT_PRESETS.map((preset) => (
+            <option value={preset} key={preset}>{preset}%</option>
+          ))}
+          <option value="custom">Boshqa...</option>
+        </select>
+        {(selectValue === 'custom') && (
+          <input
+            type="number"
+            min="0"
+            max="100"
+            step="0.01"
+            value={value ?? ''}
+            onChange={(event) => onChange(event.target.value)}
+            placeholder="Masalan, 20"
+            aria-label="Oldindan to‘lov foizi (o‘zi kiritish)"
+          />
+        )}
+      </div>
+    </label>
+  )
+}
+
 function ZakazEditor({ close, done, notify, item = null, session, asPage = false }) {
   const showPrices = can(session, 'prices_manage')
   const showPayment = showPrices || can(session, 'cash_manage')
@@ -3996,6 +4039,9 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
     selling_price: item?.selling_price || '',
     currency: item?.currency || 'UZS',
     supplier: item?.supplier || '',
+    supplier_client: item?.supplier_client || '',
+    import_type: item?.import_type || 'domestic',
+    prepaid_percent: item?.prepaid_percent != null ? String(item.prepaid_percent) : '30',
     status: item?.status || 'new',
     payment_status: item?.payment_status || 'unpaid',
     paid_amount: item?.paid_amount || '',
@@ -4007,6 +4053,17 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
     asos: item?.asos || '',
     comment: item?.comment || '',
   }))
+  // Yetkazuvchi — mijozlar bazasidan tanlangan bo'lsa uning to'liq
+  // ma'lumoti (nomi) ko'rsatish uchun; tanlanmagan bo'lsa erkin matn
+  // (`form.supplier`) ishlatiladi.
+  const [supplierClientDetail, setSupplierClientDetail] = useState(null)
+  const [supplierPickerOpen, setSupplierPickerOpen] = useState(false)
+  const [supplierQuickAddOpen, setSupplierQuickAddOpen] = useState(false)
+
+  useEffect(() => {
+    if (!item?.supplier_client || !can(session, 'clients_view')) return
+    fetchClient(item.supplier_client).then(setSupplierClientDetail).catch(() => {})
+  }, [item?.supplier_client, session])
 
   useEffect(() => {
     api.products({ page_size: 500 }).then((data) => setProducts(list(data))).catch((err) => notify(err.message))
@@ -4054,6 +4111,9 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
           selling_price: anchor.selling_price || '',
           currency: anchor.currency || 'UZS',
           supplier: anchor.supplier || '',
+          supplier_client: anchor.supplier_client || '',
+          import_type: anchor.import_type || 'domestic',
+          prepaid_percent: anchor.prepaid_percent != null ? String(anchor.prepaid_percent) : '30',
           status: anchor.status || 'new',
           payment_status: anchor.payment_status || 'unpaid',
           paid_amount: anchor.payment_status === 'partial' && batchPaid > 0
@@ -4067,13 +4127,16 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
           asos: anchor.asos || '',
           comment: anchor.comment || '',
         }))
+        if (anchor.supplier_client && can(session, 'clients_view')) {
+          fetchClient(anchor.supplier_client).then(setSupplierClientDetail).catch(() => {})
+        }
       })
       .catch((err) => notify(err.message))
       .finally(() => {
         if (!cancelled) setBatchLoading(false)
       })
     return () => { cancelled = true }
-  }, [item, canMultiLine, notify])
+  }, [item, canMultiLine, notify, session])
 
   // Ombordan tanlangan qatorlarni mahsulot ma'lumotlari bilan to'ldiradi
   useEffect(() => {
@@ -4228,6 +4291,10 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
           <option value="paid">To‘langan</option>
         </select>
       </label>
+      <PrepaidPercentField
+        value={form.prepaid_percent}
+        onChange={(value) => setForm({ ...form, prepaid_percent: value })}
+      />
       {form.payment_status === 'partial' && (
         <label>Qisman to‘langan summa
           <input
@@ -4314,7 +4381,7 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
           if (!contractNumberEdited) delete bulkPayload.contract_number
           applyPaymentPayload(bulkPayload)
           await api.zakazBulk(bulkPayload)
-          notify('Import yaratildi.', 'success')
+          notify('Kirim yaratildi.', 'success')
           done()
           return
         }
@@ -4378,7 +4445,7 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
             await api.create('/orders/zakaz/', createPayload)
           }
         }
-        notify('Import yangilandi.', 'success')
+        notify('Kirim yangilandi.', 'success')
         done()
         return
       }
@@ -4399,7 +4466,7 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
         delete payload.paid_amount
       }
       await api.update('/orders/zakaz/', item.id, payload)
-      notify('Import yangilandi.', 'success')
+      notify('Kirim yangilandi.', 'success')
       done()
     } catch (err) {
       notify(err.message)
@@ -4413,8 +4480,8 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
       <form className={`editor import-editor${asPage ? ' editor--page' : ''}`} onSubmit={submit}>
         <div className="editor-head">
           <div>
-            <p className="eyebrow">{item?.id ? 'IMPORT TAHRIRI' : 'YANGI IMPORT'}</p>
-            <h3>Yetkazuvchidan import</h3>
+            <p className="eyebrow">{item?.id ? 'KIRIM TAHRIRI' : 'YANGI KIRIM'}</p>
+            <h3>Yetkazuvchidan kirim</h3>
           </div>
           <button type="button" className="icon-button" onClick={close} aria-label={asPage ? 'Ro‘yxatga qaytish' : 'Yopish'}>
             {asPage ? <ArrowLeft size={20} /> : <X size={20} />}
@@ -4636,7 +4703,38 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
               <label>Status<select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value })}><option value="new">Yangi</option><option value="confirmed">Tasdiqlandi</option><option value="ordered">Etkazuvchiga yuborildi</option><option value="received">Qabul qilindi</option><option value="cancelled">Bekor qilindi</option></select></label>
             )
           )}
-          <label>Yetkazuvchi<input value={form.supplier} onChange={(event) => setForm({ ...form, supplier: event.target.value })} /></label>
+          <label>Kirim turi
+            <select value={form.import_type} onChange={(event) => setForm({ ...form, import_type: event.target.value })}>
+              <option value="domestic">O‘zbekiston ichidan sotib olish</option>
+              <option value="import">Import</option>
+              <option value="charter">Ustavdan kiritish</option>
+            </select>
+          </label>
+          <ClientPickerField
+            id="zakaz-supplier-client"
+            label="Yetkazuvchi (mijozlar bazasidan)"
+            value={form.supplier_client || ''}
+            selectedOption={supplierClientDetail}
+            onOpen={() => {
+              if (!can(session, 'clients_view')) {
+                notify('Mijozlar reestrini ko‘rish ruxsati yo‘q.')
+                return
+              }
+              setSupplierPickerOpen(true)
+            }}
+            onClear={() => {
+              setForm({ ...form, supplier_client: '' })
+              setSupplierClientDetail(null)
+            }}
+            placeholder="Bazadan tanlash (ixtiyoriy)..."
+          />
+          <label>Yetkazuvchi (erkin matn)
+            <input
+              value={form.supplier}
+              onChange={(event) => setForm({ ...form, supplier: event.target.value })}
+              placeholder="Bazada yo‘q bo‘lsa shu yerga yozing"
+            />
+          </label>
           <label>Shartnoma raqami<input value={form.contract_number} onChange={(event) => { setContractNumberEdited(true); setForm({ ...form, contract_number: event.target.value }) }} placeholder="Bo‘sh qoldirilsa avtomatik beriladi" /></label>
           <label>Shartnoma sanasi<input type="date" value={form.contract_date} onChange={(event) => setForm({ ...form, contract_date: event.target.value })} /></label>
           <label>Faktura<input value={form.faktura} onChange={(event) => setForm({ ...form, faktura: event.target.value })} /></label>
@@ -4655,6 +4753,38 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
             selectImportProduct(importPickerIndex, product)
             setImportPickerIndex(null)
           }}
+        />
+      )}
+      {supplierPickerOpen && can(session, 'clients_view') && (
+        <ClientPickerModal
+          title="Yetkazuvchini tanlash"
+          selectedId={form.supplier_client}
+          canSearch={can(session, 'clients_view')}
+          canAdd={can(session, 'clients_manage')}
+          onClose={() => setSupplierPickerOpen(false)}
+          onSelect={(client) => {
+            setForm({ ...form, supplier_client: client.id })
+            setSupplierClientDetail(client)
+            setSupplierPickerOpen(false)
+          }}
+          onAddNew={() => { setSupplierPickerOpen(false); setSupplierQuickAddOpen(true) }}
+        />
+      )}
+      {supplierQuickAddOpen && can(session, 'clients_manage') && (
+        <Editor
+          title="Mijozlar"
+          item={{ client_type: 'legal' }}
+          path="/clients/"
+          close={() => setSupplierQuickAddOpen(false)}
+          done={(created) => {
+            setSupplierQuickAddOpen(false)
+            if (created?.id) {
+              setForm({ ...form, supplier_client: created.id })
+              setSupplierClientDetail(created)
+            }
+          }}
+          notify={notify}
+          session={session}
         />
       )}
     </>

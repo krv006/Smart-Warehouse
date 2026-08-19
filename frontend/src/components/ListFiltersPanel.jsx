@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Funnel, MagnifyingGlass, X } from '@phosphor-icons/react'
 import { api } from '../api'
-import { MODULE_FILTER_FEATURES, MODULE_STATUS_OPTIONS, hasActiveListFilters } from '../listFilters'
+import { MODULE_FILTER_FEATURES, MODULE_STATUS_OPTIONS, IMPORT_TYPE_OPTIONS, hasActiveListFilters } from '../listFilters'
 
 const list = (data) => Array.isArray(data) ? data : data?.results || []
 
@@ -115,10 +115,10 @@ export default function ListFiltersPanel({ title, filters, onChange }) {
 
   const clearAll = useCallback(() => {
     // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi: category: '' olib tashlandi.
-    onChange({ status: '', client: '', date_from: '', date_to: '' })
+    onChange({ status: '', client: '', import_type: '', date_from: '', date_to: '' })
   }, [onChange])
 
-  if (!features.status && !features.client && !features.date) return null
+  if (!features.status && !features.client && !features.date && !features.importType) return null
 
   return (
     <div className="list-filters" ref={ref}>
@@ -166,6 +166,22 @@ export default function ListFiltersPanel({ title, filters, onChange }) {
                 loading={clientsLoading}
                 getLabel={(item) => item.company_name || item.full_name || '—'}
               />
+            )}
+            {features.importType && (
+              <div className="filter-field">
+                <label className="filter-field-label" htmlFor={`${title}-import-type-filter`}>Kirim turi</label>
+                <select
+                  id={`${title}-import-type-filter`}
+                  className="filter-select"
+                  value={filters.import_type || ''}
+                  onChange={(event) => onChange({ ...filters, import_type: event.target.value })}
+                >
+                  <option value="">Hammasi</option>
+                  {IMPORT_TYPE_OPTIONS.map((item) => (
+                    <option key={item.value} value={item.value}>{item.label}</option>
+                  ))}
+                </select>
+              </div>
             )}
             {/* Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi. */}
             {/* {features.category && (
