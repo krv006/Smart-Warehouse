@@ -22,7 +22,8 @@ export const MODULE_FILTER_FEATURES = {
   Mijozlar: { status: true, client: false, date: true },
   Sotuvlar: { status: false, client: true, date: true },
   Import: { status: true, client: false, date: true },
-  Ombor: { status: false, client: false, date: false, category: true },
+  // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi: category: true olib tashlandi.
+  Ombor: { status: false, client: false, date: false },
   Kassa: { status: true, client: true, date: true },
   Xarajatlar: { status: false, client: false, date: true },
 }
@@ -34,14 +35,16 @@ export function buildListQueryParams(title, filters = {}) {
     else params.status = filters.status
   }
   if (filters.client) params.client = filters.client
-  if (filters.category) params.category = filters.category
+  // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+  // if (filters.category) params.category = filters.category
   if (filters.date_from) params.date_from = filters.date_from
   if (filters.date_to) params.date_to = filters.date_to
   return params
 }
 
 export function hasActiveListFilters(filters = {}) {
-  return Boolean(filters.status || filters.client || filters.category
+  // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi: filters.category olib tashlandi.
+  return Boolean(filters.status || filters.client
     || filters.date_from || filters.date_to)
 }
 

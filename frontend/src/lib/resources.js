@@ -5,7 +5,8 @@ export const resources = {
   Import: { load: api.zakaz, path: '/orders/zakaz/' },
   Shartnomalar: { load: api.contracts, path: '/orders/contracts/', readonly: true },
   Ombor: { load: api.products, path: '/warehouse/products/' },
-  Kategoriyalar: { load: api.categories, path: '/warehouse/categories/' },
+  // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+  // Kategoriyalar: { load: api.categories, path: '/warehouse/categories/' },
   Qoldiqlar: { load: api.stocks, path: '/warehouse/stocks/' },
   Mijozlar: { load: api.clients, path: '/clients/' },
   Sotuvlar: { load: api.sales, path: '/sales/' },

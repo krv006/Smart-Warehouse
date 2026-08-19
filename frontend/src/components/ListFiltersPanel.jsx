@@ -5,14 +5,15 @@ import { MODULE_FILTER_FEATURES, MODULE_STATUS_OPTIONS, hasActiveListFilters } f
 
 const list = (data) => Array.isArray(data) ? data : data?.results || []
 
-// Kategoriya daraxtini tekis ro'yxatga aylantiradi (bosqich — `depth`)
-function flattenCategoryTree(nodes, depth = 0, acc = []) {
-  nodes.forEach((node) => {
-    acc.push({ id: node.id, name: node.name, depth })
-    if (node.children?.length) flattenCategoryTree(node.children, depth + 1, acc)
-  })
-  return acc
-}
+// Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+// // Kategoriya daraxtini tekis ro'yxatga aylantiradi (bosqich — `depth`)
+// function flattenCategoryTree(nodes, depth = 0, acc = []) {
+//   nodes.forEach((node) => {
+//     acc.push({ id: node.id, name: node.name, depth })
+//     if (node.children?.length) flattenCategoryTree(node.children, depth + 1, acc)
+//   })
+//   return acc
+// }
 
 function FilterSearchSelect({
   id,
@@ -72,8 +73,9 @@ export default function ListFiltersPanel({ title, filters, onChange }) {
   const [open, setOpen] = useState(false)
   const [clients, setClients] = useState([])
   const [clientsLoading, setClientsLoading] = useState(false)
-  const [categories, setCategories] = useState([])
-  const [categoriesLoading, setCategoriesLoading] = useState(false)
+  // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+  // const [categories, setCategories] = useState([])
+  // const [categoriesLoading, setCategoriesLoading] = useState(false)
   const ref = useRef(null)
   const features = MODULE_FILTER_FEATURES[title] || {}
 
@@ -88,16 +90,17 @@ export default function ListFiltersPanel({ title, filters, onChange }) {
     return () => { cancelled = true }
   }, [open, features.client])
 
-  useEffect(() => {
-    if (!open || !features.category) return undefined
-    let cancelled = false
-    setCategoriesLoading(true)
-    api.categories({ page_size: 200 })
-      .then((data) => { if (!cancelled) setCategories(flattenCategoryTree(list(data))) })
-      .catch(() => { if (!cancelled) setCategories([]) })
-      .finally(() => { if (!cancelled) setCategoriesLoading(false) })
-    return () => { cancelled = true }
-  }, [open, features.category])
+  // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+  // useEffect(() => {
+  //   if (!open || !features.category) return undefined
+  //   let cancelled = false
+  //   setCategoriesLoading(true)
+  //   api.categories({ page_size: 200 })
+  //     .then((data) => { if (!cancelled) setCategories(flattenCategoryTree(list(data))) })
+  //     .catch(() => { if (!cancelled) setCategories([]) })
+  //     .finally(() => { if (!cancelled) setCategoriesLoading(false) })
+  //   return () => { cancelled = true }
+  // }, [open, features.category])
 
   useEffect(() => {
     const onPointer = (event) => {
@@ -111,10 +114,11 @@ export default function ListFiltersPanel({ title, filters, onChange }) {
   const active = hasActiveListFilters(filters)
 
   const clearAll = useCallback(() => {
-    onChange({ status: '', client: '', category: '', date_from: '', date_to: '' })
+    // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi: category: '' olib tashlandi.
+    onChange({ status: '', client: '', date_from: '', date_to: '' })
   }, [onChange])
 
-  if (!features.status && !features.client && !features.date && !features.category) return null
+  if (!features.status && !features.client && !features.date) return null
 
   return (
     <div className="list-filters" ref={ref}>
@@ -163,7 +167,8 @@ export default function ListFiltersPanel({ title, filters, onChange }) {
                 getLabel={(item) => item.company_name || item.full_name || '—'}
               />
             )}
-            {features.category && (
+            {/* Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi. */}
+            {/* {features.category && (
               <FilterSearchSelect
                 id={`${title}-category-filter`}
                 label="Kategoriya"
@@ -173,7 +178,7 @@ export default function ListFiltersPanel({ title, filters, onChange }) {
                 loading={categoriesLoading}
                 getLabel={(item) => `${'— '.repeat(item.depth)}${item.name}`}
               />
-            )}
+            )} */}
             {features.date && (
               <>
                 <div className="filter-field">

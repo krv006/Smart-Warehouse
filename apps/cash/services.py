@@ -321,7 +321,9 @@ def get_active_rate_info():
         and settings.preferred_bank_code
     ):
         bank = get_bank_from_market(settings.preferred_bank_code)
-        side = settings.preferred_bank_side or ExchangeRateSettings.SELL
+        # Faqat SOTISH (sell) kursi ishlatiladi — sotib olish (buy) hisobga
+        # olinmaydi, `preferred_bank_side` sozlamasidan qat'i nazar.
+        side = ExchangeRateSettings.SELL
         rate = resolve_bank_rate(settings.preferred_bank_code, side)
         if bank and rate is not None:
             return {

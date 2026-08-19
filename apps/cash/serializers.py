@@ -34,7 +34,9 @@ class ExchangeRateSettingsSerializer(ModelSerializer):
             'preferred_bank_side',
             'updated_at',
         )
-        read_only_fields = ('updated_at',)
+        # `preferred_bank_side` mijozdan qabul qilinmaydi — faqat SOTISH
+        # (sell) kursi ishlatiladi, sotib olish (buy) tanlanmaydi.
+        read_only_fields = ('preferred_bank_side', 'updated_at')
 
 
 class PaymentTransactionSerializer(ModelSerializer):

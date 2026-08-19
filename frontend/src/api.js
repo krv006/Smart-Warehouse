@@ -257,7 +257,8 @@ export const api = {
   zakazBatch: (id) => request(`/orders/zakaz/${id}/batch/`),
   contracts: (params = {}) => request(`/orders/contracts/${toQuery({ page_size: 30, ...params })}`),
   productContracts: (id) => request(`/warehouse/products/${id}/contracts/`),
-  categories: (params = {}) => request(`/warehouse/categories/${toQuery({ page_size: 30, ...params })}`),
+  // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+  // categories: (params = {}) => request(`/warehouse/categories/${toQuery({ page_size: 30, ...params })}`),
   stocks: (params = {}) => request(`/warehouse/stocks/${toQuery({ page_size: 30, ...params })}`),
   products: (params = {}) => request(`/warehouse/products/${toQuery({ page_size: 30, ...params })}`),
   clients: (params = {}) => request(`/clients/${toQuery({ page_size: 30, ...params })}`),

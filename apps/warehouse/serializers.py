@@ -4,20 +4,21 @@ from rest_framework.serializers import (ModelSerializer, ValidationError,
                                         PrimaryKeyRelatedField,
                                         SerializerMethodField)
 
-from apps.warehouse.models import Category, Product, Stock
+from apps.warehouse.models import Product, Stock  # Category vaqtincha ishlatilmaydi
 from apps.warehouse.product_utils import (normalize_product_serial,
                                           serial_number_is_taken)
 
 
-class CategorySerializer(ModelSerializer):
-    children = SerializerMethodField()
-
-    class Meta:
-        model  = Category
-        fields = ('id', 'name', 'parent', 'children')
-
-    def get_children(self, obj):
-        return CategorySerializer(obj.children.all(), many=True).data
+# Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+# class CategorySerializer(ModelSerializer):
+#     children = SerializerMethodField()
+#
+#     class Meta:
+#         model  = Category
+#         fields = ('id', 'name', 'parent', 'children')
+#
+#     def get_children(self, obj):
+#         return CategorySerializer(obj.children.all(), many=True).data
 
 
 def _validate_stock_fields(attrs):
@@ -34,20 +35,20 @@ class ProductSerializer(ModelSerializer):
     available_quantity = IntegerField(read_only=True)
     pending_import_quantity = IntegerField(read_only=True)
     stock_status       = SerializerMethodField()
-    category_name      = SerializerMethodField()
+    # Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+    # category_name      = SerializerMethodField()
     unit_display       = SerializerMethodField()
     origin_display     = SerializerMethodField()
     serial_number      = CharField(required=False, allow_blank=True,
                                    allow_null=True, max_length=255)
-    # Kategoriya — mahsulot qo'shishda MAJBURIY
-    category           = PrimaryKeyRelatedField(queryset=Category.objects.all())
+    # category           = PrimaryKeyRelatedField(queryset=Category.objects.all())
     quantity            = IntegerField(write_only=True, required=False, min_value=1)
     warehouse_location  = CharField(write_only=True, required=False,
                                     allow_blank=True, max_length=255)
 
     class Meta:
         model  = Product
-        fields = ('id', 'category', 'category_name', 'name', 'model',
+        fields = ('id', 'name', 'model',
                   'serial_number', 'barcode', 'purchase_price', 'selling_price',
                   'delivery_price', 'vat_percent', 'source',
                   'origin', 'origin_display',
@@ -60,8 +61,8 @@ class ProductSerializer(ModelSerializer):
     def get_stock_status(self, obj):
         return obj.stock_status
 
-    def get_category_name(self, obj):
-        return str(obj.category) if obj.category else None
+    # def get_category_name(self, obj):
+    #     return str(obj.category) if obj.category else None
 
     def get_unit_display(self, obj):
         return obj.get_unit_display()
@@ -123,20 +124,19 @@ class ProductOperatorSerializer(ModelSerializer):
     available_quantity = IntegerField(read_only=True)
     pending_import_quantity = IntegerField(read_only=True)
     stock_status       = SerializerMethodField()
-    category_name      = SerializerMethodField()
+    # category_name      = SerializerMethodField()
     unit_display       = SerializerMethodField()
     origin_display     = SerializerMethodField()
     serial_number      = CharField(required=False, allow_blank=True,
                                    allow_null=True, max_length=255)
-    # Kategoriya — mahsulot qo'shishda MAJBURIY
-    category           = PrimaryKeyRelatedField(queryset=Category.objects.all())
+    # category           = PrimaryKeyRelatedField(queryset=Category.objects.all())
     quantity            = IntegerField(write_only=True, required=False, min_value=1)
     warehouse_location  = CharField(write_only=True, required=False,
                                     allow_blank=True, max_length=255)
 
     class Meta:
         model  = Product
-        fields = ('id', 'category', 'category_name', 'name', 'model',
+        fields = ('id', 'name', 'model',
                   'serial_number', 'barcode', 'source',
                   'origin', 'origin_display', 'unit', 'unit_display',
                   'quantity_in_stock', 'reserved_quantity',
@@ -147,8 +147,8 @@ class ProductOperatorSerializer(ModelSerializer):
     def get_stock_status(self, obj):
         return obj.stock_status
 
-    def get_category_name(self, obj):
-        return str(obj.category) if obj.category else None
+    # def get_category_name(self, obj):
+    #     return str(obj.category) if obj.category else None
 
     def get_unit_display(self, obj):
         return obj.get_unit_display()

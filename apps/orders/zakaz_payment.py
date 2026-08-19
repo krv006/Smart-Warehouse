@@ -9,7 +9,13 @@ from apps.orders.models import Zakaz
 
 
 def _target_expense_amount(zakaz):
-    """Etkazuvchiga to'langan / kassadan chiqqan summa."""
+    """Etkazuvchiga HAQIQATDA to'langan / kassadan chiqqan summa.
+
+    MUHIM: `UNPAID` holatida hali kassadan bir tiyin ham chiqmagan — shuning
+    uchun None qaytariladi (Expense yozilmaydi). Avval bu holatda ham to'liq
+    summa chiqim sifatida yozilardi — bu kassa balansini haqiqiy pul
+    chiqmasdan turib minusga tushirib yuborardi (kutayotgan/to'lanmagan
+    importlar ko'payishi bilan balans sun'iy ravishda pasayardi)."""
     total = zakaz.total
     if total is None or total <= 0:
         return None
@@ -18,8 +24,8 @@ def _target_expense_amount(zakaz):
     if zakaz.payment_status == Zakaz.PARTIAL:
         paid = Decimal(str(zakaz.paid_amount or 0))
         return paid if paid > 0 else None
-    # To'lanmagan — import summasi kassadan chiqim sifatida yoziladi
-    return total
+    # To'lanmagan — hali kassadan pul chiqmagan, chiqim yozilmaydi
+    return None
 
 
 def sync_zakaz_expense(zakaz, user=None):

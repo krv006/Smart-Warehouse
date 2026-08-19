@@ -8,31 +8,32 @@ from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
 from apps.common.permissions import IsOperatorOrManagementWrite, IsManagement
-from apps.warehouse.models import Category, Product, Stock, STATUS_IN_STOCK, STATUS_LOW_STOCK, STATUS_OUT
-from apps.warehouse.serializers import (CategorySerializer, ProductSerializer,
+from apps.warehouse.models import Product, Stock, STATUS_IN_STOCK, STATUS_LOW_STOCK, STATUS_OUT
+from apps.warehouse.serializers import (ProductSerializer,
                                         ProductOperatorSerializer,
                                         ProductAccountantSerializer, StockSerializer)
 
 
-@extend_schema_view(
-    list=extend_schema(summary="Kategoriyalar daraxti", tags=["Warehouse"]),
-    retrieve=extend_schema(summary="Kategoriya", tags=["Warehouse"]),
-    create=extend_schema(summary="Yangi kategoriya", tags=["Warehouse"]),
-    update=extend_schema(summary="Kategoriya yangilash", tags=["Warehouse"]),
-    partial_update=extend_schema(summary="Kategoriya qisman yangilash", tags=["Warehouse"]),
-    destroy=extend_schema(summary="Kategoriya o'chirish", tags=["Warehouse"]),
-)
-class CategoryViewSet(ModelViewSet):
-    serializer_class   = CategorySerializer
-    permission_classes = (IsOperatorOrManagementWrite,)
-    search_fields      = ('name',)
-
-    def get_queryset(self):
-        if self.action == 'list':
-            return Category.objects.root_nodes().prefetch_related(
-                'children__children__children'
-            )
-        return Category.objects.all()
+# Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+# @extend_schema_view(
+#     list=extend_schema(summary="Kategoriyalar daraxti", tags=["Warehouse"]),
+#     retrieve=extend_schema(summary="Kategoriya", tags=["Warehouse"]),
+#     create=extend_schema(summary="Yangi kategoriya", tags=["Warehouse"]),
+#     update=extend_schema(summary="Kategoriya yangilash", tags=["Warehouse"]),
+#     partial_update=extend_schema(summary="Kategoriya qisman yangilash", tags=["Warehouse"]),
+#     destroy=extend_schema(summary="Kategoriya o'chirish", tags=["Warehouse"]),
+# )
+# class CategoryViewSet(ModelViewSet):
+#     serializer_class   = CategorySerializer
+#     permission_classes = (IsOperatorOrManagementWrite,)
+#     search_fields      = ('name',)
+#
+#     def get_queryset(self):
+#         if self.action == 'list':
+#             return Category.objects.root_nodes().prefetch_related(
+#                 'children__children__children'
+#             )
+#         return Category.objects.all()
 
 
 @extend_schema_view(
@@ -45,7 +46,7 @@ class CategoryViewSet(ModelViewSet):
 )
 class ProductViewSet(ModelViewSet):
     # stocks/zakazlar — qoldiq va "yo'ldagi import" miqdori uchun (N+1 oldini olish)
-    queryset           = (Product.objects.select_related('category')
+    queryset           = (Product.objects
                           .prefetch_related('stocks', 'zakazlar').all())
     permission_classes = (IsOperatorOrManagementWrite,)
     search_fields      = ('name', 'model', 'serial_number', 'source')
@@ -54,18 +55,6 @@ class ProductViewSet(ModelViewSet):
         'purchase_price': ['isnull'],
         'selling_price':  ['isnull'],
     }
-
-    def get_queryset(self):
-        """`?category=<id>` — tanlangan kategoriya VA uning ost-kategoriyalari."""
-        queryset = super().get_queryset()
-        category_id = self.request.query_params.get('category')
-        if category_id:
-            category = Category.objects.filter(pk=category_id).first()
-            if category is None:
-                return queryset.none()
-            queryset = queryset.filter(
-                category__in=category.get_descendants(include_self=True))
-        return queryset
 
     def get_serializer_class(self):
         user = self.request.user
@@ -242,12 +231,8 @@ class StockViewSet(ModelViewSet):
         super().perform_destroy(instance)
 
     def get_queryset(self):
-        qs = Stock.objects.select_related('product', 'product__category')
+        qs = Stock.objects.select_related('product')
         params = self.request.query_params
-
-        category = params.get('category')
-        if category:
-            qs = qs.filter(product__category_id=category)
 
         date_from = params.get('date_from')
         date_to   = params.get('date_to')

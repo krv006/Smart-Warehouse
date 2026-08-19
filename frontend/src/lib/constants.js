@@ -8,7 +8,8 @@ export const workspace = 'Asosiy ombor'
 export const NAV_GROUPS = {
   Ombor: [
     { page: 'Ombor', label: 'Mahsulotlar', ability: 'warehouse_view' },
-    { page: 'Kategoriyalar', label: 'Kategoriyalar', ability: 'categories_view' },
+    // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+    // { page: 'Kategoriyalar', label: 'Kategoriyalar', ability: 'categories_view' },
     { page: 'Qoldiqlar', label: 'Qoldiqlar', ability: 'stocks_view' },
   ],
   Moliya: [

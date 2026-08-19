@@ -587,3 +587,50 @@ class ZakazPartialPaymentPatchTests(TestCase):
         )
         self.assertEqual(over.status_code, 400, over.data)
         self.assertIn('paid_amount', over.data)
+
+
+class ZakazExpenseKassaSyncTests(TestCase):
+    """Kassa (Expense) faqat HAQIQATDA chiqqan pulni aks ettirishi kerak —
+    to'lanmagan (UNPAID) import hali kassadan pul chiqarmasligi kerak."""
+
+    def setUp(self):
+        self.manager = User.objects.create_user('mng_kassa_bal', password='x',
+                                                role=User.MANAGEMENT)
+        self.product = Product.objects.create(
+            name='Kassa Prod', serial_number='KP-1',
+            purchase_price=Decimal('1000'))
+
+    def test_unpaid_zakaz_does_not_create_expense(self):
+        from apps.expenses.models import Expense
+        from apps.orders.zakaz_payment import sync_zakaz_expense
+
+        zakaz = Zakaz.objects.create(
+            product=self.product, quantity=10, unit_price=Decimal('100000'),
+            zakaz_type=Zakaz.MANUAL, status=Zakaz.NEW,
+            payment_status=Zakaz.UNPAID)
+        sync_zakaz_expense(zakaz, user=self.manager)
+        self.assertFalse(Expense.objects.filter(zakaz=zakaz).exists())
+
+    def test_partial_zakaz_only_expenses_paid_amount(self):
+        from apps.expenses.models import Expense
+        from apps.orders.zakaz_payment import sync_zakaz_expense
+
+        zakaz = Zakaz.objects.create(
+            product=self.product, quantity=10, unit_price=Decimal('100000'),
+            zakaz_type=Zakaz.MANUAL, status=Zakaz.NEW,
+            payment_status=Zakaz.PARTIAL, paid_amount=Decimal('300000'))
+        sync_zakaz_expense(zakaz, user=self.manager)
+        expense = Expense.objects.get(zakaz=zakaz)
+        self.assertEqual(expense.amount, Decimal('300000'))
+
+    def test_paid_zakaz_expenses_full_total(self):
+        from apps.expenses.models import Expense
+        from apps.orders.zakaz_payment import sync_zakaz_expense
+
+        zakaz = Zakaz.objects.create(
+            product=self.product, quantity=10, unit_price=Decimal('100000'),
+            zakaz_type=Zakaz.MANUAL, status=Zakaz.NEW,
+            payment_status=Zakaz.PAID)
+        sync_zakaz_expense(zakaz, user=self.manager)
+        expense = Expense.objects.get(zakaz=zakaz)
+        self.assertEqual(expense.amount, Decimal('1000000'))

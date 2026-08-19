@@ -38,22 +38,23 @@ export const userInitials = (name) => {
   return (parts[0]?.[0] || 'U').toUpperCase()
 }
 
-export function flattenCategories(nodes, depth = 0, result = []) {
-  for (const node of nodes) {
-    result.push({ id: node.id, name: node.name, depth })
-    if (node.children?.length) flattenCategories(node.children, depth + 1, result)
-  }
-  return result
-}
-
-export function findCategoryNode(nodes, id) {
-  for (const node of nodes) {
-    if (node.id === id) return node
-    const found = findCategoryNode(node.children || [], id)
-    if (found) return found
-  }
-  return null
-}
+// Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+// export function flattenCategories(nodes, depth = 0, result = []) {
+//   for (const node of nodes) {
+//     result.push({ id: node.id, name: node.name, depth })
+//     if (node.children?.length) flattenCategories(node.children, depth + 1, result)
+//   }
+//   return result
+// }
+//
+// export function findCategoryNode(nodes, id) {
+//   for (const node of nodes) {
+//     if (node.id === id) return node
+//     const found = findCategoryNode(node.children || [], id)
+//     if (found) return found
+//   }
+//   return null
+// }
 
 export function collectDescendantIds(node) {
   const ids = []

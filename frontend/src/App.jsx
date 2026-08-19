@@ -26,7 +26,8 @@ import { validateClientFields, validateCompanyProfile } from './lib/uzValidators
 const NAV_GROUPS = {
   Ombor: [
     { page: 'Ombor', label: 'Mahsulotlar', ability: 'warehouse_view' },
-    { page: 'Kategoriyalar', label: 'Kategoriyalar', ability: 'categories_view' },
+    // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+    // { page: 'Kategoriyalar', label: 'Kategoriyalar', ability: 'categories_view' },
     { page: 'Qoldiqlar', label: 'Qoldiqlar', ability: 'stocks_view' },
   ],
   Moliya: [
@@ -61,22 +62,23 @@ const moneyRate = (value) => {
 }
 const list = (data) => Array.isArray(data) ? data : data?.results || []
 
-function flattenCategories(nodes, depth = 0, result = []) {
-  for (const node of nodes) {
-    result.push({ id: node.id, name: node.name, depth })
-    if (node.children?.length) flattenCategories(node.children, depth + 1, result)
-  }
-  return result
-}
-
-function findCategoryNode(nodes, id) {
-  for (const node of nodes) {
-    if (node.id === id) return node
-    const found = findCategoryNode(node.children || [], id)
-    if (found) return found
-  }
-  return null
-}
+// Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+// function flattenCategories(nodes, depth = 0, result = []) {
+//   for (const node of nodes) {
+//     result.push({ id: node.id, name: node.name, depth })
+//     if (node.children?.length) flattenCategories(node.children, depth + 1, result)
+//   }
+//   return result
+// }
+//
+// function findCategoryNode(nodes, id) {
+//   for (const node of nodes) {
+//     if (node.id === id) return node
+//     const found = findCategoryNode(node.children || [], id)
+//     if (found) return found
+//   }
+//   return null
+// }
 
 function collectDescendantIds(node) {
   const ids = []
@@ -132,9 +134,11 @@ const documentTypeLabels = {
 }
 const documentTypeLabel = (value) => documentTypeLabels[value] || value || 'Hujjat'
 
-function bankRateValue(bank, side) {
+// Faqat SOTISH (sell) kursi ishlatiladi — sotib olish (buy) kursi
+// hisob-kitoblarda ishlatilmaydi, shuning uchun tanlash imkoni yo'q.
+function bankRateValue(bank) {
   if (!bank) return null
-  return side === 'sell' ? bank.sell_rate : bank.buy_rate
+  return bank.sell_rate
 }
 
 function BankRateDropdown({
@@ -142,7 +146,6 @@ function BankRateDropdown({
   infinRate,
   manualRate,
   value,
-  side,
   compact = false,
   header = false,
   canManage = false,
@@ -150,9 +153,7 @@ function BankRateDropdown({
   onSelectInfinbank,
   onSelectBank,
   onSelectManual,
-  onSelectSide,
 }) {
-  const showSide = value.startsWith('bank:')
   return (
     <div className={`fx-bank-select-wrap${compact ? ' fx-bank-select-wrap--compact' : ''}${header ? ' fx-bank-select-wrap--header' : ''}`}>
       <select
@@ -171,7 +172,7 @@ function BankRateDropdown({
           Infinbank MB{infinRate ? ` — ${moneyRate(infinRate)}` : ''}
         </option>
         {marketBanks.map((bank) => {
-          const rate = bankRateValue(bank, side)
+          const rate = bankRateValue(bank)
           return (
             <option key={bank.code} value={`bank:${bank.code}`}>
               {bank.name}{rate ? ` — ${moneyRate(rate)}` : ''}
@@ -184,18 +185,6 @@ function BankRateDropdown({
           </option>
         )}
       </select>
-      {showSide && (
-        <select
-          className="fx-bank-side-select"
-          value={side}
-          disabled={disabled || !canManage}
-          aria-label="Kurs turi"
-          onChange={(event) => onSelectSide?.(event.target.value)}
-        >
-          <option value="sell">Sotish</option>
-          <option value="buy">Sotib olish</option>
-        </select>
-      )}
     </div>
   )
 }
@@ -227,7 +216,6 @@ function FxRatePanel({ session, notify, compact = false, header = false, onSourc
   const manualRate = snapshot?.manual?.mb_rate
   const marketBanks = snapshot?.market_rates?.banks || []
   const selectedBankCode = snapshot?.preferred_bank_code || snapshot?.active_bank_code || ''
-  const selectedBankSide = snapshot?.preferred_bank_side || snapshot?.active_bank_side || 'sell'
   const displayRate = snapshot?.mb_rate ?? (
     serverSource === 'manual' && manualRate ? manualRate : infinRate
   )
@@ -268,7 +256,6 @@ function FxRatePanel({ session, notify, compact = false, header = false, onSourc
       await applySettings({
         preferred_rate_source: 'bank',
         preferred_bank_code: fallbackCode,
-        preferred_bank_side: selectedBankSide,
       }, 'Hisob-kitobda tanlangan bank kursi ishlatiladi.')
       return
     }
@@ -287,19 +274,6 @@ function FxRatePanel({ session, notify, compact = false, header = false, onSourc
     await applySettings({
       preferred_rate_source: 'bank',
       preferred_bank_code: code,
-      preferred_bank_side: selectedBankSide,
-    })
-  }
-
-  const selectBankSide = async (side) => {
-    if (!canManage) return
-    const code = selectedBankCode || marketBanks[0]?.code
-    if (!code) return
-    setUiSource('bank')
-    await applySettings({
-      preferred_rate_source: 'bank',
-      preferred_bank_code: code,
-      preferred_bank_side: side,
     })
   }
 
@@ -314,13 +288,11 @@ function FxRatePanel({ session, notify, compact = false, header = false, onSourc
     infinRate,
     manualRate,
     value: bankSelectValue,
-    side: selectedBankSide,
     canManage,
     disabled: sourceSaving,
     onSelectInfinbank: () => setSource('infinbank'),
     onSelectBank: selectBank,
     onSelectManual: () => setSource('manual'),
-    onSelectSide: selectBankSide,
   }
 
   const saveManual = async (event) => {
@@ -666,7 +638,8 @@ function buildDashboardFilterParams(filters) {
   if (filters?.date_from) params.date_from = filters.date_from
   if (filters?.date_to) params.date_to = filters.date_to
   if (filters?.currency) params.currency = filters.currency
-  if (filters?.category) params.category = filters.category
+  // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+  // if (filters?.category) params.category = filters.category
   if (filters?.client) params.client = filters.client
   if (filters?.supplier?.trim()) params.supplier = filters.supplier.trim()
   if (filters?.product) params.product = filters.product
@@ -679,7 +652,8 @@ const DEFAULT_DASHBOARD_FILTERS = () => ({
   date_from: todayValue(),
   date_to: todayValue(),
   currency: '',
-  category: '',
+  // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+  // category: '',
   client: '',
   supplier: '',
   product: '',
@@ -1663,10 +1637,11 @@ function importPeriodNote(summary) {
 
 function filterContextNote(filters, lookup = {}) {
   const extras = []
-  if (filters.category) {
-    const cat = lookup.categories?.find((item) => String(item.id) === String(filters.category))
-    if (cat?.name) extras.push(cat.name)
-  }
+  // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+  // if (filters.category) {
+  //   const cat = lookup.categories?.find((item) => String(item.id) === String(filters.category))
+  //   if (cat?.name) extras.push(cat.name)
+  // }
   if (filters.client) {
     const client = lookup.clients?.find((item) => String(item.id) === String(filters.client))
     if (client?.full_name || client?.company_name) extras.push(client.full_name || client.company_name)
@@ -1700,10 +1675,11 @@ function buildDashboardFilterChips(filters, lookup = {}) {
     const currency = CURRENCY_FILTERS.find((item) => item.id === filters.currency)
     chips.push({ key: 'currency', label: currency?.label || filters.currency, patch: { currency: '' } })
   }
-  if (filters.category) {
-    const cat = lookup.categories?.find((item) => String(item.id) === String(filters.category))
-    chips.push({ key: 'category', label: cat?.name || 'Kategoriya', patch: { category: '' } })
-  }
+  // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+  // if (filters.category) {
+  //   const cat = lookup.categories?.find((item) => String(item.id) === String(filters.category))
+  //   chips.push({ key: 'category', label: cat?.name || 'Kategoriya', patch: { category: '' } })
+  // }
   if (filters.client) {
     const client = lookup.clients?.find((item) => String(item.id) === String(filters.client))
     chips.push({
@@ -1785,7 +1761,8 @@ function DashboardFiltersMenu({ filters, onChange }) {
   const [customFrom, setCustomFrom] = useState(filters.date_from || todayValue())
   const [customTo, setCustomTo] = useState(filters.date_to || todayValue())
   const [supplierDraft, setSupplierDraft] = useState(filters.supplier || '')
-  const [options, setOptions] = useState({ categories: [], clients: [], products: [], loading: false })
+  // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi: `categories` maydoni olib tashlandi.
+  const [options, setOptions] = useState({ clients: [], products: [], loading: false })
   const ref = useRef(null)
   const menuRef = useRef(null)
   const optionsLoaded = useRef(false)
@@ -1796,13 +1773,12 @@ function DashboardFiltersMenu({ filters, onChange }) {
     if (optionsLoaded.current) return
     optionsLoaded.current = true
     setOptions((prev) => ({ ...prev, loading: true }))
+    // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi: api.categories(...) olib tashlandi.
     Promise.all([
-      api.categories({ page_size: 100 }),
       api.clients({ page_size: 100 }),
       api.products({ page_size: 200 }),
-    ]).then(([categories, clients, products]) => {
+    ]).then(([clients, products]) => {
       setOptions({
-        categories: list(categories),
         clients: list(clients),
         products: list(products),
         loading: false,
@@ -2005,7 +1981,8 @@ function DashboardFiltersMenu({ filters, onChange }) {
                 </div>
 
                 <div className="filter-panel-fields">
-                  <FilterSearchSelect
+                  {/* Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi. */}
+                  {/* <FilterSearchSelect
                     id="filter-category"
                     label="Kategoriya"
                     value={filters.category}
@@ -2013,7 +1990,7 @@ function DashboardFiltersMenu({ filters, onChange }) {
                     options={options.categories}
                     getLabel={(item) => item.name}
                     onChange={(category) => onChange({ category })}
-                  />
+                  /> */}
                   <FilterSearchSelect
                     id="filter-client"
                     label="Mijoz"
@@ -2432,7 +2409,8 @@ const resources = {
   'Import': { load: api.zakaz, path: '/orders/zakaz/' },
   'Shartnomalar': { load: api.contracts, path: '/orders/contracts/', readonly: true },
   'Ombor': { load: api.products, path: '/warehouse/products/' },
-  'Kategoriyalar': { load: api.categories, path: '/warehouse/categories/' },
+  // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+  // 'Kategoriyalar': { load: api.categories, path: '/warehouse/categories/' },
   'Qoldiqlar': { load: api.stocks, path: '/warehouse/stocks/' },
   'Mijozlar': { load: api.clients, path: '/clients/' },
   'Sotuvlar': { load: api.sales, path: '/sales/' },
@@ -2681,7 +2659,8 @@ function getGridColumns(title, session, { renderStatus } = {}) {
   if (title === 'Ombor') {
     return [
       { key: 'name', label: 'Mahsulot', sortable: true, render: (row) => row.name || '—' },
-      { key: 'category', label: 'Kategoriya', render: (row) => row.category_name || '—' },
+      // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+      // { key: 'category', label: 'Kategoriya', render: (row) => row.category_name || '—' },
       { key: 'model', label: 'Model', render: (row) => row.model || '—' },
       { key: 'serial', label: 'Seriya', render: (row) => row.serial_number || '—' },
       { key: 'quantity', label: 'Qoldiq', sortable: true, render: (row) => rowValue(title, row, session) },
@@ -2912,7 +2891,8 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [searchTerm, setSearchTerm] = useState('')
-  const [listFilters, setListFilters] = useState({ status: '', client: '', category: '', date_from: '', date_to: '' })
+  // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi: `category` kaliti olib tashlandi.
+  const [listFilters, setListFilters] = useState({ status: '', client: '', date_from: '', date_to: '' })
   const [page, setPage] = useState(1)
   const [totalCount, setTotalCount] = useState(0)
   const [sortKey, setSortKey] = useState('created_at')
@@ -3374,8 +3354,9 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
 }
 
 const fields = {
-  Ombor: [['name', 'Mahsulot nomi', true], ['category', 'Kategoriya', true], ['model', 'Model'], ['serial_number', 'Seriya raqami', true], ['barcode', 'Shtrix kod'], ['source', 'Manba / yetkazuvchi'], ['unit', 'O‘lchov birligi'], ['min_quantity', 'Minimal qoldiq'], ['purchase_price', 'Kelish narxi'], ['selling_price', 'Sotuv narxi'], ['delivery_price', 'Yetkazish narxi'], ['vat_percent', 'QQS %'], ['quantity', 'Boshlang‘ich miqdor'], ['warehouse_location', 'Ombordagi joy']],
-  Kategoriyalar: [['name', 'Kategoriya nomi', true], ['parent', 'Ota kategoriya']],
+  // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi: ['category', 'Kategoriya', true] olib tashlandi.
+  Ombor: [['name', 'Mahsulot nomi', true], ['model', 'Model'], ['serial_number', 'Seriya raqami', true], ['barcode', 'Shtrix kod'], ['source', 'Manba / yetkazuvchi'], ['unit', 'O‘lchov birligi'], ['min_quantity', 'Minimal qoldiq'], ['purchase_price', 'Kelish narxi'], ['selling_price', 'Sotuv narxi'], ['delivery_price', 'Yetkazish narxi'], ['vat_percent', 'QQS %'], ['quantity', 'Boshlang‘ich miqdor'], ['warehouse_location', 'Ombordagi joy']],
+  // Kategoriyalar: [['name', 'Kategoriya nomi', true], ['parent', 'Ota kategoriya']],
   Qoldiqlar: [['product', 'Mahsulot ID', true], ['quantity', 'Miqdor', true], ['reserved_quantity', 'Bron miqdor'], ['warehouse_location', 'Ombordagi joy', true]],
 }
 
@@ -3398,31 +3379,33 @@ function Editor({ title, item, path, close, done, notify, session }) {
   const [errors, setErrors] = useState({})
   const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [deleting, setDeleting] = useState(false)
-  const [categories, setCategories] = useState([])
+  // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+  // const [categories, setCategories] = useState([])
   const canManagePrices = can(session, 'prices_manage')
   const canDelete = Boolean(item?.id && ['Mijozlar', 'Ombor', 'Kategoriyalar', 'Qoldiqlar'].includes(title))
 
-  useEffect(() => {
-    // Kategoriyalar — daraxt tanlash uchun; Ombor — mahsulot kategoriyasi uchun
-    if (title !== 'Kategoriyalar' && title !== 'Ombor') return
-    api.categories({ page_size: 200 })
-      .then((data) => setCategories(list(data)))
-      .catch((err) => notify(err.message))
-  }, [title, notify])
-
-  const categoryOptions = useMemo(
-    () => (title === 'Ombor' ? flattenCategories(categories) : []),
-    [title, categories],
-  )
-
-  const parentOptions = useMemo(() => {
-    if (title !== 'Kategoriyalar') return []
-    const flat = flattenCategories(categories)
-    if (!item?.id) return flat
-    const node = findCategoryNode(categories, item.id)
-    const excluded = new Set([item.id, ...collectDescendantIds(node)])
-    return flat.filter((cat) => !excluded.has(cat.id))
-  }, [title, categories, item?.id])
+  // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+  // useEffect(() => {
+  //   // Kategoriyalar — daraxt tanlash uchun; Ombor — mahsulot kategoriyasi uchun
+  //   if (title !== 'Kategoriyalar' && title !== 'Ombor') return
+  //   api.categories({ page_size: 200 })
+  //     .then((data) => setCategories(list(data)))
+  //     .catch((err) => notify(err.message))
+  // }, [title, notify])
+  //
+  // const categoryOptions = useMemo(
+  //   () => (title === 'Ombor' ? flattenCategories(categories) : []),
+  //   [title, categories],
+  // )
+  //
+  // const parentOptions = useMemo(() => {
+  //   if (title !== 'Kategoriyalar') return []
+  //   const flat = flattenCategories(categories)
+  //   if (!item?.id) return flat
+  //   const node = findCategoryNode(categories, item.id)
+  //   const excluded = new Set([item.id, ...collectDescendantIds(node)])
+  //   return flat.filter((cat) => !excluded.has(cat.id))
+  // }, [title, categories, item?.id])
   const visibleFields = title === 'Ombor'
     ? fields[title].filter(([key]) => {
       if (key === 'purchase_price' || key === 'selling_price' || key === 'min_quantity' || key === 'delivery_price') return canManagePrices
@@ -3442,7 +3425,8 @@ function Editor({ title, item, path, close, done, notify, session }) {
     setSaving(true)
     const payload = Object.fromEntries(Object.entries(form).filter(([key, value]) => !['id', 'created_at', 'quantity_in_stock', 'available_quantity', 'reserved_quantity', 'stock_status', 'category_name', 'unit_display'].includes(key) && value !== undefined && value !== ''))
     if (title === 'Ombor') {
-      if (payload.category) payload.category = Number(payload.category)
+      // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+      // if (payload.category) payload.category = Number(payload.category)
       if (payload.min_quantity) payload.min_quantity = Number(payload.min_quantity)
       if (payload.quantity) payload.quantity = Number(payload.quantity)
       if (!canManagePrices) {
@@ -3456,9 +3440,10 @@ function Editor({ title, item, path, close, done, notify, session }) {
       if (payload.quantity) payload.quantity = Number(payload.quantity)
       if (payload.reserved_quantity) payload.reserved_quantity = Number(payload.reserved_quantity)
     }
-    if (title === 'Kategoriyalar') {
-      if (payload.parent) payload.parent = Number(payload.parent)
-    }
+    // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+    // if (title === 'Kategoriyalar') {
+    //   if (payload.parent) payload.parent = Number(payload.parent)
+    // }
     if (title === 'Mijozlar') {
       if (payload.client_type === 'individual') {
         payload.full_name = (payload.full_name || '').trim()
@@ -3566,20 +3551,22 @@ function Editor({ title, item, path, close, done, notify, session }) {
                 <select value={form.vat_percent || 'none'} onChange={(event) => setForm({ ...form, vat_percent: event.target.value })}>
                   {vatOptions.map(([value, name]) => <option value={value} key={value}>{name}</option>)}
                 </select>
-              ) : key === 'category' ? (
-                <select required={required} value={form.category ?? ''} onChange={(event) => setForm({ ...form, category: event.target.value })}>
-                  <option value="">Kategoriyani tanlang</option>
-                  {categoryOptions.map((cat) => (
-                    <option value={cat.id} key={cat.id}>{`${'— '.repeat(cat.depth)}${cat.name}`}</option>
-                  ))}
-                </select>
-              ) : key === 'parent' ? (
-                <select value={form.parent ?? ''} onChange={(event) => setForm({ ...form, parent: event.target.value })}>
-                  <option value="">Asosiy kategoriya (yuqori daraja)</option>
-                  {parentOptions.map((cat) => (
-                    <option value={cat.id} key={cat.id}>{`${'— '.repeat(cat.depth)}${cat.name}`}</option>
-                  ))}
-                </select>
+                // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi:
+                // key === 'category' va key === 'parent' tarmoqlari olib tashlandi (endi hech qachon ishlamaydi):
+                // ) : key === 'category' ? (
+                //   <select required={required} value={form.category ?? ''} onChange={(event) => setForm({ ...form, category: event.target.value })}>
+                //     <option value="">Kategoriyani tanlang</option>
+                //     {categoryOptions.map((cat) => (
+                //       <option value={cat.id} key={cat.id}>{`${'— '.repeat(cat.depth)}${cat.name}`}</option>
+                //     ))}
+                //   </select>
+                // ) : key === 'parent' ? (
+                //   <select value={form.parent ?? ''} onChange={(event) => setForm({ ...form, parent: event.target.value })}>
+                //     <option value="">Asosiy kategoriya (yuqori daraja)</option>
+                //     {parentOptions.map((cat) => (
+                //       <option value={cat.id} key={cat.id}>{`${'— '.repeat(cat.depth)}${cat.name}`}</option>
+                //     ))}
+                //   </select>
               ) : (
                 <input required={required} value={form[key] ?? ''} type={key === 'email' ? 'email' : ['min_quantity', 'quantity', 'purchase_price', 'selling_price', 'delivery_price'].includes(key) ? 'number' : 'text'} step={['purchase_price', 'selling_price', 'delivery_price'].includes(key) ? '0.01' : undefined} min={['min_quantity', 'quantity'].includes(key) ? '0' : undefined} onChange={(event) => setForm({ ...form, [key]: event.target.value })} />
               )}
@@ -3894,7 +3881,8 @@ const emptyImportRow = () => ({
   zakazId: null,
   product: '',
   product_name: '',
-  category: '',
+  // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+  // category: '',
   identification_code: '',
   barcode: '',
   unit: 'piece',
@@ -3923,7 +3911,8 @@ function fillImportRowFromProduct(row, product, showPrices) {
     ...row,
     product: product.id,
     product_name: product.name,
-    category: product.category ? String(product.category) : (row.category || ''),
+    // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+    // category: product.category ? String(product.category) : (row.category || ''),
     identification_code: product.serial_number || '',
     barcode: product.barcode || '',
     unit: product.unit || 'piece',
@@ -3964,7 +3953,8 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
   const productLocked = Boolean(item?.order_contract)
   const canMultiLine = !isBackorder && !productLocked
   const [products, setProducts] = useState([])
-  const [categories, setCategories] = useState([])
+  // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+  // const [categories, setCategories] = useState([])
   const [saving, setSaving] = useState(false)
   const [batchLoading, setBatchLoading] = useState(Boolean(item?.id && canMultiLine))
   const [importBatchId, setImportBatchId] = useState(item?.import_batch || null)
@@ -3994,9 +3984,10 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
 
   useEffect(() => {
     api.products({ page_size: 500 }).then((data) => setProducts(list(data))).catch((err) => notify(err.message))
-    api.categories({ page_size: 200 })
-      .then((data) => setCategories(flattenCategories(list(data))))
-      .catch((err) => notify(err.message))
+    // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+    // api.categories({ page_size: 200 })
+    //   .then((data) => setCategories(flattenCategories(list(data))))
+    //   .catch((err) => notify(err.message))
   }, [notify])
 
   // Yangi importda shartnoma raqamini oldindan ko‘rsatamiz (o‘sha kunning
@@ -4119,7 +4110,8 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
   const buildNewProductPayload = (row) => {
     const payload = {
       name: (row.product_name || '').trim(),
-      category: Number(row.category),
+      // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+      // category: Number(row.category),
       serial_number: (row.identification_code || '').trim(),
       barcode: (row.barcode || '').trim() || null,
       unit: row.unit || 'piece',
@@ -4157,10 +4149,11 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
       if (!row.product && !(row.product_name || '').trim()) {
         throw new Error(`${index + 1}-qator: tovar nomi kiritilishi shart.`)
       }
-      // Yangi mahsulot ombor ro'yxatiga qo'shiladi — kategoriyasiz bo'lmaydi
-      if (!row.product && !row.category) {
-        throw new Error(`${index + 1}-qator: yangi mahsulot uchun kategoriya tanlanishi shart.`)
-      }
+      // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi:
+      // yangi mahsulot uchun kategoriya majburiy emas endi (backend ham talab qilmaydi).
+      // if (!row.product && !row.category) {
+      //   throw new Error(`${index + 1}-qator: yangi mahsulot uchun kategoriya tanlanishi shart.`)
+      // }
       if (showPrices) {
         if (row.unit_price === '' || row.unit_price == null) {
           throw new Error(`${index + 1}-qator: kelish narxi kiritilishi shart.`)
@@ -4429,7 +4422,8 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
                     <tr>
                       <th>№</th>
                       <th>Tovar nomi</th>
-                      <th>Kategoriya</th>
+                      {/* Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi. */}
+                      {/* <th>Kategoriya</th> */}
                       <th>Seriya raqami</th>
                       <th>Shtrix kod</th>
                       <th>O‘lchov birligi</th>
@@ -4475,7 +4469,8 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
                             {products.map((p) => <option value={p.name} key={p.id} />)}
                           </datalist>
                         </td>
-                        <td>
+                        {/* Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi. */}
+                        {/* <td>
                           <select
                             required={!row.product}
                             value={row.category ?? ''}
@@ -4487,7 +4482,7 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
                               <option value={cat.id} key={cat.id}>{`${'— '.repeat(cat.depth)}${cat.name}`}</option>
                             ))}
                           </select>
-                        </td>
+                        </td> */}
                         <td>
                           <input
                             list={`import-serial-${index}`}
@@ -4870,7 +4865,8 @@ function fillLineFromProduct(line, product, showPrices) {
     ...line,
     product: product.id,
     product_name: product.name,
-    category: product.category ? String(product.category) : (line.category || ''),
+    // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+    // category: product.category ? String(product.category) : (line.category || ''),
     identification_code: product.serial_number || '',
     barcode: product.barcode || '',
     unit: product.unit || 'piece',
@@ -4893,7 +4889,8 @@ function reconcileLineWithProducts(line, products, showPrices) {
 }
 
 function emptyInvoiceLine(num = 1) {
-  return { line_number: num, product: '', product_name: '', category: '', identification_code: '', barcode: '', unit: 'piece', quantity: '1', unit_price: '', selling_price: '', delivery_amount: 0, vat_percent: 'none', vat_amount: 0, total_amount: 0 }
+  // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi: `category: ''` olib tashlandi.
+  return { line_number: num, product: '', product_name: '', identification_code: '', barcode: '', unit: 'piece', quantity: '1', unit_price: '', selling_price: '', delivery_amount: 0, vat_percent: 'none', vat_amount: 0, total_amount: 0 }
 }
 
 function validateEInvoice(editing, { showPrices, company } = {}) {
@@ -5713,7 +5710,8 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
   const [selectedClientDetail, setSelectedClientDetail] = useState(null)
   const [selectedExecutorClientDetail, setSelectedExecutorClientDetail] = useState(null)
   const [products, setProducts] = useState([])
-  const [categories, setCategories] = useState([])
+  // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+  // const [categories, setCategories] = useState([])
   // Buyurtmada tanlash uchun — import holatidagi (hali kelmagan) tovarlarsiz.
   // To'liq `products` ro'yxati mavjud qatorlarni mahsulotga bog'lash uchun qoladi.
   const selectableProducts = useMemo(
@@ -5810,15 +5808,14 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [invoiceData, productData, categoryData, profile] = await Promise.all([
+      // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi: api.categories(...) olib tashlandi.
+      const [invoiceData, productData, profile] = await Promise.all([
         api.invoices(),
         api.products({ page_size: 500 }),
-        api.categories({ page_size: 200 }),
         api.companyProfile(),
       ])
       setRows(list(invoiceData))
       setProducts(list(productData))
-      setCategories(flattenCategories(list(categoryData)))
       setCompany(profile)
     } catch (err) {
       notifyRef.current(err.message)
@@ -6004,7 +6001,8 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
         lines: (detail.lines?.length ? detail.lines : [emptyInvoiceLine()]).map((line) => ({
           ...line,
           product: line.product || '',
-          category: line.category ? String(line.category) : '',
+          // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+          // category: line.category ? String(line.category) : '',
           quantity: String(line.quantity ?? 1),
           unit_price: line.unit_price ?? '',
           selling_price: line.selling_price ?? '',
@@ -6187,7 +6185,8 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
             line_number: index + 1,
             product: computed.product || null,
             product_name: computed.product_name,
-            category: computed.category ? Number(computed.category) : null,
+            // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+            // category: computed.category ? Number(computed.category) : null,
             identification_code: computed.identification_code,
             barcode: computed.barcode,
             unit: computed.unit || 'piece',
@@ -6437,7 +6436,8 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
                     <tr>
                       <th>№</th>
                       <th>Tovar nomi</th>
-                      <th>Kategoriya</th>
+                      {/* Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi. */}
+                      {/* <th>Kategoriya</th> */}
                       <th>Seriya raqami</th>
                       <th>Shtrix kod</th>
                       <th>O‘lchov birligi</th>
@@ -6486,7 +6486,8 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
                           </datalist>
                           <EInvoiceFieldError message={errors[`lines.${index}.product_name`]} />
                         </td>
-                        <td>
+                        {/* Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi. */}
+                        {/* <td>
                           <select
                             required={!line.product}
                             value={line.category ?? ''}
@@ -6498,7 +6499,7 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
                               <option value={cat.id} key={cat.id}>{`${'— '.repeat(cat.depth)}${cat.name}`}</option>
                             ))}
                           </select>
-                        </td>
+                        </td> */}
                         <td>
                           <input
                             list={`einv-idcode-${index}`}

@@ -19,7 +19,7 @@ from apps.orders.models import (Order, OrderItem, OrderHistory,
                                 Zakaz, ZakazHistory,
                                 ProductContract, register_contract,
                                 allocate_pending_orders, build_contract_number)
-from apps.warehouse.models import Category, Product
+from apps.warehouse.models import Product  # Category vaqtincha ishlatilmaydi
 
 # Buyurtma sarlavha tahririda kuzatiladigan maydonlar (tarixga yoziladi)
 _ORDER_TRACKED_FIELDS = ('client', 'prepaid_amount', 'contract_number',
@@ -634,8 +634,8 @@ class ZakazInlineProductSerializer(Serializer):
     """Importda qo'lda kiritilgan mahsulot — zakaz yaratishda omborga qo'shiladi."""
     name = CharField(max_length=255)
 
-    # Kategoriya — import qatoridan yaratiladigan mahsulot uchun MAJBURIY
-    category = PrimaryKeyRelatedField(queryset=Category.objects.all())
+    # Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+    # category = PrimaryKeyRelatedField(queryset=Category.objects.all())
     serial_number = CharField(required=False, allow_blank=True, default='')
     barcode = CharField(required=False, allow_blank=True, allow_null=True)
     unit = CharField(required=False, default='piece')
