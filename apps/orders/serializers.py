@@ -22,10 +22,11 @@ from apps.orders.models import (Order, OrderItem, OrderHistory,
 from apps.warehouse.models import Category, Product
 
 # Buyurtma sarlavha tahririda kuzatiladigan maydonlar (tarixga yoziladi)
-_ORDER_TRACKED_FIELDS = ('client', 'prepaid_amount', 'contract_number',
-                         'contract_date', 'due_date', 'comment')
+_ORDER_TRACKED_FIELDS = ('client', 'prepaid_amount', 'prepaid_percent',
+                         'contract_number', 'contract_date', 'due_date', 'comment')
 
-_ZAKAZ_TRACKED_FIELDS = ('quantity', 'received_qty', 'supplier',
+_ZAKAZ_TRACKED_FIELDS = ('quantity', 'received_qty', 'supplier', 'supplier_client',
+                         'import_type', 'prepaid_percent',
                          'contract_number', 'contract_date', 'asos', 'faktura',
                          'expected_date', 'warehouse_location', 'comment')
 
@@ -159,6 +160,66 @@ def _diff(instance, validated_data, fields):
     return changes
 
 
+# ── Import qatorida qo'lda kiritilgan (omborda yo'q) mahsulot ───────────────
+# Zakaz-bulk (`/orders/zakaz/bulk/`) va endi Buyurtma (`/orders/`) uchun ham
+# BIR XIL naqsh — omborda topilmagan mahsulot shu forma orqali yaratiladi.
+
+class ZakazInlineProductSerializer(Serializer):
+    """Importda qo'lda kiritilgan mahsulot — zakaz yaratishda omborga qo'shiladi."""
+    name = CharField(max_length=255)
+
+    # Kategoriya — import qatoridan yaratiladigan mahsulot uchun MAJBURIY
+    category = PrimaryKeyRelatedField(queryset=Category.objects.all())
+    serial_number = CharField(required=False, allow_blank=True, default='')
+    barcode = CharField(required=False, allow_blank=True, allow_null=True)
+    unit = CharField(required=False, default='piece')
+    vat_percent = CharField(required=False, allow_blank=True, default='none')
+    purchase_price = DecimalField(max_digits=14, decimal_places=2,
+                                  required=False, allow_null=True)
+    selling_price = DecimalField(max_digits=14, decimal_places=2,
+                                 required=False, allow_null=True)
+    delivery_price = DecimalField(max_digits=14, decimal_places=2,
+                                  required=False, allow_null=True)
+
+    def validate_serial_number(self, value):
+        """Seriya raqami noyob — band bo'lsa 500 emas, tushunarli 400 qaytadi."""
+        from apps.warehouse.product_utils import (normalize_product_serial,
+                                                  serial_number_is_taken)
+        serial = normalize_product_serial(value)
+        if serial and serial_number_is_taken(serial):
+            raise ValidationError(
+                f'"{serial}" seriya raqami omborda allaqachon mavjud. '
+                f'Ombordagi mahsulotni tanlang yoki boshqa raqam kiriting.')
+        return value
+
+
+def _resolve_new_product_item(item_data, user):
+    """
+    Buyurtma qatorida `new_product` bo'lsa — omborga YANGI mahsulot
+    qo'shiladi (`origin=import`, xuddi Zakaz-bulk bilan bir xil
+    `create_import_product` yordamchisi orqali) va `item_data['product']`
+    o'sha mahsulotga o'rnatiladi.
+
+    Narx kirita olmaydigan foydalanuvchi (Operator) narx maydonlarini
+    kirita olmaydi — chetlab o'tiladi.
+
+    Qaytaradi: `(product, quantity)` — MANUAL zakaz ochish uchun,
+    yoki `new_product` bo'lmasa `None`.
+    """
+    new_product = item_data.pop('new_product', None)
+    if not new_product:
+        return None
+    if not _can_manage_prices(user):
+        new_product = dict(new_product)
+        new_product.pop('purchase_price', None)
+        new_product.pop('selling_price', None)
+        new_product.pop('delivery_price', None)
+    from apps.warehouse.product_utils import create_import_product
+    product = create_import_product(dict(new_product))
+    item_data['product'] = product
+    return product, item_data.get('quantity') or 1
+
+
 # ── Order tarixi ──────────────────────────────────────────────────────────────
 
 class OrderHistorySerializer(ModelSerializer):
@@ -186,7 +247,11 @@ class OrderItemSerializer(ModelSerializer):
     remove           = BooleanField(write_only=True, required=False, default=False,
                                     help_text='True — qatorni buyurtmadan olib tashlash (id bilan)')
     product          = PrimaryKeyRelatedField(queryset=Product.objects.all(),
-                                              required=False)
+                                              required=False, allow_null=True)
+    new_product      = ZakazInlineProductSerializer(
+                          required=False, write_only=True,
+                          help_text='Omborda yo\'q mahsulot — nomi bilan yangi '
+                                    'mahsulot yaratiladi va MANUAL zakaz ochiladi')
     quantity         = IntegerField(required=False, min_value=1)
     product_name     = SerializerMethodField()
     total            = ReadOnlyField()
@@ -195,7 +260,7 @@ class OrderItemSerializer(ModelSerializer):
 
     class Meta:
         model  = OrderItem
-        fields = ('id', 'remove', 'product', 'product_name',
+        fields = ('id', 'remove', 'product', 'product_name', 'new_product',
                   'quantity', 'unit_price', 'total',
                   'reserved_qty', 'backorder_qty', 'has_active_zakaz',
                   'comment')
@@ -210,10 +275,18 @@ class OrderItemSerializer(ModelSerializer):
         # (mavjud qator tahririda id bo'ladi — u yerda ham shart emas)
         if attrs.get('remove') and not attrs.get('id'):
             raise ValidationError('Qatorni o\'chirish uchun "id" kiritilishi shart.')
-        if (not attrs.get('remove') and not attrs.get('id')
-                and (not attrs.get('product') or not attrs.get('quantity'))):
+        if attrs.get('product') and attrs.get('new_product'):
             raise ValidationError(
-                'Yangi qator uchun "product" va "quantity" kiritilishi shart.')
+                'Mahsulotni tanlash va qo\'lda kiritish bir vaqtda bo\'lmaydi.')
+        if (not attrs.get('remove') and not attrs.get('id')
+                and (not attrs.get('product') and not attrs.get('new_product'))):
+            raise ValidationError(
+                'Yangi qator uchun "product" (yoki "new_product") va '
+                '"quantity" kiritilishi shart.')
+        if (not attrs.get('remove') and not attrs.get('id')
+                and not attrs.get('quantity')):
+            raise ValidationError(
+                'Yangi qator uchun "quantity" kiritilishi shart.')
         return attrs
 
 
@@ -254,7 +327,7 @@ class OrderSerializer(ModelSerializer):
             'items',
             'product', 'quantity', 'unit_price',   # legacy (write-only)
             'total_quantity', 'total',
-            'prepaid_amount', 'balance_due',
+            'prepaid_amount', 'prepaid_percent', 'balance_due',
             'contract_number', 'contract_date', 'contract_file',
             'reserved_qty', 'backorder_qty',
             'has_active_zakaz',
@@ -262,7 +335,8 @@ class OrderSerializer(ModelSerializer):
             'asos', 'history',
         )
         read_only_fields = ('status', 'created_at')
-        extra_kwargs = {'prepaid_amount': {'min_value': 0}}
+        extra_kwargs = {'prepaid_amount': {'min_value': 0},
+                        'prepaid_percent': {'min_value': 0, 'max_value': 100}}
 
     def get_client_name(self, obj):
         return str(obj.client) if obj.client else None
@@ -342,7 +416,18 @@ class OrderSerializer(ModelSerializer):
         if not items_data:
             items_data = [{'product': product, 'quantity': quantity or 1,
                            'unit_price': unit_price}]
-        elif not can_manage_prices:
+
+        # Omborda yo'q, qo'lda kiritilgan mahsulot ("new_product") — avval
+        # YANGI mahsulot sifatida yaratiladi (origin=import), keyin shu
+        # qatorga bog'lanadi. Yaratilganlar ro'yxati saqlanadi — order
+        # bilan items yaratilgach ularga MANUAL zakaz ochiladi.
+        new_product_entries = [
+            entry for entry in
+            (_resolve_new_product_item(item, user) for item in items_data)
+            if entry
+        ]
+
+        if not can_manage_prices:
             items_data = _fill_operator_item_prices(items_data)
 
         order = Order.objects.create(**validated_data)
@@ -352,6 +437,13 @@ class OrderSerializer(ModelSerializer):
             OrderItem.objects.create(order=order, **item)
 
         order.reserve()
+
+        # Omborda yo'q mahsulotlar uchun MUSTAQIL (manual) zakaz — buyurtma
+        # bilan bog'langan (kuzatish uchun), lekin BACKORDER emas: narx va
+        # yetkazuvchi bilan alohida yuritiladi (keyin operator/manager
+        # to'ldiradi).
+        for product_, qty_ in new_product_entries:
+            self._create_manual_zakaz_for_new_product(order, product_, qty_, user)
 
         # Tarix: yaratildi (shartnoma raqami + aniq sana/vaqt)
         names = ', '.join(i.product.name for i in order.items.all())
@@ -374,9 +466,46 @@ class OrderSerializer(ModelSerializer):
         # Pul (summa + oldindan to'lov) bitta amalda KASSAGA tushadi
         order.sync_payment(user=user)
 
-        # 2-etap: yetishmagan qatorlar avtomatik Zakazga o'tadi
+        # 2-etap: yetishmagan qatorlar avtomatik Zakazga o'tadi (omborda
+        # yo'q mahsulot uchun bu qatorda allaqachon faol MANUAL zakaz bor —
+        # takror (backorder) zakaz ochilmaydi)
         order.create_backorder_zakaz(user=user)
         return order
+
+    def _create_manual_zakaz_for_new_product(self, order, product, quantity, user):
+        """
+        Buyurtmada ko'rsatilgan, omborda mavjud bo'lmagan mahsulot uchun —
+        mahsulot allaqachon yaratilgan (origin=import), endi unga MUSTAQIL
+        (manual) Zakaz ochiladi. Mavjud yordamchilar bilan bir xil naqsh
+        (`ZakazBulkCreateSerializer.create()` bilan bir xil) — ZakazHistory
+        va mahsulot shartnomalari reestriga yozadi.
+        """
+        zakaz = Zakaz.objects.create(
+            order=order,
+            product=product,
+            zakaz_type=Zakaz.MANUAL,
+            quantity=quantity,
+            status=Zakaz.NEW,
+            contract_number=order.contract_number,
+            contract_date=order.contract_date,
+            expected_date=order.due_date,
+            created_by=user if getattr(user, 'is_authenticated', False) else None,
+            comment=f'Buyurtma #{order.pk} — omborda yo\'q yangi mahsulot uchun zakaz.',
+        )
+        asos = (f'Buyurtma #{order.pk} dan avtomatik zakaz — yangi mahsulot '
+                f'"{product.name}" ({quantity} dona) omborda topilmadi.')
+        ZakazHistory.objects.create(
+            zakaz=zakaz, changed_by=user, action=ZakazHistory.CREATED,
+            new_status=Zakaz.NEW, contract_number=order.contract_number,
+            contract_date=order.contract_date, asos=asos,
+        )
+        register_contract(
+            product, ProductContract.ZAKAZ_CREATED,
+            contract_number=order.contract_number,
+            contract_date=order.contract_date,
+            asos=asos, order=order, zakaz=zakaz, user=user,
+        )
+        return zakaz
 
     @transaction.atomic
     def update(self, instance, validated_data):
@@ -401,6 +530,7 @@ class OrderSerializer(ModelSerializer):
         # Qatorlarni yangilash: id bor → mavjud qator, id yo'q → yangi qator,
         # remove=true → qatorni olib tashlash (mijoz fikri o'zgarishi mumkin)
         item_changes = []
+        new_product_entries = []
 
         # Legacy: bitta qatorli buyurtmada quantity/unit_price to'g'ridan-to'g'ri
         if (not items_data and (legacy_qty is not None or legacy_price is not None)
@@ -460,6 +590,9 @@ class OrderSerializer(ModelSerializer):
                             {'item': iid, 'product': str(item.product),
                              'quantity': {'old': old_qty, 'new': item.quantity}})
                 else:
+                    resolved = _resolve_new_product_item(d, user)
+                    if resolved:
+                        new_product_entries.append(resolved)
                     d.pop('reserved_qty', None)
                     item = OrderItem.objects.create(order=order, **d)
                     item.reserve()
@@ -468,6 +601,11 @@ class OrderSerializer(ModelSerializer):
                          'added': item.quantity})
         if item_changes:
             changes['items'] = item_changes
+
+        # Omborda yo'q, tahrirda qo'shilgan yangi mahsulotlar uchun ham
+        # MUSTAQIL zakaz ochiladi — yaratishdagi bilan bir xil naqsh.
+        for product_, qty_ in new_product_entries:
+            self._create_manual_zakaz_for_new_product(order, product_, qty_, user)
 
         # Qatorlar o'zgargach eski (prefetch) keshni tozalaymiz — total,
         # holat va kassa YANGI qatorlardan qayta hisoblanishi uchun.
@@ -515,7 +653,7 @@ class OrderItemOperatorSerializer(OrderItemSerializer):
     """Operator uchun — narx va summa yashirin."""
 
     class Meta(OrderItemSerializer.Meta):
-        fields = ('id', 'remove', 'product', 'product_name',
+        fields = ('id', 'remove', 'product', 'product_name', 'new_product',
                   'quantity', 'reserved_qty', 'backorder_qty',
                   'has_active_zakaz', 'comment')
 
@@ -529,6 +667,7 @@ class OrderOperatorSerializer(OrderSerializer):
             'id', 'client', 'client_name',
             'items',
             'total_quantity',
+            'prepaid_percent',
             'contract_number', 'contract_date', 'contract_file',
             'reserved_qty', 'backorder_qty',
             'has_active_zakaz',
@@ -562,6 +701,8 @@ class OrderBulkCreateSerializer(Serializer):
     contract_file   = FileField(required=False, allow_null=True)
     prepaid_amount  = DecimalField(max_digits=14, decimal_places=2, min_value=0,
                                    required=False, allow_null=True)
+    prepaid_percent = DecimalField(max_digits=5, decimal_places=2, min_value=0,
+                                   max_value=100, required=False, allow_null=True)
     comment         = CharField(required=False, allow_blank=True, allow_null=True)
     items           = OrderItemSerializer(many=True)
 
@@ -574,6 +715,8 @@ class OrderBulkCreateSerializer(Serializer):
         # BITTA buyurtma sifatida OrderSerializer orqali yaratiladi
         if validated_data.get('prepaid_amount') is None:
             validated_data.pop('prepaid_amount', None)
+        if validated_data.get('prepaid_percent') is None:
+            validated_data.pop('prepaid_percent', None)
         return OrderSerializer(context=self.context).create(validated_data)
 
     def to_representation(self, instance):
@@ -630,35 +773,6 @@ class ZakazHistorySerializer(ModelSerializer):
 
 # ── Zakaz (Etkazuvchidan buyurtma) ────────────────────────────────────────────
 
-class ZakazInlineProductSerializer(Serializer):
-    """Importda qo'lda kiritilgan mahsulot — zakaz yaratishda omborga qo'shiladi."""
-    name = CharField(max_length=255)
-
-    # Kategoriya — import qatoridan yaratiladigan mahsulot uchun MAJBURIY
-    category = PrimaryKeyRelatedField(queryset=Category.objects.all())
-    serial_number = CharField(required=False, allow_blank=True, default='')
-    barcode = CharField(required=False, allow_blank=True, allow_null=True)
-    unit = CharField(required=False, default='piece')
-    vat_percent = CharField(required=False, allow_blank=True, default='none')
-    purchase_price = DecimalField(max_digits=14, decimal_places=2,
-                                  required=False, allow_null=True)
-    selling_price = DecimalField(max_digits=14, decimal_places=2,
-                                 required=False, allow_null=True)
-    delivery_price = DecimalField(max_digits=14, decimal_places=2,
-                                  required=False, allow_null=True)
-
-    def validate_serial_number(self, value):
-        """Seriya raqami noyob — band bo'lsa 500 emas, tushunarli 400 qaytadi."""
-        from apps.warehouse.product_utils import (normalize_product_serial,
-                                                  serial_number_is_taken)
-        serial = normalize_product_serial(value)
-        if serial and serial_number_is_taken(serial):
-            raise ValidationError(
-                f'"{serial}" seriya raqami omborda allaqachon mavjud. '
-                f'Ombordagi mahsulotni tanlang yoki boshqa raqam kiriting.')
-        return value
-
-
 class ZakazSerializer(ModelSerializer):
     new_product = ZakazInlineProductSerializer(required=False, write_only=True)
     product_name        = SerializerMethodField()
@@ -672,19 +786,26 @@ class ZakazSerializer(ModelSerializer):
     order_contract      = SerializerMethodField()
     warehouse_location  = CharField(required=False, allow_null=True,
                                     allow_blank=True, max_length=255)
+    import_type_display = SerializerMethodField()
+    supplier_client      = PrimaryKeyRelatedField(queryset=Client.objects.all(),
+                                                  required=False, allow_null=True)
+    supplier_client_name = SerializerMethodField()
     history             = ZakazHistorySerializer(many=True, read_only=True)
 
     class Meta:
         model  = Zakaz
         fields = (
             'id', 'zakaz_type', 'type_display', 'order', 'order_contract',
+            'import_type', 'import_type_display',
             'product', 'product_name', 'new_product',
             'quantity', 'received_qty',
             'unit_price', 'selling_price', 'delivery_price',
             'vat_percent', 'vat_amount', 'total_with_vat',
             'currency', 'total',
             'payment_status', 'payment_status_display', 'paid_amount',
-            'supplier', 'status', 'status_display',
+            'prepaid_percent',
+            'supplier', 'supplier_client', 'supplier_client_name',
+            'status', 'status_display',
             'contract_number', 'contract_date', 'confirmed_at',
             'asos', 'faktura',
             'expected_date', 'warehouse_location',
@@ -697,7 +818,8 @@ class ZakazSerializer(ModelSerializer):
         # order'ni ko'chirish buyurtma↔zakaz bog'lanishini buzadi)
         read_only_fields = ('created_by', 'confirmed_at', 'created_at',
                             'zakaz_type', 'order')
-        extra_kwargs = {'product': {'required': False, 'allow_null': True}}
+        extra_kwargs = {'product': {'required': False, 'allow_null': True},
+                        'prepaid_percent': {'min_value': 0, 'max_value': 100}}
 
     def get_product_name(self, obj):
         # Import ro'yxatida faqat mahsulot nomi — seriya raqamisiz
@@ -715,6 +837,12 @@ class ZakazSerializer(ModelSerializer):
     def get_payment_status_display(self, obj):
         return obj.get_payment_status_display()
 
+    def get_import_type_display(self, obj):
+        return obj.get_import_type_display()
+
+    def get_supplier_client_name(self, obj):
+        return str(obj.supplier_client) if obj.supplier_client_id else None
+
     def get_order_contract(self, obj):
         """Manba buyurtmaning shartnoma raqami (asos zanjiri)."""
         if obj.order_id:
@@ -723,11 +851,14 @@ class ZakazSerializer(ModelSerializer):
                     'contract_date': str(obj.order.contract_date)}
         return None
 
-    # Operator uchun taqiq: received_qty (ombor hisobiga ta'sir qiladi) —
-    # faqat Management. Backorder zakazda miqdor/mahsulot buyurtmadan
-    # keladi — operator qo'lda o'zgartira olmaydi.
+    # Operator uchun taqiq: FAQAT received_qty (bevosita ombor qoldig'iga
+    # ta'sir qiladi — rasmiy "qabul qilindi" statusidan tashqari qo'lda
+    # o'zgartirilsa "fantom" tovar kiradi). Boshqa barcha maydonlar (supplier,
+    # narxlar, miqdor, sanalar, izoh, shartnoma, import_type, ...) har qanday
+    # avtorizatsiyalangan foydalanuvchi tomonidan PATCH qilinishi mumkin —
+    # backorder zakazda ham (bu ilgari operator uchun taqiqlangan edi, endi
+    # to'liq tahrirlash imkoni berilgan).
     _MANAGEMENT_ONLY_FIELDS = frozenset(('received_qty',))
-    _BACKORDER_LOCKED_FIELDS = frozenset(('quantity', 'product', 'unit_price'))
 
     def validate_unit_price(self, value):
         if value is not None and value < 0:
@@ -781,13 +912,13 @@ class ZakazSerializer(ModelSerializer):
                     f'"{self.instance.get_status_display()}" holatidagi zakazda '
                     f'miqdor yoki narxni o\'zgartirib bo\'lmaydi.')
 
-            # Rol chegarasi: received_qty faqat Management (ombor hisobi);
-            # backorder zakazda miqdor/mahsulot buyurtmadan keladi
+            # Rol chegarasi: received_qty faqat Management (ombor hisobi
+            # to'g'ridan-to'g'ri o'zgaradi). Boshqa hamma maydon (supplier,
+            # narxlar, miqdor, sanalar, izoh, shartnoma, import_type, ...)
+            # har qanday avtorizatsiyalangan foydalanuvchiga ochiq.
             user = self.context['request'].user
             if not getattr(user, 'is_management', False):
                 blocked = set(attrs) & self._MANAGEMENT_ONLY_FIELDS
-                if self.instance.is_backorder:
-                    blocked |= set(attrs) & self._BACKORDER_LOCKED_FIELDS
                 if blocked:
                     raise PermissionDenied(
                         'Bu maydonlarni faqat boshqaruv (Management) '
@@ -1041,9 +1172,12 @@ class ZakazOperatorSerializer(ZakazSerializer):
     class Meta(ZakazSerializer.Meta):
         fields = (
             'id', 'zakaz_type', 'type_display', 'order', 'order_contract',
+            'import_type', 'import_type_display',
             'product', 'product_name', 'new_product',
             'quantity', 'received_qty',
-            'supplier', 'status', 'status_display',
+            'prepaid_percent',
+            'supplier', 'supplier_client', 'supplier_client_name',
+            'status', 'status_display',
             'contract_number', 'contract_date', 'confirmed_at',
             'asos', 'faktura',
             'expected_date', 'warehouse_location',
@@ -1069,6 +1203,11 @@ class ZakazItemSerializer(Serializer):
     vat_percent   = CharField(required=False, allow_blank=True, allow_null=True)
     currency      = CharField(required=False, allow_blank=True, allow_null=True)
     supplier      = CharField(required=False, allow_blank=True, allow_null=True)
+    supplier_client = PrimaryKeyRelatedField(queryset=Client.objects.all(),
+                                             required=False, allow_null=True)
+    import_type   = CharField(required=False, allow_blank=True, allow_null=True)
+    prepaid_percent = DecimalField(max_digits=5, decimal_places=2, min_value=0,
+                                   max_value=100, required=False, allow_null=True)
     expected_date = DateField(required=False, allow_null=True)
     comment       = CharField(required=False, allow_blank=True, allow_null=True)
 
@@ -1122,6 +1261,11 @@ class ZakazBulkCreateSerializer(Serializer):
     }
     """
     supplier        = CharField(required=False, allow_blank=True, allow_null=True)
+    supplier_client = PrimaryKeyRelatedField(queryset=Client.objects.all(),
+                                             required=False, allow_null=True)
+    import_type     = CharField(required=False, allow_blank=True, allow_null=True)
+    prepaid_percent = DecimalField(max_digits=5, decimal_places=2, min_value=0,
+                                   max_value=100, required=False, allow_null=True)
     expected_date   = DateField(required=False, allow_null=True)
     contract_number = CharField(required=False, allow_blank=True, allow_null=True)
     contract_date   = DateField(required=False, allow_null=True)
@@ -1190,6 +1334,9 @@ class ZakazBulkCreateSerializer(Serializer):
         from apps.warehouse.product_utils import create_import_product
 
         common_supplier = validated_data.get('supplier')
+        common_supplier_client = validated_data.get('supplier_client')
+        common_import_type = validated_data.get('import_type') or Zakaz.DOMESTIC
+        common_prepaid_percent = validated_data.get('prepaid_percent')
         common_expected = validated_data.get('expected_date')
         contract_date   = validated_data.get('contract_date')
         contract_number = (validated_data.get('contract_number') or '').strip()
@@ -1231,6 +1378,7 @@ class ZakazBulkCreateSerializer(Serializer):
             zakaz = Zakaz.objects.create(
                 product=product,
                 zakaz_type=Zakaz.MANUAL,
+                import_type=item.get('import_type') or common_import_type,
                 quantity=item['quantity'],
                 unit_price=item.get('unit_price'),
                 selling_price=item.get('selling_price'),
@@ -1240,7 +1388,13 @@ class ZakazBulkCreateSerializer(Serializer):
                 currency=item.get('currency') or currency,
                 payment_status=payment_status,
                 paid_amount=line_paid,
+                prepaid_percent=(item.get('prepaid_percent')
+                                 if item.get('prepaid_percent') is not None
+                                 else (common_prepaid_percent
+                                       if common_prepaid_percent is not None
+                                       else Decimal('30'))),
                 supplier=item.get('supplier') or common_supplier,
+                supplier_client=item.get('supplier_client') or common_supplier_client,
                 expected_date=item.get('expected_date') or common_expected,
                 contract_number=contract_number,
                 contract_date=contract_date,

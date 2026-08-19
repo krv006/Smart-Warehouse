@@ -197,8 +197,8 @@ Timeout: **8 soniya**. Xato klassi: `ApiError(message, status, fields?)` — `fi
 | `fulfillOrder(id, payload)` | POST | `/orders/{id}/fulfill/` | `{ contract_number, asos, ... }` |
 | `cancelOrder(id, payload)` | POST | `/orders/{id}/cancel/` | `{ contract_number, asos, ... }` |
 | `createOrderZakaz(id, payload)` | POST | `/orders/{id}/create-zakaz/` | zakaz body |
-| `zakaz(params)` | GET | `/orders/zakaz/` | `page_size=30`, `status`, `product`, `order`, `contract_number` |
-| `zakazBulk(payload)` | POST | `/orders/zakaz/bulk/` | bulk zakaz body; ixtiyoriy `import_batch`, `payment_status`, `paid_amount` |
+| `zakaz(params)` | GET | `/orders/zakaz/` | `page_size=30`, `status`, `product`, `order`, `contract_number`, `import_type` |
+| `zakazBulk(payload)` | POST | `/orders/zakaz/bulk/` | bulk zakaz body; ixtiyoriy `import_batch`, `payment_status`, `paid_amount`, `import_type`, `supplier_client`, `prepaid_percent` |
 | `zakazBatch(id)` | GET | `/orders/zakaz/{id}/batch/` | `{ items: Zakaz[] }` — import guruhi (tahrir) |
 | `contracts(params)` | GET | `/orders/contracts/` | `page_size=30`, `product`, `contract_number`, `source_type`, `order`, `zakaz` |
 | `productContracts(id)` | GET | `/warehouse/products/{id}/contracts/` | — |
@@ -330,7 +330,7 @@ Yordamchi kutubxonalar: `lib/utils.js` (`money`, `todayValue`, `formatDateUz`, `
 | Bosh sahifa | `reports`, `monthlyTrend` | `/reports/summary/` | Filtrli dashboard: **Tushum**, **Import chiqim**, **Kassa balansi**, Savdo (`Dashboard` komponenti) |
 | Hisobotlar | `reports`, `expensesSummary`, `paymentsSummary`, `exportReport` | `/reports/*`, `/expenses/summary/`, `/cash/payments/summary/` | Tablar: Moliyaviy, Ombor, Sotuvlar, Xarajatlar, **Excel** (`ReportExportPanel`) |
 | Buyurtmalar | `invoices`, `invoice`, `createInvoice`, `updateInvoice`, `removeInvoice`, `nextContractNumber`, `companyProfile`, `clients` (qidiruv/qo‘shish) | `/invoices/`, `/company-profile/`, `/clients/` | `BuyurtmalarPage` — ro‘yxat, ko‘rish modali, alohida editor sahifalari (§17a) |
-| Import | `zakaz`, `zakazBulk`, `zakazBatch`, `create`, `update` | `/orders/zakaz/`, `/orders/zakaz/bulk/`, `/orders/zakaz/{id}/batch/` | **`ResourcePage`** + **`ZakazEditor`** — ko‘p qator, `import_batch` guruhlash, batch tahrir, kassa chiqimi (§9a–9b, §17c); grid: To‘lov, Summa |
+| Kirim (nav/UI nomi; ilgari «Import») | `zakaz`, `zakazBulk`, `zakazBatch`, `create`, `update` | `/orders/zakaz/`, `/orders/zakaz/bulk/`, `/orders/zakaz/{id}/batch/` | **`ResourcePage`** + **`ZakazEditor`** — ko‘p qator, `import_batch` guruhlash, batch tahrir, kassa chiqimi (§9a–9b, §17c); grid: To‘lov, Summa; `resources.js`/`App.jsx` kaliti endi `'Kirim'` |
 | Shartnomalar | `contracts`, `retrieve` | `/orders/contracts/` | Read-only |
 | Korxona profili | `companyProfile`, `updateCompanyProfile` | `/company-profile/` | Profil dropdown |
 | Ombor | `products`, `create`, `update`, `addStock`, `productContracts` | `/warehouse/products/` | `warehouse_create` ability |
@@ -398,7 +398,9 @@ Ro‘yxatdan **ko‘z** ikonkasi URL o‘zgartirmaydi — `loadInvoiceForView(id
 
 ### Grid ro‘yxatlar, filtr, pagination (`ResourcePage` + `listFilters.js`)
 
-**Grid sahifalar** (`GRID_PAGES` — `App.jsx`): Mijozlar, Sotuvlar, Import, Ombor, Xarajatlar. **Kassa** va **Buyurtmalar** alohida: `KassaPage` (`/moliya/kassa`), `BuyurtmalarPage` (`/invoices/`).
+**Grid sahifalar** (`GRID_PAGES` — `App.jsx`): Mijozlar, Sotuvlar, Kirim (ilgari «Import»), Ombor, Xarajatlar. **Kassa** va **Buyurtmalar** alohida: `KassaPage` (`/moliya/kassa`), `BuyurtmalarPage` (`/invoices/`).
+
+**Kirim filtri (`import_type`):** `ListFiltersPanel`da «Kirim turi» dropdown — `domestic` / `import` / `charter` + «Hammasi» (`MODULE_FILTER_FEATURES.Kirim.importType`, `IMPORT_TYPE_OPTIONS` — `listFilters.js`); `buildListQueryParams` orqali `?import_type=` sifatida yuboriladi.
 
 | Parametr | Qiymat |
 |---|---|
@@ -551,13 +553,31 @@ Jami **~95** HTTP endpoint (custom actionlar bilan). ✅ = `api.js` da wrapper b
 | PATCH | `/{id}/` | `{ asos, items[] }` | Operator+ | ✅ `update` |
 | GET | `/next-contract-number/` | `contract_date` | Auth | ✅ `nextContractNumber` |
 | POST | `/bulk/` | bulk order body | Operator+ | ✅ `ordersBulk` |
+
+> **Frontend holati:** `Order` (`/orders/`, bron) uchun hozircha yaratish/tahrirlash formasi frontendda **yo‘q** — `resources.js`da faqat ro‘yxat (`api.orders`) uchun ishlatiladi, «Buyurtmalar» sahifasi generic editorni chetlab o‘tadi (`active !== 'Buyurtmalar'`) va aslida `ElectronicInvoice` (`/invoices/`, `BuyurtmalarPage`) ni tahrirlaydi. `prepaid_percent` (quyida) shu model uchun **backend**da to‘liq qo‘shilgan va test qilingan, lekin uni tahrirlaydigan alohida `Order` UI hali yo‘q — bu doc yozilgan paytdagi kod holati.
+
+**Yangi maydon — `prepaid_percent`** (`decimal(5,2)`, nullable, standart `30`): oldindan to‘lov foizi, `prepaid_amount`dan mustaqil saqlanadi (avtomatik hisoblanmaydi). `POST`/`PATCH /orders/{id}/` va `POST /orders/bulk/` orqali yoziladi.
 | POST | `/{id}/fulfill/` | `{ contract_number, asos, faktura? }` | Operator/Management | ✅ `fulfillOrder` |
 | POST | `/{id}/cancel/` | `{ contract_number, asos, faktura? }` | Operator/Management | ✅ `cancelOrder` |
 | POST | `/{id}/create-zakaz/` | `{ contract_number, asos, supplier?, expected_date? }` | Operator/Management | ✅ `createOrderZakaz` |
 
 DELETE yo‘q — bekor qilish `/cancel/` orqali.
 
-### Zakaz (Import) — `/api/v1/orders/zakaz/`
+**Yangi — `items[].new_product` (omborda yo‘q mahsulot buyurtmada):** `OrderItemSerializer` endi `new_product` ni ham qabul qiladi — `Zakaz`dagi `new_product` bilan **bir xil** shakl (`name`, `category` majburiy, `serial_number`/`barcode`/`unit`/`vat_percent`/narxlar ixtiyoriy). `product` va `new_product` bir qatorda bir vaqtda bo‘lmaydi; yangi qator uchun ikkisidan biri + `quantity` majburiy.
+
+```json
+{
+  "contract_number": "SH-2026/045",
+  "items": [
+    { "new_product": { "name": "Omborda yo‘q noutbuk", "category": 3 },
+      "quantity": 7, "unit_price": "9000000" }
+  ]
+}
+```
+
+Natija: mahsulot `create_import_product` orqali `origin=import` bilan yaratiladi, so‘ng shu mahsulotga **MUSTAQIL (`zakaz_type=manual`) Zakaz** ochiladi (`order` FK shu buyurtmaga bog‘langan, `status=new`, `contract_number`/`contract_date`/`expected_date` buyurtmadan olinadi) — Kirim ro‘yxatida ko‘rinadi. Bu, ombordagi **mavjud** mahsulotning yetishmagan miqdoriga avtomatik ochiladigan `BACKORDER` zakazdan farqli — u alohida, o‘zgarmagan mantiq (`Order.create_backorder_zakaz`, miqdori aynan yetishmagan qism). Ikkalasi bir buyurtmada aralash bo‘lishi mumkin.
+
+### Zakaz (Import → UI da «Kirim») — `/api/v1/orders/zakaz/`
 
 | Method | Path | Query / body | Ruxsat | api.js |
 |---|---|---|---|---|
@@ -1578,7 +1598,7 @@ Base:
 ### Ro‘yxat
 
 ```http
-GET /api/v1/orders/zakaz/?page_size=30&status=new&zakaz_type=manual&payment_status=unpaid&product=1&order=5&contract_number=12/1108&search=monitor
+GET /api/v1/orders/zakaz/?page_size=30&status=new&zakaz_type=manual&import_type=import&payment_status=unpaid&product=1&order=5&contract_number=12/1108&search=monitor
 ```
 
 Status oqimi (backend qat’iy ketma-ketlik):
@@ -1621,6 +1641,20 @@ POST /api/v1/orders/zakaz/
 `prices_manage` roli uchun `unit_price` (kelish) va `selling_price` (ketish) **majburiy**; ikkalasi mahsulotning `purchase_price` / `selling_price` maydonlariga yoziladi. `contract_number` yuborilmasa backend o‘sha kunning keyingi raqamini band qiladi.
 
 **Javobda qo‘shimcha maydonlar:** `selling_price`, `delivery_price`, `vat_percent`, `vat_amount` (kelish summasidan hisoblangan QQS), `total_with_vat`, `total`. `product_name` — faqat mahsulot nomi (seriya raqamisiz).
+
+> **UI nomi «Kirim».** Backend URL/model/maydon nomlari (`zakaz`, `Zakaz`, `zakaz_type=import`, `Product.origin=import`, ...) o‘zgarmagan — faqat frontendda ko‘rinadigan nom «Import»dan «Kirim»ga o‘zgardi (nav, sahifa sarlavhasi, breadcrumb, `resources.js`/`App.jsx`ning `resources`/`GRID_PAGES`/`listFilters.js` kalitlari endi `'Kirim'`).
+
+**Yangi maydonlar (`import_type`, `supplier_client`, `prepaid_percent`):**
+
+| Maydon | Turi | Izoh |
+|--------|------|------|
+| `import_type` | `'domestic' \| 'import' \| 'charter'` | Kirim turi — foydalanuvchi tanlaydi. Standart: `domestic`. Avtomatik (`backorder`) zakazda ham shu standart qo‘llanadi — foydalanuvchi ishtirokisiz. Ro‘yxatda filtrlanadi: `?import_type=import`. Javobda `import_type_display` (o‘qish uchun matn) ham qaytadi. |
+| `supplier_client` | UUID (yozish), nullable | Yetkazuvchi — `apps.clients.Client` dan tanlangan (ixtiyoriy). Eski erkin matn `supplier` maydoni **saqlanib qoldi** — ikkalasi bir vaqtda ishlaydi (biri yoki ikkalasi ham bo‘sh bo‘lishi mumkin). Javobda o‘qish-uchun `supplier_client_name` (`client_name`ga o‘xshash naqsh) qaytadi. |
+| `prepaid_percent` | `decimal(5,2)`, nullable | Oldindan to‘lov foizi — ma’lumot uchun, `paid_amount`/`payment_status` dan mustaqil saqlanadi. Standart: `30`. |
+
+`import_type`/`supplier_client`/`prepaid_percent` — bulk (`/orders/zakaz/bulk/`) so‘rovda ham qabul qilinadi (butun bulk uchun umumiy qiymat, har bir `items[]` qatorida ixtiyoriy ustidan yozish mumkin).
+
+**To‘liq tahrirlash (PATCH):** Ilgari backorder-turdagi zakazda `quantity`/`product`/`unit_price` operator uchun bloklangan edi — bu cheklov OLIB TASHLANDI: endi har qanday avtorizatsiyalangan (tizimga kirgan) foydalanuvchi `supplier`, `supplier_client`, narxlar, `quantity`, sanalar, `comment`, shartnoma maydonlari va `import_type`ni PATCH qila oladi. Yagona qolgan rol-cheklovi — `received_qty` (faqat Management, ombor hisobiga bevosita ta’sir qilgani uchun). Status o‘tishi (`asos` + shartnoma raqami majburiy, faqat Management) **o‘zgarmagan**.
 
 `import_batch` ixtiyoriy — berilmasa backend yangi UUID yaratadi. Mavjud import guruhiga bitta qator qo‘shishda shu UUID yuboriladi (tahrir modalidagi yangi qatorlar).
 
@@ -2860,7 +2894,7 @@ Biznes qoida (frontend ko‘rsatish):
 
 **Sotuv o‘chirilsa** bog‘liq kassa yozuvi ham o‘chadi (`PROTECT` xatosining oldi olingan). **Buyurtma bekor qilinsa** (`/cancel/`) — bog‘liq kassa yozuvi hozircha **tegilmaydi** (ochiq savol — refund siyosati aniqlanmagan).
 
-### Import grid ustunlari (`ResourcePage`, title=`Import`)
+### Kirim grid ustunlari (`ResourcePage`, title=`Kirim`; ilgari `Import`)
 
 | Ustun | Maydon | Eslatma |
 |---|---|---|
@@ -2876,6 +2910,8 @@ Biznes qoida (frontend ko‘rsatish):
 | Kutil. | `expected_date` | |
 | Holati | `status` | inline — `order_status_manage` |
 | Yaratdi | `created_by_name` | |
+
+Ustunlarda ko‘rsatilmasa ham, `import_type`/`import_type_display`, `supplier_client`/`supplier_client_name`, `prepaid_percent` javobda mavjud — tahrir formasida (`ZakazEditor`) to‘liq ko‘rinadi/tahrirlanadi; ro‘yxat esa `?import_type=` bo‘yicha filtrlanadi («Kirim turi» dropdown).
 
 Tarix tugmasi: zakaz `history` modal.
 

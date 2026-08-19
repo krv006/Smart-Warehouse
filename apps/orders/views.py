@@ -446,6 +446,7 @@ class ZakazViewSet(CreateModelMixin, ListModelMixin,
     filterset_fields   = {
         'status':          ['exact'],
         'zakaz_type':      ['exact'],
+        'import_type':     ['exact'],
         'payment_status':  ['exact'],
         'product':         ['exact'],
         'order':           ['exact'],

@@ -74,6 +74,10 @@ class Order(TimeStampedModel):
     due_date        = DateField(default=current_year_end,
                                 help_text='Yetkazish muddati — joriy yil 31-dekabr')
     status          = CharField(max_length=12, choices=STATUS_CHOICES, default=PENDING)
+    prepaid_percent = DecimalField(max_digits=5, decimal_places=2, null=True, blank=True,
+                                   default=Decimal('30'),
+                                   help_text='Oldindan to\'lov foizi (ma\'lumot uchun — '
+                                             'mutlaq summadan mustaqil saqlanadi)')
     comment         = TextField(blank=True, null=True)
 
     class Meta:
@@ -523,6 +527,16 @@ class Zakaz(TimeStampedModel):
         (MANUAL,    'Mustaqil zakaz'),
     )
 
+    # ── Kirim (import) turi — foydalanuvchi tanlaydi ────────────────────────
+    DOMESTIC = 'domestic'
+    IMPORT   = 'import'
+    CHARTER  = 'charter'
+    IMPORT_TYPE_CHOICES = (
+        (DOMESTIC, 'O\'zbekiston ichidan sotib olish'),
+        (IMPORT,   'Import'),
+        (CHARTER,  'Ustavdan kiritish'),
+    )
+
     # ── To'lov holati (faqat MANUAL zakaz uchun) ────────────────────────────────
     UNPAID  = 'unpaid'
     PARTIAL = 'partial'
@@ -541,6 +555,9 @@ class Zakaz(TimeStampedModel):
                                    default=MANUAL,
                                    help_text='backorder — buyurtmadan avtomatik; '
                                              'manual — mustaqil zakaz')
+    import_type        = CharField(max_length=10, choices=IMPORT_TYPE_CHOICES,
+                                   default=DOMESTIC, blank=True,
+                                   help_text='Kirim turi: domestic / import / charter')
     order              = ForeignKey('orders.Order', on_delete=SET_NULL,
                                     null=True, blank=True, related_name='zakazlar',
                                     verbose_name='Manba buyurtma')
@@ -572,7 +589,14 @@ class Zakaz(TimeStampedModel):
                                       help_text='Etkazuvchiga to\'langan summa (qisman to\'lov)')
 
     supplier           = CharField(max_length=255, blank=True, null=True,
-                                   help_text='Etkazuvchi nomi / manzili')
+                                   help_text='Etkazuvchi nomi / manzili (erkin matn)')
+    supplier_client     = ForeignKey('clients.Client', on_delete=SET_NULL,
+                                     null=True, blank=True,
+                                     related_name='zakaz_supplier_for',
+                                     help_text='Etkazuvchi — mijozlar bazasidan tanlangan')
+    prepaid_percent    = DecimalField(max_digits=5, decimal_places=2, null=True, blank=True,
+                                      default=Decimal('30'),
+                                      help_text='Oldindan to\'lov foizi (ma\'lumot uchun)')
     status             = CharField(max_length=12, choices=STATUS_CHOICES, default=NEW)
 
     # Shartnoma (dogovor) — har bir ish holati uchun asos
