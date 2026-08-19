@@ -1,5 +1,5 @@
 from django.db import transaction
-from django.db.models import F
+from django.db.models import F, Q
 from django.utils.dateparse import parse_date
 
 from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter
@@ -8,31 +8,33 @@ from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
 from apps.common.permissions import IsOperatorOrManagementWrite, IsManagement
-from apps.warehouse.models import Category, Product, Stock, STATUS_IN_STOCK, STATUS_LOW_STOCK, STATUS_OUT
-from apps.warehouse.serializers import (CategorySerializer, ProductSerializer,
+from apps.warehouse.models import (Product, Stock, STATUS_IN_STOCK, STATUS_LOW_STOCK,
+                                   STATUS_OUT, STATUS_ON_THE_WAY)
+from apps.warehouse.serializers import (ProductSerializer,
                                         ProductOperatorSerializer,
                                         ProductAccountantSerializer, StockSerializer)
 
 
-@extend_schema_view(
-    list=extend_schema(summary="Kategoriyalar daraxti", tags=["Warehouse"]),
-    retrieve=extend_schema(summary="Kategoriya", tags=["Warehouse"]),
-    create=extend_schema(summary="Yangi kategoriya", tags=["Warehouse"]),
-    update=extend_schema(summary="Kategoriya yangilash", tags=["Warehouse"]),
-    partial_update=extend_schema(summary="Kategoriya qisman yangilash", tags=["Warehouse"]),
-    destroy=extend_schema(summary="Kategoriya o'chirish", tags=["Warehouse"]),
-)
-class CategoryViewSet(ModelViewSet):
-    serializer_class   = CategorySerializer
-    permission_classes = (IsOperatorOrManagementWrite,)
-    search_fields      = ('name',)
-
-    def get_queryset(self):
-        if self.action == 'list':
-            return Category.objects.root_nodes().prefetch_related(
-                'children__children__children'
-            )
-        return Category.objects.all()
+# Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+# @extend_schema_view(
+#     list=extend_schema(summary="Kategoriyalar daraxti", tags=["Warehouse"]),
+#     retrieve=extend_schema(summary="Kategoriya", tags=["Warehouse"]),
+#     create=extend_schema(summary="Yangi kategoriya", tags=["Warehouse"]),
+#     update=extend_schema(summary="Kategoriya yangilash", tags=["Warehouse"]),
+#     partial_update=extend_schema(summary="Kategoriya qisman yangilash", tags=["Warehouse"]),
+#     destroy=extend_schema(summary="Kategoriya o'chirish", tags=["Warehouse"]),
+# )
+# class CategoryViewSet(ModelViewSet):
+#     serializer_class   = CategorySerializer
+#     permission_classes = (IsOperatorOrManagementWrite,)
+#     search_fields      = ('name',)
+#
+#     def get_queryset(self):
+#         if self.action == 'list':
+#             return Category.objects.root_nodes().prefetch_related(
+#                 'children__children__children'
+#             )
+#         return Category.objects.all()
 
 
 @extend_schema_view(
@@ -45,27 +47,16 @@ class CategoryViewSet(ModelViewSet):
 )
 class ProductViewSet(ModelViewSet):
     # stocks/zakazlar — qoldiq va "yo'ldagi import" miqdori uchun (N+1 oldini olish)
-    queryset           = (Product.objects.select_related('category')
+    queryset           = (Product.objects
                           .prefetch_related('stocks', 'zakazlar').all())
     permission_classes = (IsOperatorOrManagementWrite,)
-    search_fields      = ('name', 'model', 'serial_number', 'source')
+    # Model funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi: 'model' qidiruvdan olib tashlandi.
+    search_fields      = ('name', 'serial_number', 'source')
     ordering_fields    = ('name', 'purchase_price', 'created_at')
     filterset_fields   = {
         'purchase_price': ['isnull'],
         'selling_price':  ['isnull'],
     }
-
-    def get_queryset(self):
-        """`?category=<id>` — tanlangan kategoriya VA uning ost-kategoriyalari."""
-        queryset = super().get_queryset()
-        category_id = self.request.query_params.get('category')
-        if category_id:
-            category = Category.objects.filter(pk=category_id).first()
-            if category is None:
-                return queryset.none()
-            queryset = queryset.filter(
-                category__in=category.get_descendants(include_self=True))
-        return queryset
 
     def get_serializer_class(self):
         user = self.request.user
@@ -214,10 +205,44 @@ class ProductViewSet(ModelViewSet):
         return Response(ProductContractSerializer(qs, many=True).data)
 
 
+def _pending_product_ids_subquery():
+    """Faol (hali qabul qilinmagan) Zakaz/Kirim'i bor mahsulotlar ID'lari.
+
+    `Product.pending_import_quantity` bilan bir xil mantiq (har bir Zakaz
+    qatori uchun `max(quantity - received_qty, 0)`, keyin mahsulot bo'yicha
+    yig'indi > 0) — lekin bu yerda subquery sifatida, Python'ga barcha Zakaz
+    qatorlarini yuklamasdan ishlatiladi.
+    """
+    from django.db.models import Sum
+    from django.db.models.functions import Greatest
+    from apps.orders.models import Zakaz
+
+    return (
+        Zakaz.objects
+        .filter(status__in=Zakaz.ACTIVE_STATUSES)
+        .annotate(shortfall=Greatest(F('quantity') - F('received_qty'), 0))
+        .values('product_id')
+        .annotate(total_pending=Sum('shortfall'))
+        .filter(total_pending__gt=0)
+        .values_list('product_id', flat=True)
+    )
+
+
 @extend_schema_view(
     list=extend_schema(
         summary="Ombor qoldiqlari (Ostatka)", tags=["Warehouse"],
-        description="Filtr: `?product=1`, `?warehouse_location=A-1`"
+        description=(
+            "Filtr: `?product=1`, `?warehouse_location=A-1`, "
+            "`?status=out_of_stock|low_stock|in_stock|on_the_way`\n\n"
+            "**Standart ko'rinish** (status berilmasa): qoldig'i 0 VA hech "
+            "qanday yo'ldagi (faol Zakaz/Kirim) miqdori yo'q mahsulotlar "
+            "ro'yxatdan yashiriladi. Qoldig'i 0 bo'lsa-da yo'lda importi bor "
+            "mahsulotlar `on_the_way` (\"Yo'lda\") holatida ko'rinishda "
+            "qoladi — hatto hali birorta ham Stock qatori yaratilmagan "
+            "(hammasi yo'lda) mahsulot uchun ham sintetik qator qo'shiladi. "
+            "`?status=out_of_stock` — chinakam bo'sh (yo'lda ham hech narsa "
+            "yo'q) qatorlarni ko'rish uchun aniq so'ralishi kerak."
+        ),
     ),
     retrieve=extend_schema(summary="Qoldiq", tags=["Warehouse"]),
     create=extend_schema(summary="Yangi qoldiq (Operator)", tags=["Warehouse"]),
@@ -230,6 +255,7 @@ class StockViewSet(ModelViewSet):
     permission_classes = (IsOperatorOrManagementWrite,)
     filterset_fields   = ('product', 'warehouse_location')
     search_fields      = ('product__name', 'product__serial_number', 'warehouse_location')
+    ordering_fields    = ('quantity', 'created_at', 'product__name')
 
     def perform_destroy(self, instance):
         # Broni bor qatorni o'chirish buyurtmalardagi reserved_qty hisobini
@@ -242,12 +268,8 @@ class StockViewSet(ModelViewSet):
         super().perform_destroy(instance)
 
     def get_queryset(self):
-        qs = Stock.objects.select_related('product', 'product__category')
+        qs = Stock.objects.select_related('product')
         params = self.request.query_params
-
-        category = params.get('category')
-        if category:
-            qs = qs.filter(product__category_id=category)
 
         date_from = params.get('date_from')
         date_to   = params.get('date_to')
@@ -256,15 +278,68 @@ class StockViewSet(ModelViewSet):
         if date_to:
             qs = qs.filter(created_at__date__lte=parse_date(date_to))
 
+        pending_ids = _pending_product_ids_subquery()
         status = params.get('status')
         if status == STATUS_OUT:
-            qs = qs.filter(quantity=0)
+            # Chinakam bo'sh — yo'lda hech narsa yo'q
+            qs = qs.filter(quantity=0).exclude(product_id__in=pending_ids)
         elif status == STATUS_LOW_STOCK:
             # quantity > 0 and quantity <= product.min_quantity
-            from django.db.models import F
             qs = qs.filter(quantity__gt=0, quantity__lte=F('product__min_quantity'))
         elif status == STATUS_IN_STOCK:
-            from django.db.models import F
             qs = qs.filter(quantity__gt=F('product__min_quantity'))
+        elif status == STATUS_ON_THE_WAY:
+            qs = qs.filter(quantity=0, product_id__in=pending_ids)
+        elif self.action == 'list':
+            # Standart ro'yxat ko'rinishi: status filtri berilmagan bo'lsa,
+            # butunlay bo'sh VA yo'lda hech narsasi yo'q qatorlar
+            # yashiriladi. retrieve/update/destroy uchun bu cheklov
+            # qo'llanilmaydi — mavjud (hatto 0 qoldiqli) qatorni tahrirlash/
+            # o'chirish har doim ishlashi kerak.
+            qs = qs.filter(Q(quantity__gt=0) | Q(product_id__in=pending_ids))
 
         return qs
+
+    def _synthetic_pending_rows(self, status):
+        """Birorta ham Stock qatori yo'q, lekin yo'lda (faol Zakaz/Kirim)
+        miqdori bor mahsulotlar uchun DB'ga yozilmagan `Stock` obyektlari —
+        StockSerializer ular bilan ham to'liq ishlay oladi (product FK
+        o'rnatilgan, id=None). Faqat status filtri qo'llanilmagan yoki aynan
+        `on_the_way` so'ralganda, va joylashuv (`warehouse_location`) filtri
+        yo'q paytda qo'shiladi — sintetik qatorlarning real joylashuvi yo'q.
+        """
+        if status not in (None, '', STATUS_ON_THE_WAY):
+            return []
+        params = self.request.query_params
+        if params.get('warehouse_location'):
+            return []
+
+        products = Product.objects.filter(
+            stocks__isnull=True, id__in=_pending_product_ids_subquery())
+
+        product_id = params.get('product')
+        if product_id:
+            products = products.filter(pk=product_id)
+
+        search = params.get('search')
+        if search:
+            products = products.filter(
+                Q(name__icontains=search) | Q(serial_number__icontains=search))
+
+        return [
+            Stock(product=product, quantity=0, reserved_quantity=0, warehouse_location='')
+            for product in products
+        ]
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        status = request.query_params.get('status')
+        combined = list(queryset) + self._synthetic_pending_rows(status)
+
+        page = self.paginate_queryset(combined)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(combined, many=True)
+        return Response(serializer.data)

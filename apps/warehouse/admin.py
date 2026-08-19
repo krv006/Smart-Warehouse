@@ -2,15 +2,16 @@ from django.contrib import admin
 from django.utils.html import format_html
 from mptt.admin import DraggableMPTTAdmin
 
-from apps.warehouse.models import Category, Product, Stock
+from apps.warehouse.models import Product, Stock
 
 
-@admin.register(Category)
-class CategoryAdmin(DraggableMPTTAdmin):
-    list_display       = ('tree_actions', 'indented_title')
-    list_display_links = ('indented_title',)
-    search_fields      = ('name',)
-    mptt_level_indent  = 20
+# Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+# @admin.register(Category)
+# class CategoryAdmin(DraggableMPTTAdmin):
+#     list_display       = ('tree_actions', 'indented_title')
+#     list_display_links = ('indented_title',)
+#     search_fields      = ('name',)
+#     mptt_level_indent  = 20
 
 
 class StockInline(admin.TabularInline):
@@ -22,11 +23,12 @@ class StockInline(admin.TabularInline):
 
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
-    list_display    = ('id', 'name', 'model', 'serial_number', 'category',
+    # Model funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi: 'model' olib tashlandi.
+    list_display    = ('id', 'name', 'serial_number',
                        'source', 'purchase_price_fmt', 'selling_price_fmt',
                        'unit', 'min_quantity', 'stock_badge', 'created_at')
-    search_fields   = ('name', 'model', 'serial_number', 'source')
-    list_filter     = ('created_at', 'category')
+    search_fields   = ('name', 'serial_number', 'source')
+    list_filter     = ('created_at',)
     ordering        = ('-created_at',)
     list_per_page   = 25
     date_hierarchy  = 'created_at'
@@ -34,7 +36,7 @@ class ProductAdmin(admin.ModelAdmin):
     inlines         = (StockInline,)
 
     fieldsets = (
-        ('Asosiy', {'fields': ('category', 'name', 'model', 'serial_number', 'source', 'unit')}),
+        ('Asosiy', {'fields': ('name', 'serial_number', 'source', 'unit')}),
         ('Narx',   {'fields': ('purchase_price', 'selling_price')}),
         ('Qoldiq', {'fields': ('min_quantity',)}),
         ('Vaqt',   {'fields': ('created_at', 'updated_at'), 'classes': ('collapse',)}),

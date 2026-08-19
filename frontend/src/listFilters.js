@@ -3,7 +3,8 @@ export const MODULE_STATUS_OPTIONS = {
     { value: 'true', label: 'Faol' },
     { value: 'false', label: 'Nofaol' },
   ],
-  Import: [
+  // "Import" sahifasi UIda "Kirim" deb ataladi — kalit shu nomga mos.
+  Kirim: [
     { value: 'new', label: 'Yangi' },
     { value: 'confirmed', label: 'Tasdiqlandi' },
     { value: 'ordered', label: 'Etkazuvchiga yuborildi' },
@@ -16,13 +17,21 @@ export const MODULE_STATUS_OPTIONS = {
     { value: 'paid', label: 'To‘langan' },
     { value: 'overdue', label: 'Muddati o‘tgan' },
   ],
+  Qoldiqlar: [
+    { value: 'in_stock', label: 'Yetarli' },
+    { value: 'low_stock', label: 'Kam qoldi' },
+    { value: 'out_of_stock', label: 'Tugagan' },
+    { value: 'on_the_way', label: 'Yo‘lda' },
+  ],
 }
 
 export const MODULE_FILTER_FEATURES = {
   Mijozlar: { status: true, client: false, date: true },
   Sotuvlar: { status: false, client: true, date: true },
-  Import: { status: true, client: false, date: true },
-  Ombor: { status: false, client: false, date: false, category: true },
+  Kirim: { status: true, client: false, date: true, importType: true },
+  // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi: category: true olib tashlandi.
+  Ombor: { status: false, client: false, date: false },
+  Qoldiqlar: { status: true, client: false, date: true },
   Kassa: { status: true, client: true, date: true },
   Xarajatlar: { status: false, client: false, date: true },
 }
@@ -34,23 +43,34 @@ export function buildListQueryParams(title, filters = {}) {
     else params.status = filters.status
   }
   if (filters.client) params.client = filters.client
-  if (filters.category) params.category = filters.category
+  // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+  // if (filters.category) params.category = filters.category
+  if (filters.import_type) params.import_type = filters.import_type
   if (filters.date_from) params.date_from = filters.date_from
   if (filters.date_to) params.date_to = filters.date_to
   return params
 }
 
 export function hasActiveListFilters(filters = {}) {
-  return Boolean(filters.status || filters.client || filters.category
-    || filters.date_from || filters.date_to)
+  // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi: filters.category olib tashlandi.
+  return Boolean(filters.status || filters.client
+    || filters.import_type || filters.date_from || filters.date_to)
 }
+
+// Kirim (Zakaz) import turi — 3 tanlov + "hammasi"
+export const IMPORT_TYPE_OPTIONS = [
+  { value: 'domestic', label: 'O‘zbekiston ichidan sotib olish' },
+  { value: 'import', label: 'Import' },
+  { value: 'charter', label: 'Ustavdan kiritish' },
+]
 
 export function emptyStateConfig(title) {
   const map = {
     Mijozlar: { label: 'Hali mijoz yo‘q', cta: 'Birinchi mijozni qo‘shish' },
     Sotuvlar: { label: 'Hali sotuv yo‘q', cta: 'Birinchi sotuvni qo‘shish' },
-    Import: { label: 'Hali import yozuvi yo‘q', cta: 'Import qo‘shish' },
+    Kirim: { label: 'Hali kirim yozuvi yo‘q', cta: 'Kirim qo‘shish' },
     Ombor: { label: 'Hali mahsulot yo‘q', cta: 'Birinchi mahsulotni qo‘shish' },
+    Qoldiqlar: { label: 'Qoldiq topilmadi', cta: null },
     Kassa: { label: 'To‘lov yozuvi topilmadi', cta: null },
     Xarajatlar: { label: 'Hali xarajat yo‘q', cta: 'Xarajat qo‘shish' },
   }

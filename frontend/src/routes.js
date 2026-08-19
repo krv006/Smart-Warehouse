@@ -1,7 +1,7 @@
 export const PAGE_PATHS = {
   'Bosh sahifa': '/',
   Buyurtmalar: '/buyurtmalar',
-  Import: '/import',
+  Kirim: '/import',
   Shartnomalar: '/shartnomalar',
   Ombor: '/ombor',
   Kategoriyalar: '/ombor/kategoriyalar',
@@ -41,14 +41,14 @@ export function parseAppPath(pathname) {
   }
 
   if (clean === '/import/yangi') {
-    return { kind: 'import-new', page: 'Import', path: clean }
+    return { kind: 'import-new', page: 'Kirim', path: clean }
   }
 
   const importEditMatch = clean.match(/^\/import\/(\d+)\/tahrir$/)
   if (importEditMatch) {
     return {
       kind: 'import-edit',
-      page: 'Import',
+      page: 'Kirim',
       zakazId: Number(importEditMatch[1]),
       path: clean,
     }
@@ -135,10 +135,10 @@ export function crumbFromPath(pathname) {
     return `Buyurtmalar / Tahrir / ${parsed.invoiceId.slice(0, 8)}…`
   }
   if (parsed.kind === 'import-new') {
-    return 'Import / Yangi'
+    return 'Kirim / Yangi'
   }
   if (parsed.kind === 'import-edit') {
-    return `Import / Tahrir / #${parsed.zakazId}`
+    return `Kirim / Tahrir / #${parsed.zakazId}`
   }
   if (parsed.page === 'Ombor' || parsed.page === 'Kategoriyalar' || parsed.page === 'Qoldiqlar') {
     if (parsed.page === 'Ombor') return 'Ombor / Mahsulotlar'

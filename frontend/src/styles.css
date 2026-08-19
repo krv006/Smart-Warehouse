@@ -4618,6 +4618,20 @@ label.field-invalid textarea:focus,
   gap: 6px;
 }
 
+.prepaid-percent-field {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.prepaid-percent-field select {
+  flex: 1;
+}
+
+.prepaid-percent-field input {
+  flex: 1;
+}
+
 .client-picker-label {
   font-size: 13px;
   font-weight: 500;

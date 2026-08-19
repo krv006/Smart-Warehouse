@@ -94,7 +94,7 @@ python manage.py seed --products 60 --orders 30 --zakazlar 20 --clients 25
 | Modul | Tavsif |
 |-------|--------|
 | Users | 3 ta belgilangan: `operator1/op1pass`, `accountant1/acc1pass`, `manager1/mgr1pass` + tasodifiy |
-| Categories | 8 ta ota + bola kategoriyalar (MPTT) |
+| ~~Categories~~ | **O'chirilgan** — kategoriya funksiyasi vaqtincha yo'q (seed ham yaratmaydi), keyinchalik qaytariladi |
 | Products | ~20% narxsiz, `selling_price` + `min_quantity` bilan |
 | Stock | Har mahsulotga 1–3 lokatsiya |
 | Sales | `available_quantity` ga qarab, mijozga bog'langan |
@@ -247,9 +247,10 @@ Buyurtmani **bir necha bor** tahrirlash mumkin (bu zakaz bilan bog'liq emas):
 | `quantity_in_stock` | Ombordagi jami |
 | `reserved_quantity` | Bron qilingan |
 | `available_quantity` | Sotish mumkin (`jami − bron`) |
-| `stock_status` | `in_stock` / `low_stock` / `out_of_stock` |
+| `stock_status` | `in_stock` / `low_stock` / `out_of_stock` / `on_the_way` (qoldiq 0, lekin faol Zakaz/Kirim yo'lda) |
+| `pending_import_quantity` | Faol (hali qabul qilinmagan) Zakaz/Kirim'dagi jami miqdor |
 
-Filtr: `?category=3` · `?purchase_price__isnull=true` · `?selling_price__isnull=true`
+Filtr: `?purchase_price__isnull=true` · `?selling_price__isnull=true` (`category` filtri o'chirilgan)
 
 Mahsulot qo'shishda `quantity` + `warehouse_location` yuborilsa — Stock avtomatik yaratiladi.
 
@@ -286,10 +287,16 @@ POST /warehouse/products/{id}/add-stock/
 | GET/POST | `/warehouse/stocks/` | Qoldiqlar |
 | GET/PATCH/DELETE | `/warehouse/stocks/{id}/` | Bitta |
 
-Filtr: `?product=1` · `?category=3` · `?status=low_stock` · `?date_from=...&date_to=...`
+Filtr: `?product=1` · `?status=low_stock` · `?date_from=...&date_to=...` (`category` filtri o'chirilgan)
 
-#### Category
-`/warehouse/categories/` — MPTT daraxt (`parent → children`).
+> Standart ko'rinishda (status berilmasa) qoldig'i 0 VA yo'lda hech narsasi
+> yo'q mahsulotlar yashiriladi; yo'lda (faol Zakaz/Kirim) importi bor
+> mahsulot — hatto birorta ham Stock qatori bo'lmasa ham (sintetik qator,
+> `id: null`) — `status: "on_the_way"` bilan ro'yxatda qoladi.
+> `?status=out_of_stock` chinakam bo'sh qatorlarni aniq so'raganda ishlaydi.
+
+#### Category (vaqtincha o'chirilgan)
+`/warehouse/categories/` — MPTT daraxt (`parent → children`). Backendda kod comment qilingan (model/serializer/viewset/url), endpoint hozircha 404. Keyinchalik qaytariladi.
 
 ---
 
@@ -461,6 +468,24 @@ PATCH /orders/zakaz/{id}/
 ```
 → `asos` yoki `faktura` bo'lmasa: **400**.
 → Ombor +20, pending buyurtmalar avtomatik bronlanadi.
+
+---
+
+### 6.4.1 Kirim (ilgari «Import») — yangi maydonlar
+
+Frontendda «Import» bo'limi endi **«Kirim»** deb ataladi (backendda `zakaz`/`Zakaz`/`origin=import` nomlari o'zgarmadi — faqat UI yorlig'i). Qo'shildi:
+
+| Maydon | Modul | Tavsif |
+|---|---|---|
+| `import_type` | Zakaz | Kirim turi — `domestic` (O'zbekiston ichidan sotib olish) / `import` (Import) / `charter` (Ustavdan kiritish), default `domestic`. Ro'yxatda filtrlanadi (`?import_type=`). |
+| `supplier_client` | Zakaz | Yetkazuvchi — mijozlar bazasidan (`Client`) tanlanadi (eski erkin matn `supplier` ham saqlanadi, orqaga moslik uchun) |
+| `prepaid_percent` | Zakaz va Order | Oldindan to'lov foizi — dropdown (5/10/15/30%, default 30%) + qo'lda kiritish; mutlaq summadan (`prepaid_amount`/`paid_amount`) mustaqil, ma'lumot uchun saqlanadi |
+
+**To'liq tahrir huquqi:** Kirim yozuvining barcha maydonlari (yetkazuvchi, narxlar, miqdor, sanalar, izoh, `import_type`) endi ruxsati bor foydalanuvchi tomonidan PATCH qilinadi — faqat holat (`status`) o'zgarishi hamon Management-only va `asos` + shartnoma raqami talab qiladi (bu qoida o'zgarmadi).
+
+**Bazada yo'q mahsulot bilan buyurtma:** `Order` (Buyurtma) endi ham `items[].new_product` qabul qiladi (Zakaz-bulk bilan bir xil naqsh) — bazada topilmagan mahsulot nomi bilan yangi `Product` (`origin=import`) yaratiladi va unga bog'langan `MANUAL` Zakaz ochiladi. Mavjud mahsulotda yetishmagan miqdor uchun avtomatik `BACKORDER` Zakaz ochilishi (yuqorida tavsiflangan FIFO bron mexanizmi) o'zgarmadi.
+
+To'liq API tafsilotlari: `FRONTEND_API.md`.
 
 ---
 
@@ -787,6 +812,8 @@ Bu standart (avtomatik) qiymat — maydon bo'sh qoldirilganda ishlatiladi. Xodim
 | `apps/common/contracts.py` | `ContractSequence` — `contract_date`/`date_part` maydonlari olib tashlandi, `last_number` bilan yagona (`pk=1`) qator; birinchi ishga tushganda bazadagi mavjud raqamlardan boshlang'ich qiymat hisoblanadi |
 | `apps/orders/serializers.py` | `OrderSerializer`dagi majburiy `^\d+/\d{4}$` format tekshiruvi olib tashlandi |
 | `frontend/src/App.jsx` | Import/Faktura formalaridagi raqam-only kirim cheklovi va format validatsiyasi olib tashlandi |
+
+> **YANGILANDI (keyingi commit):** yuqoridagi "UMUMIY (global)" hisoblagich yana **kunlik** (`{tartib}/{DDMM}`, har sana mustaqil, 1 dan boshlanadi) formatga qaytarildi — masalan kecha (18-avgust) uchun 3 ta shartnoma bo'lgan bo'lsa, o'sha sanaga bugun qo'shilgan hujjat `4/1808` bo'ladi. `ContractSequence` endi sana bo'yicha alohida qator saqlaydi (`date` maydoni qaytarildi). Erkin matn kiritish imkoniyati (regex tekshiruvsiz) o'zgarmadi. Ko'proq: `apps/common/contracts.py`.
 
 **Kassaga valyuta konvertori qo'shildi (yangi, faqat frontend):** `KassaPage`da endi UZS summasini kiritib, mavjud bank kurslaridan (Infinbank MB yoki bankxizmatlari.uz ro'yxatidagi banklar) birini tanlab, natijani $ da ko'rish mumkin. Bu sof mahalliy hisob-kitob — yangi backend endpoint talab qilinmadi, mavjud `GET /cash/exchange-rates/latest/` javobidan foydalanildi. Fayl: `frontend/src/components/KassaPage.jsx` (`CurrencyConverter` komponenti).
 

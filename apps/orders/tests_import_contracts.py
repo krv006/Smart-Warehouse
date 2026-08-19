@@ -14,33 +14,48 @@ from apps.warehouse.models import Category, Product, ProductOrigin, Stock
 
 
 class ContractSequenceTests(TestCase):
-    """Yagona UMUMIY o'suvchi tartib raqam: 1, 2, 3, ... — kunlik qayta
-    boshlanmaydi, kim/qaysi kuni yaratishidan qat'i nazar bitta hisoblagich."""
+    """Har bir SANA uchun alohida o'suvchi tartib raqam: `{n}/{DDMM}`,
+    har kuni 1 dan qayta boshlanadi."""
 
-    def test_allocation_increments_globally(self):
-        self.assertEqual(allocate_contract_number(), '1')
-        self.assertEqual(allocate_contract_number(), '2')
-        self.assertEqual(allocate_contract_number(), '3')
+    def test_allocation_increments_within_a_day(self):
+        today = date(2026, 8, 19)
+        self.assertEqual(allocate_contract_number(today), f'1/{today.strftime("%d%m")}')
+        self.assertEqual(allocate_contract_number(today), f'2/{today.strftime("%d%m")}')
+        self.assertEqual(allocate_contract_number(today), f'3/{today.strftime("%d%m")}')
 
-    def test_does_not_restart_on_different_date(self):
-        self.assertEqual(allocate_contract_number(date(2026, 8, 13)), '1')
-        # contract_date endi raqamga ta'sir qilmaydi — hisoblagich davom etadi
-        self.assertEqual(allocate_contract_number(date(2026, 8, 14)), '2')
+    def test_restarts_on_different_date(self):
+        self.assertEqual(allocate_contract_number(date(2026, 8, 13)), '1/1308')
+        # boshqa sana — mustaqil hisoblagich, 1 dan boshlanadi
+        self.assertEqual(allocate_contract_number(date(2026, 8, 14)), '1/1408')
+        self.assertEqual(allocate_contract_number(date(2026, 8, 13)), '2/1308')
 
     def test_peek_does_not_consume(self):
-        self.assertEqual(peek_contract_number(), '1')
-        self.assertEqual(peek_contract_number(), '1')
-        self.assertEqual(allocate_contract_number(), '1')
+        d = date(2026, 8, 19)
+        self.assertEqual(peek_contract_number(d), f'1/{d.strftime("%d%m")}')
+        self.assertEqual(peek_contract_number(d), f'1/{d.strftime("%d%m")}')
+        self.assertEqual(allocate_contract_number(d), f'1/{d.strftime("%d%m")}')
+
+    def test_leftover_document_continues_previous_day_count(self):
+        """Kecha 3 ta zakaz bo'lgan sanaga bugun kirim qo'shilsa — hisoblagich
+        o'sha kunning mavjud hujjatlar sonidan davom etadi (4/1808)."""
+        yesterday = date(2026, 8, 18)
+        for _ in range(3):
+            Zakaz.objects.create(
+                product=Product.objects.create(name='Kabel'),
+                quantity=1, contract_date=yesterday,
+                contract_number=allocate_contract_number(yesterday),
+            )
+        self.assertEqual(allocate_contract_number(yesterday), '4/1808')
 
     def test_manual_number_is_taken_into_account_on_first_use(self):
-        """Hisoblagich birinchi marta ishga tushganda, bazadagi qo'lda
-        kiritilgan raqamlarni ham hisobga oladi — orqaga qaytib
-        takrorlamaydi."""
+        """Hisoblagich shu sana uchun birinchi marta ishga tushganda,
+        bazadagi qo'lda kiritilgan raqamlarni ham hisobga oladi — orqaga
+        qaytib takrorlamaydi."""
         Zakaz.objects.create(
             product=Product.objects.create(name='Kabel'),
             quantity=1, contract_number='7', contract_date=date(2026, 8, 13),
         )
-        self.assertEqual(allocate_contract_number(), '8')
+        self.assertEqual(allocate_contract_number(date(2026, 8, 13)), '2/1308')
 
     def test_free_form_contract_number_is_accepted(self):
         """Xodim istagan ko'rinishda (masalan '412412412') qo'lda
@@ -76,9 +91,10 @@ class ImportContractNumberAPITests(TestCase):
         second = self._bulk()
         self.assertEqual(first.status_code, 201, first.data)
         self.assertEqual(second.status_code, 201, second.data)
-        first_number = int(first.data['zakazlar'][0]['contract_number'])
-        second_number = int(second.data['zakazlar'][0]['contract_number'])
-        self.assertEqual(second_number, first_number + 1)
+        first_n, first_date = first.data['zakazlar'][0]['contract_number'].split('/')
+        second_n, second_date = second.data['zakazlar'][0]['contract_number'].split('/')
+        self.assertEqual(first_date, second_date)
+        self.assertEqual(int(second_n), int(first_n) + 1)
 
     def test_next_contract_number_endpoint_peeks(self):
         res = self.api.get('/api/v1/orders/next-contract-number/',
@@ -264,20 +280,21 @@ class ProductOriginTests(TestCase):
         self.assertIsNone(product.category)
         self.assertFalse(Category.objects.exists())
 
-    def test_import_bulk_requires_category_for_new_product(self):
+    def test_import_bulk_creates_new_product_without_category(self):
+        """Kategoriya funksiyasi o'chirilgan — yangi import mahsuloti
+        kategoriyasiz ham muammosiz yaratiladi."""
         res = self.api.post('/api/v1/orders/zakaz/bulk/', {
             'items': [{'new_product': {'name': 'Kategoriyasiz import'},
                        'quantity': 1, 'unit_price': '1000.00',
                        'selling_price': '2000.00'}],
         }, format='json')
-        self.assertEqual(res.status_code, 400, res.data)
+        self.assertEqual(res.status_code, 201, res.data)
 
-    def test_product_create_requires_category(self):
+    def test_product_create_does_not_require_category(self):
         res = self.api.post('/api/v1/warehouse/products/',
                             {'name': 'Kategoriyasiz', 'unit': 'piece'},
                             format='json')
-        self.assertEqual(res.status_code, 400, res.data)
-        self.assertIn('category', res.data)
+        self.assertEqual(res.status_code, 201, res.data)
 
 
 class InvoiceLineVatTests(TestCase):
@@ -416,18 +433,15 @@ class InvoiceAutoProductTests(TestCase):
         self.assertEqual(zakaz.contract_number,
                          res.data['contract_number'])
 
-    def test_invoice_requires_category_for_unknown_product(self):
+    def test_unknown_product_is_created_without_category(self):
+        """Kategoriya funksiyasi o'chirilgan — yangi mahsulot kategoriyasiz
+        ham muammosiz yaratiladi."""
         payload = self._payload('Kategoriyasiz tovar')
-        payload['lines'][0].pop('category')
+        payload['lines'][0].pop('category', None)
         res = self.api.post(self.URL, payload, format='json')
-        self.assertEqual(res.status_code, 400, res.data)
-
-    def test_created_product_gets_category(self):
-        res = self.api.post(self.URL, self._payload('Kategoriyali tovar'),
-                            format='json')
         self.assertEqual(res.status_code, 201, res.data)
-        product = Product.objects.get(name='Kategoriyali tovar')
-        self.assertEqual(product.category_id, self.category.pk)
+        product = Product.objects.get(name='Kategoriyasiz tovar')
+        self.assertIsNone(product.category_id)
 
     def test_known_product_creates_no_import_row(self):
         Product.objects.create(name='Ombordagi tovar')
@@ -483,11 +497,13 @@ class InvoiceAutoProductTests(TestCase):
         self.assertEqual(Decimal(line['vat_amount']), Decimal('22500.00'))
         self.assertEqual(Decimal(line['total_amount']), Decimal('172500.00'))
 
-    def test_contract_number_is_allocated_globally(self):
+    def test_contract_number_increments_within_the_day(self):
         first = self.api.post(self.URL, self._payload('A tovar'), format='json')
         second = self.api.post(self.URL, self._payload('B tovar'), format='json')
-        self.assertEqual(int(second.data['contract_number']),
-                         int(first.data['contract_number']) + 1)
+        first_n, first_date = first.data['contract_number'].split('/')
+        second_n, second_date = second.data['contract_number'].split('/')
+        self.assertEqual(first_date, second_date)
+        self.assertEqual(int(second_n), int(first_n) + 1)
 
 
 class InvoiceKassaSyncTests(TestCase):
@@ -622,39 +638,40 @@ class InvoiceKassaSyncTests(TestCase):
         self.assertFalse(Expense.objects.filter(invoice_id=invoice_id).exists())
 
 
-class ProductCategoryFilterTests(TestCase):
-    """`?category=` — tanlangan kategoriya va uning ost-kategoriyalari."""
-
-    URL = '/api/v1/warehouse/products/'
-
-    def setUp(self):
-        from apps.warehouse.models import Category
-
-        self.api = APIClient()
-        self.manager = User.objects.create_user('mng_cat', password='x',
-                                                role=User.MANAGEMENT)
-        self.api.force_authenticate(self.manager)
-        self.parent = Category.objects.create(name='Texnika')
-        self.child = Category.objects.create(name='Monitorlar', parent=self.parent)
-        self.other = Category.objects.create(name='Mebel')
-        Product.objects.create(name='Monitor', category=self.child)
-        Product.objects.create(name='Noutbuk', category=self.parent)
-        Product.objects.create(name='Stol', category=self.other)
-
-    def _names(self, category_id):
-        res = self.api.get(self.URL, {'category': category_id, 'page_size': 50})
-        self.assertEqual(res.status_code, 200, res.data)
-        rows = res.data.get('results', res.data)
-        return sorted(row['name'] for row in rows)
-
-    def test_parent_category_includes_children(self):
-        self.assertEqual(self._names(self.parent.pk), ['Monitor', 'Noutbuk'])
-
-    def test_child_category_only(self):
-        self.assertEqual(self._names(self.child.pk), ['Monitor'])
-
-    def test_other_category(self):
-        self.assertEqual(self._names(self.other.pk), ['Stol'])
+# Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+# class ProductCategoryFilterTests(TestCase):
+#     """`?category=` — tanlangan kategoriya va uning ost-kategoriyalari."""
+#
+#     URL = '/api/v1/warehouse/products/'
+#
+#     def setUp(self):
+#         from apps.warehouse.models import Category
+#
+#         self.api = APIClient()
+#         self.manager = User.objects.create_user('mng_cat', password='x',
+#                                                 role=User.MANAGEMENT)
+#         self.api.force_authenticate(self.manager)
+#         self.parent = Category.objects.create(name='Texnika')
+#         self.child = Category.objects.create(name='Monitorlar', parent=self.parent)
+#         self.other = Category.objects.create(name='Mebel')
+#         Product.objects.create(name='Monitor', category=self.child)
+#         Product.objects.create(name='Noutbuk', category=self.parent)
+#         Product.objects.create(name='Stol', category=self.other)
+#
+#     def _names(self, category_id):
+#         res = self.api.get(self.URL, {'category': category_id, 'page_size': 50})
+#         self.assertEqual(res.status_code, 200, res.data)
+#         rows = res.data.get('results', res.data)
+#         return sorted(row['name'] for row in rows)
+#
+#     def test_parent_category_includes_children(self):
+#         self.assertEqual(self._names(self.parent.pk), ['Monitor', 'Noutbuk'])
+#
+#     def test_child_category_only(self):
+#         self.assertEqual(self._names(self.child.pk), ['Monitor'])
+#
+#     def test_other_category(self):
+#         self.assertEqual(self._names(self.other.pk), ['Stol'])
 
 
 class DuplicateSerialTests(TestCase):

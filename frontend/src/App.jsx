@@ -26,7 +26,8 @@ import { validateClientFields, validateCompanyProfile } from './lib/uzValidators
 const NAV_GROUPS = {
   Ombor: [
     { page: 'Ombor', label: 'Mahsulotlar', ability: 'warehouse_view' },
-    { page: 'Kategoriyalar', label: 'Kategoriyalar', ability: 'categories_view' },
+    // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+    // { page: 'Kategoriyalar', label: 'Kategoriyalar', ability: 'categories_view' },
     { page: 'Qoldiqlar', label: 'Qoldiqlar', ability: 'stocks_view' },
   ],
   Moliya: [
@@ -38,7 +39,7 @@ const NAV_GROUPS = {
 const SIDEBAR_NAV = [
   ['Bosh sahifa', House, 'dashboard'],
   ['Buyurtmalar', FileText, 'einvoice_view'],
-  ['Import', Truck, 'procurement_view'],
+  ['Kirim', Truck, 'procurement_view'],
   ['Shartnomalar', ClipboardText, 'contracts_view'],
   ['Ombor', Package, '__group_ombor__'],
   ['Mijozlar', Users, 'clients_view'],
@@ -61,22 +62,23 @@ const moneyRate = (value) => {
 }
 const list = (data) => Array.isArray(data) ? data : data?.results || []
 
-function flattenCategories(nodes, depth = 0, result = []) {
-  for (const node of nodes) {
-    result.push({ id: node.id, name: node.name, depth })
-    if (node.children?.length) flattenCategories(node.children, depth + 1, result)
-  }
-  return result
-}
-
-function findCategoryNode(nodes, id) {
-  for (const node of nodes) {
-    if (node.id === id) return node
-    const found = findCategoryNode(node.children || [], id)
-    if (found) return found
-  }
-  return null
-}
+// Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+// function flattenCategories(nodes, depth = 0, result = []) {
+//   for (const node of nodes) {
+//     result.push({ id: node.id, name: node.name, depth })
+//     if (node.children?.length) flattenCategories(node.children, depth + 1, result)
+//   }
+//   return result
+// }
+//
+// function findCategoryNode(nodes, id) {
+//   for (const node of nodes) {
+//     if (node.id === id) return node
+//     const found = findCategoryNode(node.children || [], id)
+//     if (found) return found
+//   }
+//   return null
+// }
 
 function collectDescendantIds(node) {
   const ids = []
@@ -132,9 +134,11 @@ const documentTypeLabels = {
 }
 const documentTypeLabel = (value) => documentTypeLabels[value] || value || 'Hujjat'
 
-function bankRateValue(bank, side) {
+// Faqat SOTISH (sell) kursi ishlatiladi — sotib olish (buy) kursi
+// hisob-kitoblarda ishlatilmaydi, shuning uchun tanlash imkoni yo'q.
+function bankRateValue(bank) {
   if (!bank) return null
-  return side === 'sell' ? bank.sell_rate : bank.buy_rate
+  return bank.sell_rate
 }
 
 function BankRateDropdown({
@@ -142,7 +146,6 @@ function BankRateDropdown({
   infinRate,
   manualRate,
   value,
-  side,
   compact = false,
   header = false,
   canManage = false,
@@ -150,9 +153,7 @@ function BankRateDropdown({
   onSelectInfinbank,
   onSelectBank,
   onSelectManual,
-  onSelectSide,
 }) {
-  const showSide = value.startsWith('bank:')
   return (
     <div className={`fx-bank-select-wrap${compact ? ' fx-bank-select-wrap--compact' : ''}${header ? ' fx-bank-select-wrap--header' : ''}`}>
       <select
@@ -171,7 +172,7 @@ function BankRateDropdown({
           Infinbank MB{infinRate ? ` — ${moneyRate(infinRate)}` : ''}
         </option>
         {marketBanks.map((bank) => {
-          const rate = bankRateValue(bank, side)
+          const rate = bankRateValue(bank)
           return (
             <option key={bank.code} value={`bank:${bank.code}`}>
               {bank.name}{rate ? ` — ${moneyRate(rate)}` : ''}
@@ -184,18 +185,6 @@ function BankRateDropdown({
           </option>
         )}
       </select>
-      {showSide && (
-        <select
-          className="fx-bank-side-select"
-          value={side}
-          disabled={disabled || !canManage}
-          aria-label="Kurs turi"
-          onChange={(event) => onSelectSide?.(event.target.value)}
-        >
-          <option value="sell">Sotish</option>
-          <option value="buy">Sotib olish</option>
-        </select>
-      )}
     </div>
   )
 }
@@ -227,7 +216,6 @@ function FxRatePanel({ session, notify, compact = false, header = false, onSourc
   const manualRate = snapshot?.manual?.mb_rate
   const marketBanks = snapshot?.market_rates?.banks || []
   const selectedBankCode = snapshot?.preferred_bank_code || snapshot?.active_bank_code || ''
-  const selectedBankSide = snapshot?.preferred_bank_side || snapshot?.active_bank_side || 'sell'
   const displayRate = snapshot?.mb_rate ?? (
     serverSource === 'manual' && manualRate ? manualRate : infinRate
   )
@@ -268,7 +256,6 @@ function FxRatePanel({ session, notify, compact = false, header = false, onSourc
       await applySettings({
         preferred_rate_source: 'bank',
         preferred_bank_code: fallbackCode,
-        preferred_bank_side: selectedBankSide,
       }, 'Hisob-kitobda tanlangan bank kursi ishlatiladi.')
       return
     }
@@ -287,19 +274,6 @@ function FxRatePanel({ session, notify, compact = false, header = false, onSourc
     await applySettings({
       preferred_rate_source: 'bank',
       preferred_bank_code: code,
-      preferred_bank_side: selectedBankSide,
-    })
-  }
-
-  const selectBankSide = async (side) => {
-    if (!canManage) return
-    const code = selectedBankCode || marketBanks[0]?.code
-    if (!code) return
-    setUiSource('bank')
-    await applySettings({
-      preferred_rate_source: 'bank',
-      preferred_bank_code: code,
-      preferred_bank_side: side,
     })
   }
 
@@ -314,13 +288,11 @@ function FxRatePanel({ session, notify, compact = false, header = false, onSourc
     infinRate,
     manualRate,
     value: bankSelectValue,
-    side: selectedBankSide,
     canManage,
     disabled: sourceSaving,
     onSelectInfinbank: () => setSource('infinbank'),
     onSelectBank: selectBank,
     onSelectManual: () => setSource('manual'),
-    onSelectSide: selectBankSide,
   }
 
   const saveManual = async (event) => {
@@ -666,7 +638,8 @@ function buildDashboardFilterParams(filters) {
   if (filters?.date_from) params.date_from = filters.date_from
   if (filters?.date_to) params.date_to = filters.date_to
   if (filters?.currency) params.currency = filters.currency
-  if (filters?.category) params.category = filters.category
+  // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+  // if (filters?.category) params.category = filters.category
   if (filters?.client) params.client = filters.client
   if (filters?.supplier?.trim()) params.supplier = filters.supplier.trim()
   if (filters?.product) params.product = filters.product
@@ -679,7 +652,8 @@ const DEFAULT_DASHBOARD_FILTERS = () => ({
   date_from: todayValue(),
   date_to: todayValue(),
   currency: '',
-  category: '',
+  // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+  // category: '',
   client: '',
   supplier: '',
   product: '',
@@ -1529,16 +1503,16 @@ function App() {
             <KassaPage notify={notify} session={session} reloadKey={resourceReloadKey} onDataChange={() => loadDashboard(true)} />
           </>
         )}
-        {(routeInfo.kind === 'import-new' || routeInfo.kind === 'import-edit') && active === 'Import' && can(session, 'procurement_view') && (
+        {(routeInfo.kind === 'import-new' || routeInfo.kind === 'import-edit') && active === 'Kirim' && can(session, 'procurement_view') && (
           <ImportEditorPage
             zakazId={routeInfo.zakazId || null}
             session={session}
             notify={notify}
-            onClose={() => routerNavigate(pathForPage('Import'))}
+            onClose={() => routerNavigate(pathForPage('Kirim'))}
             onDone={() => {
               setResourceReloadKey((value) => value + 1)
               loadDashboard(true)
-              routerNavigate(pathForPage('Import'))
+              routerNavigate(pathForPage('Kirim'))
             }}
           />
         )}
@@ -1663,10 +1637,11 @@ function importPeriodNote(summary) {
 
 function filterContextNote(filters, lookup = {}) {
   const extras = []
-  if (filters.category) {
-    const cat = lookup.categories?.find((item) => String(item.id) === String(filters.category))
-    if (cat?.name) extras.push(cat.name)
-  }
+  // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+  // if (filters.category) {
+  //   const cat = lookup.categories?.find((item) => String(item.id) === String(filters.category))
+  //   if (cat?.name) extras.push(cat.name)
+  // }
   if (filters.client) {
     const client = lookup.clients?.find((item) => String(item.id) === String(filters.client))
     if (client?.full_name || client?.company_name) extras.push(client.full_name || client.company_name)
@@ -1700,10 +1675,11 @@ function buildDashboardFilterChips(filters, lookup = {}) {
     const currency = CURRENCY_FILTERS.find((item) => item.id === filters.currency)
     chips.push({ key: 'currency', label: currency?.label || filters.currency, patch: { currency: '' } })
   }
-  if (filters.category) {
-    const cat = lookup.categories?.find((item) => String(item.id) === String(filters.category))
-    chips.push({ key: 'category', label: cat?.name || 'Kategoriya', patch: { category: '' } })
-  }
+  // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+  // if (filters.category) {
+  //   const cat = lookup.categories?.find((item) => String(item.id) === String(filters.category))
+  //   chips.push({ key: 'category', label: cat?.name || 'Kategoriya', patch: { category: '' } })
+  // }
   if (filters.client) {
     const client = lookup.clients?.find((item) => String(item.id) === String(filters.client))
     chips.push({
@@ -1785,7 +1761,8 @@ function DashboardFiltersMenu({ filters, onChange }) {
   const [customFrom, setCustomFrom] = useState(filters.date_from || todayValue())
   const [customTo, setCustomTo] = useState(filters.date_to || todayValue())
   const [supplierDraft, setSupplierDraft] = useState(filters.supplier || '')
-  const [options, setOptions] = useState({ categories: [], clients: [], products: [], loading: false })
+  // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi: `categories` maydoni olib tashlandi.
+  const [options, setOptions] = useState({ clients: [], products: [], loading: false })
   const ref = useRef(null)
   const menuRef = useRef(null)
   const optionsLoaded = useRef(false)
@@ -1796,13 +1773,12 @@ function DashboardFiltersMenu({ filters, onChange }) {
     if (optionsLoaded.current) return
     optionsLoaded.current = true
     setOptions((prev) => ({ ...prev, loading: true }))
+    // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi: api.categories(...) olib tashlandi.
     Promise.all([
-      api.categories({ page_size: 100 }),
       api.clients({ page_size: 100 }),
       api.products({ page_size: 200 }),
-    ]).then(([categories, clients, products]) => {
+    ]).then(([clients, products]) => {
       setOptions({
-        categories: list(categories),
         clients: list(clients),
         products: list(products),
         loading: false,
@@ -2005,7 +1981,8 @@ function DashboardFiltersMenu({ filters, onChange }) {
                 </div>
 
                 <div className="filter-panel-fields">
-                  <FilterSearchSelect
+                  {/* Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi. */}
+                  {/* <FilterSearchSelect
                     id="filter-category"
                     label="Kategoriya"
                     value={filters.category}
@@ -2013,7 +1990,7 @@ function DashboardFiltersMenu({ filters, onChange }) {
                     options={options.categories}
                     getLabel={(item) => item.name}
                     onChange={(category) => onChange({ category })}
-                  />
+                  /> */}
                   <FilterSearchSelect
                     id="filter-client"
                     label="Mijoz"
@@ -2152,7 +2129,7 @@ function Dashboard({ data, loading, period, onPeriodChange, onCreateBuyurtma, on
 
       <section className="metric-grid">
         <Metric icon={CurrencyCircleDollar} label="Tushum" value={kassaValue} note={kassaNote} trend="up" />
-        <Metric icon={Truck} label="Import chiqim" value={importPeriodLabel(summary)} note={importNote} trend="down" />
+        <Metric icon={Truck} label="Kirim chiqim" value={importPeriodLabel(summary)} note={importNote} trend="down" />
         <Metric icon={Wallet} label="Kassa balansi" value={netValue} note={balanceNote} trend={netTone} />
         <Metric icon={ClipboardText} label="Savdo" value={`${salesValue} so‘m`} note={salesNote} trend="up" />
         <Metric icon={Package} label="Ombordagi birliklar" value={money(warehouse.total_quantity)} note={`${warehouse.total_product_types || 0} turdagi mahsulot · hozirgi holat`} trend="neutral" />
@@ -2185,7 +2162,7 @@ function Dashboard({ data, loading, period, onPeriodChange, onCreateBuyurtma, on
               <tr>
                 <th>Oy</th>
                 <th>Tushum</th>
-                <th>Import chiqim</th>
+                <th>Kirim chiqim</th>
                 <th>Balans</th>
                 <th>Savdo</th>
               </tr>
@@ -2429,10 +2406,13 @@ function Empty({ label }) {
 }
 
 const resources = {
-  'Import': { load: api.zakaz, path: '/orders/zakaz/' },
+  // "Import" — foydalanuvchiga "Kirim" nomi bilan ko'rsatiladi (backend
+  // hali ham zakaz/import atamalarini ichki ishlatadi).
+  'Kirim': { load: api.zakaz, path: '/orders/zakaz/' },
   'Shartnomalar': { load: api.contracts, path: '/orders/contracts/', readonly: true },
   'Ombor': { load: api.products, path: '/warehouse/products/' },
-  'Kategoriyalar': { load: api.categories, path: '/warehouse/categories/' },
+  // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+  // 'Kategoriyalar': { load: api.categories, path: '/warehouse/categories/' },
   'Qoldiqlar': { load: api.stocks, path: '/warehouse/stocks/' },
   'Mijozlar': { load: api.clients, path: '/clients/' },
   'Sotuvlar': { load: api.sales, path: '/sales/' },
@@ -2444,7 +2424,7 @@ const resources = {
 
 function rowTitle(title, row) {
   if (title === 'Shartnomalar') return row.contract_number || `Reestr #${row.id}`
-  if (title === 'Import') return row.product_name || `Import #${row.id}`
+  if (title === 'Kirim') return row.product_name || `Kirim #${row.id}`
   if (title === 'Qoldiqlar') return row.product_name || row.product || `Qoldiq #${row.id}`
   if (title === 'Foydalanuvchilar') return row.username
   return row.company_name || row.full_name || row.client_name || row.name || `Hujjat #${row.id}`
@@ -2456,7 +2436,7 @@ function rowMeta(title, row) {
     if (row.asos && row.asos !== row.source_type_display) parts.push(row.asos)
     return parts.filter(Boolean).join(' • ') || row.created_at || '—'
   }
-  if (title === 'Import') return [row.status_display || row.status, row.supplier, row.expected_date].filter(Boolean).join(' • ') || '—'
+  if (title === 'Kirim') return [row.status_display || row.status, row.supplier, row.expected_date].filter(Boolean).join(' • ') || '—'
   if (title === 'Qoldiqlar') return [row.warehouse_location, `bron: ${row.reserved_quantity || 0}`].filter(Boolean).join(' • ')
   if (title === 'Foydalanuvchilar') return [row.role, row.is_active ? 'faol' : 'bloklangan'].filter(Boolean).join(' • ')
   if (title === 'Mijozlar') return [row.phone, row.inn, row.pinfl, row.passport_number, row.director_jshshr].filter(Boolean).join(' • ') || row.created_at || '—'
@@ -2465,7 +2445,7 @@ function rowMeta(title, row) {
 
 function rowValue(title, row, session) {
   const showPrices = can(session, 'prices_view')
-  if (title === 'Import') {
+  if (title === 'Kirim') {
     if (!showPrices || !row.total) return `${row.quantity || 0} dona`
     return `${money(row.total)} ${row.currency || ''}`
   }
@@ -2485,7 +2465,15 @@ function rowValue(title, row, session) {
   return row.total_amount ? `${money(row.total_amount)} so‘m` : (row.available_quantity ?? row.total ?? '—')
 }
 
-const GRID_PAGES = new Set(['Mijozlar', 'Sotuvlar', 'Import', 'Ombor', 'Kassa', 'Xarajatlar'])
+const GRID_PAGES = new Set(['Mijozlar', 'Sotuvlar', 'Kirim', 'Ombor', 'Qoldiqlar', 'Kassa', 'Xarajatlar'])
+
+// Qoldiq holati — Product.stock_status bilan mos (apps/warehouse/models.py)
+const STOCK_STATUS_BADGES = {
+  in_stock:     { label: 'Yetarli',  tone: 'success' },
+  low_stock:    { label: 'Kam qoldi', tone: 'warning' },
+  out_of_stock: { label: 'Tugagan',  tone: 'danger' },
+  on_the_way:   { label: 'Yo‘lda',   tone: 'info' },
+}
 
 const ORDER_STATUS_BADGES = {
   pending: { label: 'Kutilmoqda', tone: 'warning' },
@@ -2510,8 +2498,9 @@ const IMPORT_PAYMENT_BADGES = {
 const GRID_SORT_FIELDS = {
   Mijozlar: { name: 'company_name', created_at: 'created_at', status: 'is_active' },
   Sotuvlar: { product: 'sold_date', created_at: 'sold_date', total: 'sold_date' },
-  Import: { id: 'id', product: 'created_at', created_at: 'created_at', status: 'status', supplier: 'supplier', expected_date: 'expected_date' },
+  Kirim: { id: 'id', product: 'created_at', created_at: 'created_at', status: 'status', supplier: 'supplier', expected_date: 'expected_date' },
   Ombor: { name: 'name', created_at: 'created_at', quantity: 'name' },
+  Qoldiqlar: { name: 'product__name', created_at: 'created_at', quantity: 'quantity' },
   Kassa: { client: 'due_date', created_at: 'created_at', status: 'status' },
   Xarajatlar: { amount: 'date', created_at: 'date' },
 }
@@ -2633,7 +2622,7 @@ function getGridColumns(title, session, { renderStatus } = {}) {
       { key: 'created_at', label: 'Sana', sortable: true, render: (row) => formatDateUz(row.sold_date || row.created_at) },
     ]
   }
-  if (title === 'Import') {
+  if (title === 'Kirim') {
     const showPrices = can(session, 'prices_view')
     return [
       { key: 'id', label: 'ID', sortable: true, className: 'col-id', render: (row) => row._idLabel || row.id },
@@ -2681,8 +2670,10 @@ function getGridColumns(title, session, { renderStatus } = {}) {
   if (title === 'Ombor') {
     return [
       { key: 'name', label: 'Mahsulot', sortable: true, render: (row) => row.name || '—' },
-      { key: 'category', label: 'Kategoriya', render: (row) => row.category_name || '—' },
-      { key: 'model', label: 'Model', render: (row) => row.model || '—' },
+      // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+      // { key: 'category', label: 'Kategoriya', render: (row) => row.category_name || '—' },
+      // Model funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+      // { key: 'model', label: 'Model', render: (row) => row.model || '—' },
       { key: 'serial', label: 'Seriya', render: (row) => row.serial_number || '—' },
       { key: 'quantity', label: 'Qoldiq', sortable: true, render: (row) => rowValue(title, row, session) },
       ...(showPrices ? [
@@ -2697,6 +2688,21 @@ function getGridColumns(title, session, { renderStatus } = {}) {
         />
       ) },
       { key: 'created_at', label: 'Joy', render: (row) => row.warehouse_location || '—' },
+    ]
+  }
+  if (title === 'Qoldiqlar') {
+    return [
+      { key: 'name', label: 'Mahsulot', sortable: true, render: (row) => row.product_name || `Qoldiq #${row.id}` },
+      { key: 'location', label: 'Joylashuv', render: (row) => row.warehouse_location || (row.id == null ? 'Hali kirim bo‘lmagan' : '—') },
+      { key: 'quantity', label: 'Qoldiq', sortable: true, render: (row) => quantityWithUnit(row.quantity || 0, row) },
+      { key: 'reserved', label: 'Bron', render: (row) => quantityWithUnit(row.reserved_quantity || 0, row) },
+      { key: 'pending', label: 'Yo‘lda', render: (row) => (
+        row.pending_import_quantity ? quantityWithUnit(row.pending_import_quantity, row) : '—'
+      ) },
+      { key: 'status', label: 'Holati', render: (row) => {
+        const meta = STOCK_STATUS_BADGES[row.stock_status] || { label: row.stock_status, tone: 'neutral' }
+        return <StatusBadge status={row.stock_status} label={meta.label} tone={meta.tone} />
+      } },
     ]
   }
   if (title === 'Kassa') {
@@ -2773,7 +2779,7 @@ function ContractDetailModal({ id, close, onNavigate, navigateToPath }) {
               <div className="contract-detail-wide"><dt>Asos</dt><dd>{detail.asos || '—'}</dd></div>
               <div><dt>Faktura</dt><dd>{detail.faktura || '—'}</dd></div>
               <div><dt>Buyurtma</dt><dd>{detail.order ? `#${detail.order}` : '—'}</dd></div>
-              <div><dt>Import</dt><dd>{detail.zakaz ? `#${detail.zakaz}` : '—'}</dd></div>
+              <div><dt>Kirim</dt><dd>{detail.zakaz ? `#${detail.zakaz}` : '—'}</dd></div>
               <div><dt>Buyurtma (SK)</dt><dd>{detail.invoice ? detail.contract_number || `#${detail.invoice}` : '—'}</dd></div>
               <div><dt>Yaratgan</dt><dd>{detail.created_by_name || '—'}</dd></div>
               <div><dt>Yaratilgan vaqt</dt><dd>{detail.created_at || '—'}</dd></div>
@@ -2791,8 +2797,8 @@ function ContractDetailModal({ id, close, onNavigate, navigateToPath }) {
                   </button>
                 )}
                 {detail.zakaz && (
-                  <button type="button" className="secondary-button" onClick={() => goTo('Import')}>
-                    Importga o‘tish
+                  <button type="button" className="secondary-button" onClick={() => goTo('Kirim')}>
+                    Kirimga o‘tish
                   </button>
                 )}
               </div>
@@ -2873,8 +2879,8 @@ function ImportHistoryModal({ item, close }) {
     })))
     : (item?.history || [])
   const title = item?._grouped
-    ? `${item._items?.length || item._groupIds?.length || ''} ta mahsulot — import tarixi`
-    : (item?.product_name || `Import #${item?.id}`)
+    ? `${item._items?.length || item._groupIds?.length || ''} ta mahsulot — kirim tarixi`
+    : (item?.product_name || `Kirim #${item?.id}`)
   return (
     <div className="modal-backdrop" role="presentation">
       <div className="editor import-history-modal">
@@ -2912,7 +2918,8 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [searchTerm, setSearchTerm] = useState('')
-  const [listFilters, setListFilters] = useState({ status: '', client: '', category: '', date_from: '', date_to: '' })
+  // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi: `category` kaliti olib tashlandi.
+  const [listFilters, setListFilters] = useState({ status: '', client: '', date_from: '', date_to: '' })
   const [page, setPage] = useState(1)
   const [totalCount, setTotalCount] = useState(0)
   const [sortKey, setSortKey] = useState('created_at')
@@ -2967,7 +2974,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
   }
 
   const manageAbilities = {
-    'Import': 'procurement_manage',
+    'Kirim': 'procurement_manage',
     'Ombor': 'warehouse_manage',
     'Kategoriyalar': 'warehouse_manage',
     'Qoldiqlar': 'warehouse_manage',
@@ -2982,7 +2989,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
   }
   const canManage = can(session, manageAbilities[title])
   const canCreate = (can(session, createAbilities[title] || manageAbilities[title]))
-    && ['Mijozlar', 'Ombor', 'Import', 'Kategoriyalar', 'Qoldiqlar', 'Sotuvlar', 'Xarajatlar', 'Foydalanuvchilar'].includes(title)
+    && ['Mijozlar', 'Ombor', 'Kirim', 'Kategoriyalar', 'Qoldiqlar', 'Sotuvlar', 'Xarajatlar', 'Foydalanuvchilar'].includes(title)
   const canEditRows = canManage && !resources[title]?.readonly
 
   const handleMarkRead = async (id) => {
@@ -3012,8 +3019,8 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
 
   const handleEdit = async (row) => {
     if (!resources[title]) return
-    // Import — ko'p ma'lumotli forma, alohida sahifada ochiladi
-    if (title === 'Import') {
+    // Kirim — ko'p ma'lumotli forma, alohida sahifada ochiladi
+    if (title === 'Kirim') {
       navigateToPath(importEditPath(row.id))
       return
     }
@@ -3042,12 +3049,12 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
   }
 
   const displayRows = useMemo(
-    () => (title === 'Import' ? groupImportRows(rows) : rows),
+    () => (title === 'Kirim' ? groupImportRows(rows) : rows),
     [title, rows],
   )
 
   const selectedRows = useMemo(() => {
-    if (title !== 'Import') {
+    if (title !== 'Kirim') {
       return rows.filter((row) => selectedIds.includes(row.id))
     }
     const expanded = []
@@ -3061,7 +3068,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
 
   const gridColumns = useMemo(() => getGridColumns(title, session, {
     renderStatus: (row) => {
-      if (title === 'Import' && can(session, 'order_status_manage')) {
+      if (title === 'Kirim' && can(session, 'order_status_manage')) {
         const locked = ['received', 'cancelled'].includes(row.status) || row.status === 'mixed'
         const transitions = {
           new: ['new', 'confirmed', 'cancelled'],
@@ -3102,7 +3109,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
   }
 
   const handleBulkStatus = () => {
-    if (!selectedRows.length || title !== 'Import') return
+    if (!selectedRows.length || title !== 'Kirim') return
     setStatusChange({ mode: 'import', rows: selectedRows, targetStatus: listFilters.status || 'confirmed' })
   }
 
@@ -3120,7 +3127,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
         if (targetStatus === 'received') body.received_qty = payload.received_qty || row.quantity
         await api.update('/orders/zakaz/', row.id, body)
       }
-      notify('Import statusi yangilandi.', 'success')
+      notify('Kirim statusi yangilandi.', 'success')
     }
     setStatusChange(null)
     refreshAfterChange()
@@ -3150,12 +3157,12 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
 
   const renderRowActions = (row) => (
     <>
-      {title === 'Import' && (
+      {title === 'Kirim' && (
         <button type="button" className="row-action" disabled={opening} onClick={() => openImportHistory(row)} aria-label="Tarix">
           <ClockCounterClockwise size={18} />
         </button>
       )}
-      {canEditRows && <button className="row-action" disabled={opening} onClick={() => handleEdit(row)} aria-label="Tahrirlash"><PencilSimple size={18} /></button>}
+      {canEditRows && row.id != null && <button className="row-action" disabled={opening} onClick={() => handleEdit(row)} aria-label="Tahrirlash"><PencilSimple size={18} /></button>}
       {can(session, 'warehouse_manage') && title === 'Ombor' && <button className="row-action" onClick={() => setStockProduct(row)} aria-label="Kirim">Kirim</button>}
       {can(session, 'cash_manage') && title === 'Kassa' && row.remaining !== '0' && (
         <button className="row-action" onClick={() => setPaying(row)} aria-label="To‘lov"><CurrencyCircleDollar size={18} /></button>
@@ -3164,7 +3171,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
   )
 
   return (
-    <div className={`page resource-page${title === 'Import' ? ' resource-page--import' : ''}`}>
+    <div className={`page resource-page${title === 'Kirim' ? ' resource-page--import' : ''}`}>
       <div className="page-heading">
         <div>
           <p className="eyebrow">MODUL</p>
@@ -3182,7 +3189,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
           {canCreate && (
             <button
               className="primary-button"
-              onClick={() => (title === 'Import' ? navigateToPath(importNewPath()) : setEditing({}))}
+              onClick={() => (title === 'Kirim' ? navigateToPath(importNewPath()) : setEditing({}))}
             >
               <Plus size={20} />Yangi qo‘shish
             </button>
@@ -3191,7 +3198,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
       </div>
       <section className="data-panel">
         <div className="panel-head">
-          <div><p className="eyebrow">RO‘YXAT</p><h3>{title === 'Import' && useGrid ? `${displayRows.length} ta import · ${totalCount} qator` : `${useGrid ? totalCount : rows.length} ta yozuv`}</h3></div>
+          <div><p className="eyebrow">RO‘YXAT</p><h3>{title === 'Kirim' && useGrid ? `${displayRows.length} ta kirim · ${totalCount} qator` : `${useGrid ? totalCount : rows.length} ta yozuv`}</h3></div>
           <div className="panel-head-actions">
             {useGrid && <ListFiltersPanel title={title} filters={listFilters} onChange={setListFilters} />}
             <form className="resource-search" onSubmit={handleSearch}>
@@ -3206,7 +3213,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
               <DownloadSimple size={18} />
               Eksport
             </button>
-            {title === 'Import' && can(session, 'order_status_manage') && (
+            {title === 'Kirim' && can(session, 'order_status_manage') && (
               <button type="button" className="secondary-button" disabled={!selectedIds.length} onClick={handleBulkStatus}>
                 Status o‘zgartirish
               </button>
@@ -3216,7 +3223,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
         {useGrid ? (
           <>
             <DataTable
-              wrapClassName={title === 'Import' ? 'data-table-wrap--import' : ''}
+              wrapClassName={title === 'Kirim' ? 'data-table-wrap--import' : ''}
               columns={gridColumns}
               rows={displayRows}
               sortKey={sortKey}
@@ -3229,7 +3236,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
               emptyCta={showEmptyCta && emptyCfg.cta ? {
                 label: emptyCfg.label,
                 ctaLabel: emptyCfg.cta,
-                onCta: () => (title === 'Import' ? navigateToPath(importNewPath()) : setEditing({})),
+                onCta: () => (title === 'Kirim' ? navigateToPath(importNewPath()) : setEditing({})),
               } : null}
               selectable={useGrid}
               selectedIds={selectedIds}
@@ -3374,8 +3381,10 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
 }
 
 const fields = {
-  Ombor: [['name', 'Mahsulot nomi', true], ['category', 'Kategoriya', true], ['model', 'Model'], ['serial_number', 'Seriya raqami', true], ['barcode', 'Shtrix kod'], ['source', 'Manba / yetkazuvchi'], ['unit', 'O‘lchov birligi'], ['min_quantity', 'Minimal qoldiq'], ['purchase_price', 'Kelish narxi'], ['selling_price', 'Sotuv narxi'], ['delivery_price', 'Yetkazish narxi'], ['vat_percent', 'QQS %'], ['quantity', 'Boshlang‘ich miqdor'], ['warehouse_location', 'Ombordagi joy']],
-  Kategoriyalar: [['name', 'Kategoriya nomi', true], ['parent', 'Ota kategoriya']],
+  // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi: ['category', 'Kategoriya', true] olib tashlandi.
+  // Model funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi: ['model', 'Model'] olib tashlandi.
+  Ombor: [['name', 'Mahsulot nomi', true], ['serial_number', 'Seriya raqami', true], ['barcode', 'Shtrix kod'], ['source', 'Manba / yetkazuvchi'], ['unit', 'O‘lchov birligi'], ['min_quantity', 'Minimal qoldiq'], ['purchase_price', 'Kelish narxi'], ['selling_price', 'Sotuv narxi'], ['delivery_price', 'Yetkazish narxi'], ['vat_percent', 'QQS %'], ['quantity', 'Boshlang‘ich miqdor'], ['warehouse_location', 'Ombordagi joy']],
+  // Kategoriyalar: [['name', 'Kategoriya nomi', true], ['parent', 'Ota kategoriya']],
   Qoldiqlar: [['product', 'Mahsulot ID', true], ['quantity', 'Miqdor', true], ['reserved_quantity', 'Bron miqdor'], ['warehouse_location', 'Ombordagi joy', true]],
 }
 
@@ -3398,31 +3407,33 @@ function Editor({ title, item, path, close, done, notify, session }) {
   const [errors, setErrors] = useState({})
   const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [deleting, setDeleting] = useState(false)
-  const [categories, setCategories] = useState([])
+  // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+  // const [categories, setCategories] = useState([])
   const canManagePrices = can(session, 'prices_manage')
   const canDelete = Boolean(item?.id && ['Mijozlar', 'Ombor', 'Kategoriyalar', 'Qoldiqlar'].includes(title))
 
-  useEffect(() => {
-    // Kategoriyalar — daraxt tanlash uchun; Ombor — mahsulot kategoriyasi uchun
-    if (title !== 'Kategoriyalar' && title !== 'Ombor') return
-    api.categories({ page_size: 200 })
-      .then((data) => setCategories(list(data)))
-      .catch((err) => notify(err.message))
-  }, [title, notify])
-
-  const categoryOptions = useMemo(
-    () => (title === 'Ombor' ? flattenCategories(categories) : []),
-    [title, categories],
-  )
-
-  const parentOptions = useMemo(() => {
-    if (title !== 'Kategoriyalar') return []
-    const flat = flattenCategories(categories)
-    if (!item?.id) return flat
-    const node = findCategoryNode(categories, item.id)
-    const excluded = new Set([item.id, ...collectDescendantIds(node)])
-    return flat.filter((cat) => !excluded.has(cat.id))
-  }, [title, categories, item?.id])
+  // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+  // useEffect(() => {
+  //   // Kategoriyalar — daraxt tanlash uchun; Ombor — mahsulot kategoriyasi uchun
+  //   if (title !== 'Kategoriyalar' && title !== 'Ombor') return
+  //   api.categories({ page_size: 200 })
+  //     .then((data) => setCategories(list(data)))
+  //     .catch((err) => notify(err.message))
+  // }, [title, notify])
+  //
+  // const categoryOptions = useMemo(
+  //   () => (title === 'Ombor' ? flattenCategories(categories) : []),
+  //   [title, categories],
+  // )
+  //
+  // const parentOptions = useMemo(() => {
+  //   if (title !== 'Kategoriyalar') return []
+  //   const flat = flattenCategories(categories)
+  //   if (!item?.id) return flat
+  //   const node = findCategoryNode(categories, item.id)
+  //   const excluded = new Set([item.id, ...collectDescendantIds(node)])
+  //   return flat.filter((cat) => !excluded.has(cat.id))
+  // }, [title, categories, item?.id])
   const visibleFields = title === 'Ombor'
     ? fields[title].filter(([key]) => {
       if (key === 'purchase_price' || key === 'selling_price' || key === 'min_quantity' || key === 'delivery_price') return canManagePrices
@@ -3442,7 +3453,8 @@ function Editor({ title, item, path, close, done, notify, session }) {
     setSaving(true)
     const payload = Object.fromEntries(Object.entries(form).filter(([key, value]) => !['id', 'created_at', 'quantity_in_stock', 'available_quantity', 'reserved_quantity', 'stock_status', 'category_name', 'unit_display'].includes(key) && value !== undefined && value !== ''))
     if (title === 'Ombor') {
-      if (payload.category) payload.category = Number(payload.category)
+      // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+      // if (payload.category) payload.category = Number(payload.category)
       if (payload.min_quantity) payload.min_quantity = Number(payload.min_quantity)
       if (payload.quantity) payload.quantity = Number(payload.quantity)
       if (!canManagePrices) {
@@ -3456,9 +3468,10 @@ function Editor({ title, item, path, close, done, notify, session }) {
       if (payload.quantity) payload.quantity = Number(payload.quantity)
       if (payload.reserved_quantity) payload.reserved_quantity = Number(payload.reserved_quantity)
     }
-    if (title === 'Kategoriyalar') {
-      if (payload.parent) payload.parent = Number(payload.parent)
-    }
+    // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+    // if (title === 'Kategoriyalar') {
+    //   if (payload.parent) payload.parent = Number(payload.parent)
+    // }
     if (title === 'Mijozlar') {
       if (payload.client_type === 'individual') {
         payload.full_name = (payload.full_name || '').trim()
@@ -3566,20 +3579,22 @@ function Editor({ title, item, path, close, done, notify, session }) {
                 <select value={form.vat_percent || 'none'} onChange={(event) => setForm({ ...form, vat_percent: event.target.value })}>
                   {vatOptions.map(([value, name]) => <option value={value} key={value}>{name}</option>)}
                 </select>
-              ) : key === 'category' ? (
-                <select required={required} value={form.category ?? ''} onChange={(event) => setForm({ ...form, category: event.target.value })}>
-                  <option value="">Kategoriyani tanlang</option>
-                  {categoryOptions.map((cat) => (
-                    <option value={cat.id} key={cat.id}>{`${'— '.repeat(cat.depth)}${cat.name}`}</option>
-                  ))}
-                </select>
-              ) : key === 'parent' ? (
-                <select value={form.parent ?? ''} onChange={(event) => setForm({ ...form, parent: event.target.value })}>
-                  <option value="">Asosiy kategoriya (yuqori daraja)</option>
-                  {parentOptions.map((cat) => (
-                    <option value={cat.id} key={cat.id}>{`${'— '.repeat(cat.depth)}${cat.name}`}</option>
-                  ))}
-                </select>
+                // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi:
+                // key === 'category' va key === 'parent' tarmoqlari olib tashlandi (endi hech qachon ishlamaydi):
+                // ) : key === 'category' ? (
+                //   <select required={required} value={form.category ?? ''} onChange={(event) => setForm({ ...form, category: event.target.value })}>
+                //     <option value="">Kategoriyani tanlang</option>
+                //     {categoryOptions.map((cat) => (
+                //       <option value={cat.id} key={cat.id}>{`${'— '.repeat(cat.depth)}${cat.name}`}</option>
+                //     ))}
+                //   </select>
+                // ) : key === 'parent' ? (
+                //   <select value={form.parent ?? ''} onChange={(event) => setForm({ ...form, parent: event.target.value })}>
+                //     <option value="">Asosiy kategoriya (yuqori daraja)</option>
+                //     {parentOptions.map((cat) => (
+                //       <option value={cat.id} key={cat.id}>{`${'— '.repeat(cat.depth)}${cat.name}`}</option>
+                //     ))}
+                //   </select>
               ) : (
                 <input required={required} value={form[key] ?? ''} type={key === 'email' ? 'email' : ['min_quantity', 'quantity', 'purchase_price', 'selling_price', 'delivery_price'].includes(key) ? 'number' : 'text'} step={['purchase_price', 'selling_price', 'delivery_price'].includes(key) ? '0.01' : undefined} min={['min_quantity', 'quantity'].includes(key) ? '0' : undefined} onChange={(event) => setForm({ ...form, [key]: event.target.value })} />
               )}
@@ -3894,7 +3909,8 @@ const emptyImportRow = () => ({
   zakazId: null,
   product: '',
   product_name: '',
-  category: '',
+  // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+  // category: '',
   identification_code: '',
   barcode: '',
   unit: 'piece',
@@ -3923,7 +3939,8 @@ function fillImportRowFromProduct(row, product, showPrices) {
     ...row,
     product: product.id,
     product_name: product.name,
-    category: product.category ? String(product.category) : (row.category || ''),
+    // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+    // category: product.category ? String(product.category) : (row.category || ''),
     identification_code: product.serial_number || '',
     barcode: product.barcode || '',
     unit: product.unit || 'piece',
@@ -3955,6 +3972,47 @@ function splitPartialPayment(totalPaid, lineTotals) {
   return splits
 }
 
+// Oldindan to'lov foizi — 5/10/15/30% tayyor variantlar + o'zi kiritish.
+// Kirim (Zakaz) va Buyurtma (Order) editorlarida bir xil ishlatiladi.
+const PREPAID_PERCENT_PRESETS = ['5', '10', '15', '30']
+
+function PrepaidPercentField({ value, onChange, label = 'Oldindan to‘lov (%)' }) {
+  const isPreset = PREPAID_PERCENT_PRESETS.includes(String(value ?? ''))
+  const selectValue = value === '' || value == null ? '' : (isPreset ? String(value) : 'custom')
+  return (
+    <label>
+      {label}
+      <div className="prepaid-percent-field">
+        <select
+          value={selectValue}
+          onChange={(event) => {
+            const next = event.target.value
+            onChange(next === 'custom' ? (isPreset ? '' : String(value ?? '')) : next)
+          }}
+        >
+          <option value="">—</option>
+          {PREPAID_PERCENT_PRESETS.map((preset) => (
+            <option value={preset} key={preset}>{preset}%</option>
+          ))}
+          <option value="custom">Boshqa...</option>
+        </select>
+        {(selectValue === 'custom') && (
+          <input
+            type="number"
+            min="0"
+            max="100"
+            step="0.01"
+            value={value ?? ''}
+            onChange={(event) => onChange(event.target.value)}
+            placeholder="Masalan, 20"
+            aria-label="Oldindan to‘lov foizi (o‘zi kiritish)"
+          />
+        )}
+      </div>
+    </label>
+  )
+}
+
 function ZakazEditor({ close, done, notify, item = null, session, asPage = false }) {
   const showPrices = can(session, 'prices_manage')
   const showPayment = showPrices || can(session, 'cash_manage')
@@ -3964,7 +4022,8 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
   const productLocked = Boolean(item?.order_contract)
   const canMultiLine = !isBackorder && !productLocked
   const [products, setProducts] = useState([])
-  const [categories, setCategories] = useState([])
+  // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+  // const [categories, setCategories] = useState([])
   const [saving, setSaving] = useState(false)
   const [batchLoading, setBatchLoading] = useState(Boolean(item?.id && canMultiLine))
   const [importBatchId, setImportBatchId] = useState(item?.import_batch || null)
@@ -3980,6 +4039,9 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
     selling_price: item?.selling_price || '',
     currency: item?.currency || 'UZS',
     supplier: item?.supplier || '',
+    supplier_client: item?.supplier_client || '',
+    import_type: item?.import_type || 'domestic',
+    prepaid_percent: item?.prepaid_percent != null ? String(item.prepaid_percent) : '30',
     status: item?.status || 'new',
     payment_status: item?.payment_status || 'unpaid',
     paid_amount: item?.paid_amount || '',
@@ -3991,12 +4053,24 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
     asos: item?.asos || '',
     comment: item?.comment || '',
   }))
+  // Yetkazuvchi — mijozlar bazasidan tanlangan bo'lsa uning to'liq
+  // ma'lumoti (nomi) ko'rsatish uchun; tanlanmagan bo'lsa erkin matn
+  // (`form.supplier`) ishlatiladi.
+  const [supplierClientDetail, setSupplierClientDetail] = useState(null)
+  const [supplierPickerOpen, setSupplierPickerOpen] = useState(false)
+  const [supplierQuickAddOpen, setSupplierQuickAddOpen] = useState(false)
+
+  useEffect(() => {
+    if (!item?.supplier_client || !can(session, 'clients_view')) return
+    fetchClient(item.supplier_client).then(setSupplierClientDetail).catch(() => {})
+  }, [item?.supplier_client, session])
 
   useEffect(() => {
     api.products({ page_size: 500 }).then((data) => setProducts(list(data))).catch((err) => notify(err.message))
-    api.categories({ page_size: 200 })
-      .then((data) => setCategories(flattenCategories(list(data))))
-      .catch((err) => notify(err.message))
+    // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+    // api.categories({ page_size: 200 })
+    //   .then((data) => setCategories(flattenCategories(list(data))))
+    //   .catch((err) => notify(err.message))
   }, [notify])
 
   // Yangi importda shartnoma raqamini oldindan ko‘rsatamiz (o‘sha kunning
@@ -4037,6 +4111,9 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
           selling_price: anchor.selling_price || '',
           currency: anchor.currency || 'UZS',
           supplier: anchor.supplier || '',
+          supplier_client: anchor.supplier_client || '',
+          import_type: anchor.import_type || 'domestic',
+          prepaid_percent: anchor.prepaid_percent != null ? String(anchor.prepaid_percent) : '30',
           status: anchor.status || 'new',
           payment_status: anchor.payment_status || 'unpaid',
           paid_amount: anchor.payment_status === 'partial' && batchPaid > 0
@@ -4050,13 +4127,16 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
           asos: anchor.asos || '',
           comment: anchor.comment || '',
         }))
+        if (anchor.supplier_client && can(session, 'clients_view')) {
+          fetchClient(anchor.supplier_client).then(setSupplierClientDetail).catch(() => {})
+        }
       })
       .catch((err) => notify(err.message))
       .finally(() => {
         if (!cancelled) setBatchLoading(false)
       })
     return () => { cancelled = true }
-  }, [item, canMultiLine, notify])
+  }, [item, canMultiLine, notify, session])
 
   // Ombordan tanlangan qatorlarni mahsulot ma'lumotlari bilan to'ldiradi
   useEffect(() => {
@@ -4119,7 +4199,8 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
   const buildNewProductPayload = (row) => {
     const payload = {
       name: (row.product_name || '').trim(),
-      category: Number(row.category),
+      // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+      // category: Number(row.category),
       serial_number: (row.identification_code || '').trim(),
       barcode: (row.barcode || '').trim() || null,
       unit: row.unit || 'piece',
@@ -4157,10 +4238,11 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
       if (!row.product && !(row.product_name || '').trim()) {
         throw new Error(`${index + 1}-qator: tovar nomi kiritilishi shart.`)
       }
-      // Yangi mahsulot ombor ro'yxatiga qo'shiladi — kategoriyasiz bo'lmaydi
-      if (!row.product && !row.category) {
-        throw new Error(`${index + 1}-qator: yangi mahsulot uchun kategoriya tanlanishi shart.`)
-      }
+      // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi:
+      // yangi mahsulot uchun kategoriya majburiy emas endi (backend ham talab qilmaydi).
+      // if (!row.product && !row.category) {
+      //   throw new Error(`${index + 1}-qator: yangi mahsulot uchun kategoriya tanlanishi shart.`)
+      // }
       if (showPrices) {
         if (row.unit_price === '' || row.unit_price == null) {
           throw new Error(`${index + 1}-qator: kelish narxi kiritilishi shart.`)
@@ -4209,6 +4291,10 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
           <option value="paid">To‘langan</option>
         </select>
       </label>
+      <PrepaidPercentField
+        value={form.prepaid_percent}
+        onChange={(value) => setForm({ ...form, prepaid_percent: value })}
+      />
       {form.payment_status === 'partial' && (
         <label>Qisman to‘langan summa
           <input
@@ -4295,7 +4381,7 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
           if (!contractNumberEdited) delete bulkPayload.contract_number
           applyPaymentPayload(bulkPayload)
           await api.zakazBulk(bulkPayload)
-          notify('Import yaratildi.', 'success')
+          notify('Kirim yaratildi.', 'success')
           done()
           return
         }
@@ -4359,7 +4445,7 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
             await api.create('/orders/zakaz/', createPayload)
           }
         }
-        notify('Import yangilandi.', 'success')
+        notify('Kirim yangilandi.', 'success')
         done()
         return
       }
@@ -4380,7 +4466,7 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
         delete payload.paid_amount
       }
       await api.update('/orders/zakaz/', item.id, payload)
-      notify('Import yangilandi.', 'success')
+      notify('Kirim yangilandi.', 'success')
       done()
     } catch (err) {
       notify(err.message)
@@ -4394,8 +4480,8 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
       <form className={`editor import-editor${asPage ? ' editor--page' : ''}`} onSubmit={submit}>
         <div className="editor-head">
           <div>
-            <p className="eyebrow">{item?.id ? 'IMPORT TAHRIRI' : 'YANGI IMPORT'}</p>
-            <h3>Yetkazuvchidan import</h3>
+            <p className="eyebrow">{item?.id ? 'KIRIM TAHRIRI' : 'YANGI KIRIM'}</p>
+            <h3>Yetkazuvchidan kirim</h3>
           </div>
           <button type="button" className="icon-button" onClick={close} aria-label={asPage ? 'Ro‘yxatga qaytish' : 'Yopish'}>
             {asPage ? <ArrowLeft size={20} /> : <X size={20} />}
@@ -4429,7 +4515,8 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
                     <tr>
                       <th>№</th>
                       <th>Tovar nomi</th>
-                      <th>Kategoriya</th>
+                      {/* Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi. */}
+                      {/* <th>Kategoriya</th> */}
                       <th>Seriya raqami</th>
                       <th>Shtrix kod</th>
                       <th>O‘lchov birligi</th>
@@ -4475,7 +4562,8 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
                             {products.map((p) => <option value={p.name} key={p.id} />)}
                           </datalist>
                         </td>
-                        <td>
+                        {/* Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi. */}
+                        {/* <td>
                           <select
                             required={!row.product}
                             value={row.category ?? ''}
@@ -4487,7 +4575,7 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
                               <option value={cat.id} key={cat.id}>{`${'— '.repeat(cat.depth)}${cat.name}`}</option>
                             ))}
                           </select>
-                        </td>
+                        </td> */}
                         <td>
                           <input
                             list={`import-serial-${index}`}
@@ -4615,7 +4703,38 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
               <label>Status<select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value })}><option value="new">Yangi</option><option value="confirmed">Tasdiqlandi</option><option value="ordered">Etkazuvchiga yuborildi</option><option value="received">Qabul qilindi</option><option value="cancelled">Bekor qilindi</option></select></label>
             )
           )}
-          <label>Yetkazuvchi<input value={form.supplier} onChange={(event) => setForm({ ...form, supplier: event.target.value })} /></label>
+          <label>Kirim turi
+            <select value={form.import_type} onChange={(event) => setForm({ ...form, import_type: event.target.value })}>
+              <option value="domestic">O‘zbekiston ichidan sotib olish</option>
+              <option value="import">Import</option>
+              <option value="charter">Ustavdan kiritish</option>
+            </select>
+          </label>
+          <ClientPickerField
+            id="zakaz-supplier-client"
+            label="Yetkazuvchi (mijozlar bazasidan)"
+            value={form.supplier_client || ''}
+            selectedOption={supplierClientDetail}
+            onOpen={() => {
+              if (!can(session, 'clients_view')) {
+                notify('Mijozlar reestrini ko‘rish ruxsati yo‘q.')
+                return
+              }
+              setSupplierPickerOpen(true)
+            }}
+            onClear={() => {
+              setForm({ ...form, supplier_client: '' })
+              setSupplierClientDetail(null)
+            }}
+            placeholder="Bazadan tanlash (ixtiyoriy)..."
+          />
+          <label>Yetkazuvchi (erkin matn)
+            <input
+              value={form.supplier}
+              onChange={(event) => setForm({ ...form, supplier: event.target.value })}
+              placeholder="Bazada yo‘q bo‘lsa shu yerga yozing"
+            />
+          </label>
           <label>Shartnoma raqami<input value={form.contract_number} onChange={(event) => { setContractNumberEdited(true); setForm({ ...form, contract_number: event.target.value }) }} placeholder="Bo‘sh qoldirilsa avtomatik beriladi" /></label>
           <label>Shartnoma sanasi<input type="date" value={form.contract_date} onChange={(event) => setForm({ ...form, contract_date: event.target.value })} /></label>
           <label>Faktura<input value={form.faktura} onChange={(event) => setForm({ ...form, faktura: event.target.value })} /></label>
@@ -4634,6 +4753,38 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
             selectImportProduct(importPickerIndex, product)
             setImportPickerIndex(null)
           }}
+        />
+      )}
+      {supplierPickerOpen && can(session, 'clients_view') && (
+        <ClientPickerModal
+          title="Yetkazuvchini tanlash"
+          selectedId={form.supplier_client}
+          canSearch={can(session, 'clients_view')}
+          canAdd={can(session, 'clients_manage')}
+          onClose={() => setSupplierPickerOpen(false)}
+          onSelect={(client) => {
+            setForm({ ...form, supplier_client: client.id })
+            setSupplierClientDetail(client)
+            setSupplierPickerOpen(false)
+          }}
+          onAddNew={() => { setSupplierPickerOpen(false); setSupplierQuickAddOpen(true) }}
+        />
+      )}
+      {supplierQuickAddOpen && can(session, 'clients_manage') && (
+        <Editor
+          title="Mijozlar"
+          item={{ client_type: 'legal' }}
+          path="/clients/"
+          close={() => setSupplierQuickAddOpen(false)}
+          done={(created) => {
+            setSupplierQuickAddOpen(false)
+            if (created?.id) {
+              setForm({ ...form, supplier_client: created.id })
+              setSupplierClientDetail(created)
+            }
+          }}
+          notify={notify}
+          session={session}
         />
       )}
     </>
@@ -4870,7 +5021,8 @@ function fillLineFromProduct(line, product, showPrices) {
     ...line,
     product: product.id,
     product_name: product.name,
-    category: product.category ? String(product.category) : (line.category || ''),
+    // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+    // category: product.category ? String(product.category) : (line.category || ''),
     identification_code: product.serial_number || '',
     barcode: product.barcode || '',
     unit: product.unit || 'piece',
@@ -4893,7 +5045,8 @@ function reconcileLineWithProducts(line, products, showPrices) {
 }
 
 function emptyInvoiceLine(num = 1) {
-  return { line_number: num, product: '', product_name: '', category: '', identification_code: '', barcode: '', unit: 'piece', quantity: '1', unit_price: '', selling_price: '', delivery_amount: 0, vat_percent: 'none', vat_amount: 0, total_amount: 0 }
+  // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi: `category: ''` olib tashlandi.
+  return { line_number: num, product: '', product_name: '', identification_code: '', barcode: '', unit: 'piece', quantity: '1', unit_price: '', selling_price: '', delivery_amount: 0, vat_percent: 'none', vat_amount: 0, total_amount: 0 }
 }
 
 function validateEInvoice(editing, { showPrices, company } = {}) {
@@ -5713,7 +5866,8 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
   const [selectedClientDetail, setSelectedClientDetail] = useState(null)
   const [selectedExecutorClientDetail, setSelectedExecutorClientDetail] = useState(null)
   const [products, setProducts] = useState([])
-  const [categories, setCategories] = useState([])
+  // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+  // const [categories, setCategories] = useState([])
   // Buyurtmada tanlash uchun — import holatidagi (hali kelmagan) tovarlarsiz.
   // To'liq `products` ro'yxati mavjud qatorlarni mahsulotga bog'lash uchun qoladi.
   const selectableProducts = useMemo(
@@ -5810,15 +5964,14 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [invoiceData, productData, categoryData, profile] = await Promise.all([
+      // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi: api.categories(...) olib tashlandi.
+      const [invoiceData, productData, profile] = await Promise.all([
         api.invoices(),
         api.products({ page_size: 500 }),
-        api.categories({ page_size: 200 }),
         api.companyProfile(),
       ])
       setRows(list(invoiceData))
       setProducts(list(productData))
-      setCategories(flattenCategories(list(categoryData)))
       setCompany(profile)
     } catch (err) {
       notifyRef.current(err.message)
@@ -6004,7 +6157,8 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
         lines: (detail.lines?.length ? detail.lines : [emptyInvoiceLine()]).map((line) => ({
           ...line,
           product: line.product || '',
-          category: line.category ? String(line.category) : '',
+          // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+          // category: line.category ? String(line.category) : '',
           quantity: String(line.quantity ?? 1),
           unit_price: line.unit_price ?? '',
           selling_price: line.selling_price ?? '',
@@ -6187,7 +6341,8 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
             line_number: index + 1,
             product: computed.product || null,
             product_name: computed.product_name,
-            category: computed.category ? Number(computed.category) : null,
+            // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+            // category: computed.category ? Number(computed.category) : null,
             identification_code: computed.identification_code,
             barcode: computed.barcode,
             unit: computed.unit || 'piece',
@@ -6437,7 +6592,8 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
                     <tr>
                       <th>№</th>
                       <th>Tovar nomi</th>
-                      <th>Kategoriya</th>
+                      {/* Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi. */}
+                      {/* <th>Kategoriya</th> */}
                       <th>Seriya raqami</th>
                       <th>Shtrix kod</th>
                       <th>O‘lchov birligi</th>
@@ -6486,7 +6642,8 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
                           </datalist>
                           <EInvoiceFieldError message={errors[`lines.${index}.product_name`]} />
                         </td>
-                        <td>
+                        {/* Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi. */}
+                        {/* <td>
                           <select
                             required={!line.product}
                             value={line.category ?? ''}
@@ -6498,7 +6655,7 @@ function BuyurtmalarPage({ notify, session, routeMode = 'list', invoiceId = null
                               <option value={cat.id} key={cat.id}>{`${'— '.repeat(cat.depth)}${cat.name}`}</option>
                             ))}
                           </select>
-                        </td>
+                        </td> */}
                         <td>
                           <input
                             list={`einv-idcode-${index}`}

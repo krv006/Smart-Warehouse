@@ -293,7 +293,7 @@ function PaymentCreateModal({ close, done, notify }) {
 }
 
 function ledgerSourceLabel(row) {
-  if (row.source === 'import') return 'Import'
+  if (row.source === 'import') return 'Kirim'
   if (row.source === 'order') return 'Buyurtma'
   if (row.source === 'sale') return 'Sotuv'
   if (row.source === 'expense') return 'Rasxod'
@@ -564,7 +564,7 @@ export default function KassaPage({ notify, session, onDataChange, reloadKey = 0
             onEdit={canAdjustBalance ? () => setAdjusting('USD') : null}
           />
           <KassaMetric icon={ArrowUp} label="Tushum (UZS)" value={`UZS ${money(summary.sum_in_uzs ?? summary.sum_paid_uzs)}`} tone="success" />
-          <KassaMetric icon={ArrowDown} label="Import chiqim (UZS)" value={`UZS ${money(summary.sum_import_uzs)}`} tone="warning" />
+          <KassaMetric icon={ArrowDown} label="Kirim chiqim (UZS)" value={`UZS ${money(summary.sum_import_uzs)}`} tone="warning" />
           <KassaMetric icon={CurrencyCircleDollar} label="Komissiya (UZS)" value={`UZS ${money(summary.total_commission_uzs)}`} />
         </section>
       )}
@@ -588,7 +588,7 @@ export default function KassaPage({ notify, session, onDataChange, reloadKey = 0
                 <option value="">Barcha manba</option>
                 <option value="sale">Sotuv</option>
                 <option value="order">Buyurtma</option>
-                <option value="import">Import</option>
+                <option value="import">Kirim</option>
                 <option value="expense">Rasxod</option>
                 <option value="adjustment">Qo‘lda tuzatish</option>
               </select>

@@ -8,7 +8,8 @@ export const workspace = 'Asosiy ombor'
 export const NAV_GROUPS = {
   Ombor: [
     { page: 'Ombor', label: 'Mahsulotlar', ability: 'warehouse_view' },
-    { page: 'Kategoriyalar', label: 'Kategoriyalar', ability: 'categories_view' },
+    // Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+    // { page: 'Kategoriyalar', label: 'Kategoriyalar', ability: 'categories_view' },
     { page: 'Qoldiqlar', label: 'Qoldiqlar', ability: 'stocks_view' },
   ],
   Moliya: [
@@ -20,7 +21,7 @@ export const NAV_GROUPS = {
 export const SIDEBAR_NAV = [
   ['Bosh sahifa', House, 'dashboard'],
   ['Buyurtmalar', FileText, 'orders_view'],
-  ['Import', Truck, 'procurement_view'],
+  ['Kirim', Truck, 'procurement_view'],
   ['Shartnomalar', ClipboardText, 'contracts_view'],
   ['Ombor', Package, '__group_ombor__'],
   ['Mijozlar', Users, 'clients_view'],
@@ -56,7 +57,7 @@ export const documentTypeLabels = {
   contract: 'Shartnoma',
 }
 
-export const GRID_PAGES = new Set(['Mijozlar', 'Buyurtmalar', 'Sotuvlar', 'Import', 'Ombor', 'Kassa', 'Xarajatlar'])
+export const GRID_PAGES = new Set(['Mijozlar', 'Buyurtmalar', 'Sotuvlar', 'Kirim', 'Ombor', 'Kassa', 'Xarajatlar'])
 
 export const ORDER_STATUS_BADGES = {
   pending: { label: 'Kutilmoqda', tone: 'warning' },

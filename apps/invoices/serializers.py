@@ -8,22 +8,21 @@ from rest_framework.serializers import (ModelSerializer, ValidationError,
 from apps.invoices.expense_sync import sync_invoice_expense
 from apps.invoices.models import ElectronicInvoice, ExecutorType, InvoiceLineItem, VatPercent
 from apps.invoices.services import sync_invoice_contract_registry
-from apps.warehouse.models import Category, Product, ProductUnit
+from apps.warehouse.models import Product, ProductUnit  # Category vaqtincha ishlatilmaydi
 
 
 class InvoiceLineItemSerializer(ModelSerializer):
     unit_display = SerializerMethodField()
     vat_percent_display = SerializerMethodField()
-    # Ombordagi mahsulot topilmasa YANGI mahsulot ochiladi — unga kategoriya
-    # majburiy (modelda saqlanmaydi, faqat mahsulot yaratish uchun)
-    category = PrimaryKeyRelatedField(queryset=Category.objects.all(),
-                                      required=False, allow_null=True,
-                                      write_only=True)
+    # Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+    # category = PrimaryKeyRelatedField(queryset=Category.objects.all(),
+    #                                   required=False, allow_null=True,
+    #                                   write_only=True)
 
     class Meta:
         model = InvoiceLineItem
         fields = (
-            'id', 'line_number', 'product', 'product_name', 'category',
+            'id', 'line_number', 'product', 'product_name',
             'identification_code', 'barcode', 'unit', 'unit_display',
             'quantity', 'unit_price', 'selling_price', 'delivery_amount',
             'vat_percent', 'vat_percent_display', 'vat_amount', 'total_amount',
@@ -125,8 +124,6 @@ class ElectronicInvoiceSerializer(ModelSerializer):
         from apps.warehouse.models import ProductOrigin
         from apps.warehouse.product_utils import create_import_product, find_product
 
-        # `category` modelda yo'q — faqat yangi mahsulot ochish uchun
-        category = line_data.pop('category', None)
         if isinstance(line_data.get('product'), Product):
             return line_data
         name = (line_data.get('product_name') or '').strip()
@@ -138,14 +135,8 @@ class ElectronicInvoiceSerializer(ModelSerializer):
             barcode=line_data.get('barcode'),
         )
         if product is None:
-            if category is None:
-                raise ValidationError({
-                    'lines': (f'"{name}" omborda topilmadi — yangi mahsulot '
-                              f'uchun kategoriya (category) tanlanishi shart.'),
-                })
             product = create_import_product({
                 'name': name,
-                'category': category,
                 'serial_number': line_data.get('identification_code'),
                 'barcode': line_data.get('barcode'),
                 'unit': line_data.get('unit'),

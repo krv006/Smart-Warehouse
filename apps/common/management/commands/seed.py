@@ -139,8 +139,9 @@ class Command(BaseCommand):
         self.stdout.write('>>> Seed boshlandi...\n')
 
         users     = self._seed_users(options['users'])
-        cats      = self._seed_categories()
-        products  = self._seed_products(options['products'], cats)
+        # Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+        # cats      = self._seed_categories()
+        products  = self._seed_products(options['products'])
         self._seed_stocks(products)
         exp_types = self._seed_expense_types()
         clients   = self._seed_clients(options['clients'])
@@ -167,7 +168,7 @@ class Command(BaseCommand):
         from apps.orders.models import Order, Zakaz
         from apps.sales.models import Sale
         from apps.users.models import User
-        from apps.warehouse.models import Category, Product, Stock
+        from apps.warehouse.models import Product, Stock  # Category vaqtincha ishlatilmaydi
 
         self.stdout.write('>>> Baza tozalanmoqda...')
         Payment.objects.all().delete()   # PROTECT: Order/Sale dan oldin
@@ -178,7 +179,7 @@ class Command(BaseCommand):
         Notification.objects.all().delete()
         Stock.objects.all().delete()
         Product.objects.all().delete()
-        Category.objects.all().delete()
+        # Category.objects.all().delete()
         Expense.objects.all().delete()
         ExpenseSubType.objects.all().delete()
         ExpenseType.objects.all().delete()
@@ -232,24 +233,24 @@ class Command(BaseCommand):
         return users
 
     # ── Categories ────────────────────────────────────────────────────────────
-    def _seed_categories(self):
-        from apps.warehouse.models import Category
-        cats = []
-        for parent_name, children in PRODUCT_CATEGORIES:
-            parent, _ = Category.objects.get_or_create(name=parent_name)
-            cats.append(parent)
-            for child_name in children:
-                child, _ = Category.objects.get_or_create(
-                    name=child_name, parent=parent
-                )
-                cats.append(child)
-        self.stdout.write(ok(f'{len(cats)} ta kategoriya yaratildi'))
-        return cats
+    # Kategoriya funksiyasi vaqtincha o'chirilgan — keyinchalik qaytariladi.
+    # def _seed_categories(self):
+    #     from apps.warehouse.models import Category
+    #     cats = []
+    #     for parent_name, children in PRODUCT_CATEGORIES:
+    #         parent, _ = Category.objects.get_or_create(name=parent_name)
+    #         cats.append(parent)
+    #         for child_name in children:
+    #             child, _ = Category.objects.get_or_create(
+    #                 name=child_name, parent=parent
+    #             )
+    #             cats.append(child)
+    #     self.stdout.write(ok(f'{len(cats)} ta kategoriya yaratildi'))
+    #     return cats
 
     # ── Products ──────────────────────────────────────────────────────────────
-    def _seed_products(self, count, cats):
-        from apps.warehouse.models import Category, Product
-        leaf_cats = list(Category.objects.filter(children__isnull=True))
+    def _seed_products(self, count):
+        from apps.warehouse.models import Product
         products  = []
         used_serials = set()
 
@@ -270,7 +271,6 @@ class Command(BaseCommand):
             min_qty      = random.choice([3, 5, 5, 5, 10, 10, 15, 20])
 
             p = Product.objects.create(
-                category=random.choice(leaf_cats),
                 name=f'{brand} {model}',
                 model=model,
                 serial_number=serial,

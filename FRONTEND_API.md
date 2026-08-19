@@ -147,17 +147,19 @@ Sana:
 YYYY-MM-DD
 ```
 
-**Shartnoma raqami (o'zgardi — endi UMUMIY, erkin matn):**
+**Shartnoma raqami (yana kunlik — `{tartib}/{DDMM}`):**
 
-Avval har kun uchun alohida (`{tartib}/{DDMM}`, kuniga 1 dan qayta boshlanadigan) raqam berilardi. Endi **bitta umumiy, hech qachon qayta boshlanmaydigan** ketma-ket son beriladi — kim, qaysi modulda (buyurtma/zakaz/faktura) va qaysi kunda yaratishidan qat'i nazar, bitta hisoblagichdan olinadi:
+Har bir SANA uchun alohida, 1 dan boshlanadigan ketma-ket raqam beriladi, `{tartib}/{DDMM}` formatida:
 
 ```text
-1, 2, 3, 4, ...
+1/1908, 2/1908, 3/1908, ...
 ```
 
-Bu — faqat **standart (avtomatik)** qiymat, maydon bo'sh qoldirilganda ishlatiladi. Xodim istasa, shartnoma raqamini **istalgan boshqa ko'rinishda** qo'lda kiritishi mumkin (masalan `124151245124`) — **hech qanday format tekshiruvi endi yo'q** (na backend, na frontendda). Eski `^\d+/\d{4}$` regex talabi butunlay olib tashlandi.
+Hisoblagich `contract_date` bo'yicha mustaqil — masalan bugun (19-avgust) kecha (18-avgust, "1808") uchun kechroq/qoldirilgan shartnoma kiritilsa, backend o'sha sanadagi mavjud hujjatlar sonini hisoblab, keyingi raqamni beradi (kecha 3 ta bo'lgan bo'lsa — `4/1808`). Sana tanlanmasa — bugungi kun bo'yicha.
 
-Bo‘sh yuborilsa backend avtomatik yaratadi (`apps/common/contracts.allocate_contract_number`).
+Bu — faqat **standart (avtomatik)** qiymat, maydon bo'sh qoldirilganda ishlatiladi. Xodim istasa, shartnoma raqamini **istalgan boshqa ko'rinishda** qo'lda kiritishi mumkin (masalan `124151245124`) — **hech qanday format tekshiruvi yo'q** (na backend, na frontendda).
+
+Bo‘sh yuborilsa backend avtomatik yaratadi (`apps/common/contracts.allocate_contract_number(contract_date)`); `GET /orders/next-contract-number/?contract_date=...` faqat ko'rsatadi (band qilmaydi).
 
 ---
 
@@ -197,14 +199,14 @@ Timeout: **8 soniya**. Xato klassi: `ApiError(message, status, fields?)` — `fi
 | `fulfillOrder(id, payload)` | POST | `/orders/{id}/fulfill/` | `{ contract_number, asos, ... }` |
 | `cancelOrder(id, payload)` | POST | `/orders/{id}/cancel/` | `{ contract_number, asos, ... }` |
 | `createOrderZakaz(id, payload)` | POST | `/orders/{id}/create-zakaz/` | zakaz body |
-| `zakaz(params)` | GET | `/orders/zakaz/` | `page_size=30`, `status`, `product`, `order`, `contract_number` |
-| `zakazBulk(payload)` | POST | `/orders/zakaz/bulk/` | bulk zakaz body; ixtiyoriy `import_batch`, `payment_status`, `paid_amount` |
+| `zakaz(params)` | GET | `/orders/zakaz/` | `page_size=30`, `status`, `product`, `order`, `contract_number`, `import_type` |
+| `zakazBulk(payload)` | POST | `/orders/zakaz/bulk/` | bulk zakaz body; ixtiyoriy `import_batch`, `payment_status`, `paid_amount`, `import_type`, `supplier_client`, `prepaid_percent` |
 | `zakazBatch(id)` | GET | `/orders/zakaz/{id}/batch/` | `{ items: Zakaz[] }` — import guruhi (tahrir) |
 | `contracts(params)` | GET | `/orders/contracts/` | `page_size=30`, `product`, `contract_number`, `source_type`, `order`, `zakaz` |
 | `productContracts(id)` | GET | `/warehouse/products/{id}/contracts/` | — |
-| `categories(params)` | GET | `/warehouse/categories/` | `page_size=30`, `search` |
-| `products(params)` | GET | `/warehouse/products/` | `page_size=30`, `search`, `category` |
-| `stocks(params)` | GET | `/warehouse/stocks/` | `page_size=30`, `product`, `category`, `status` |
+| ~~`categories(params)`~~ | ~~GET~~ | ~~`/warehouse/categories/`~~ | **O'chirilgan** — kategoriya funksiyasi vaqtincha yo'q, backendda kod comment qilingan, keyinchalik qaytariladi |
+| `products(params)` | GET | `/warehouse/products/` | `page_size=30`, `search` (`category` filtri olib tashlangan) |
+| `stocks(params)` | GET | `/warehouse/stocks/` | `page_size=30`, `product`, `warehouse_location`, `status` (`in_stock`\|`low_stock`\|`out_of_stock`\|`on_the_way`), `date_from`, `date_to`, `search`, `ordering` (`category` filtri olib tashlangan) |
 | `addStock(id, payload)` | POST | `/warehouse/products/{id}/add-stock/` | kirim body |
 | `clients(params)` | GET | `/clients/` | `page_size=30`, `search` (F.I.Sh, INN, JSHSHIR, passport, kompaniya, email), `is_active`, `date_from`, `date_to` |
 | `sales(params)` | GET | `/sales/` | `page_size=30`, `product`, `client`, `sold_date`, `date_from`, `date_to`, `search`, `ordering`, `page` |
@@ -217,7 +219,7 @@ Timeout: **8 soniya**. Xato klassi: `ApiError(message, status, fields?)` — `fi
 | `adjustCashBalance(payload)` | POST | `/cash/payments/adjust-balance/` | `{ currency: 'UZS'\|'USD', target_balance, asos }` |
 | `exchangeRateLatest(refresh)` | GET | `/cash/exchange-rates/latest/` | `refresh=true\|false` |
 | `exchangeRateSettings()` | GET | `/cash/exchange-rates/settings/` | — |
-| `updateExchangeRateSettings(payload)` | PATCH | `/cash/exchange-rates/settings/` | `{ auto_fetch_enabled?, preferred_rate_source?, preferred_bank_code?, preferred_bank_side? }` (`infinbank` \| `manual` \| `bank`; `preferred_bank_side`: `buy` \| `sell`) |
+| `updateExchangeRateSettings(payload)` | PATCH | `/cash/exchange-rates/settings/` | `{ auto_fetch_enabled?, preferred_rate_source?, preferred_bank_code? }` (`infinbank` \| `manual` \| `bank`); `preferred_bank_side` is read-only now, always `sell` |
 | `companyProfile()` | GET | `/company-profile/` | — |
 | `updateCompanyProfile(payload)` | PATCH | `/company-profile/` | korxona rekvizitlari — Management |
 | `invoices(params)` | GET | `/invoices/` | `page_size=30`, `document_type`, `client`, `search` |
@@ -273,7 +275,7 @@ const rows = list(await api.orders({ search: '12/1108' }))
 const detail = await api.retrieve('/orders/', id)
 
 // Yaratish / tahrirlash / o‘chirish
-await api.create('/warehouse/categories/', payload)
+await api.create('/warehouse/products/', payload)
 await api.update('/sales/', id, payload)
 await api.createForm('/orders/', formData)   // multipart
 await api.updateForm('/expenses/expenses/', id, formData)
@@ -330,12 +332,12 @@ Yordamchi kutubxonalar: `lib/utils.js` (`money`, `todayValue`, `formatDateUz`, `
 | Bosh sahifa | `reports`, `monthlyTrend` | `/reports/summary/` | Filtrli dashboard: **Tushum**, **Import chiqim**, **Kassa balansi**, Savdo (`Dashboard` komponenti) |
 | Hisobotlar | `reports`, `expensesSummary`, `paymentsSummary`, `exportReport` | `/reports/*`, `/expenses/summary/`, `/cash/payments/summary/` | Tablar: Moliyaviy, Ombor, Sotuvlar, Xarajatlar, **Excel** (`ReportExportPanel`) |
 | Buyurtmalar | `invoices`, `invoice`, `createInvoice`, `updateInvoice`, `removeInvoice`, `nextContractNumber`, `companyProfile`, `clients` (qidiruv/qo‘shish) | `/invoices/`, `/company-profile/`, `/clients/` | `BuyurtmalarPage` — ro‘yxat, ko‘rish modali, alohida editor sahifalari (§17a) |
-| Import | `zakaz`, `zakazBulk`, `zakazBatch`, `create`, `update` | `/orders/zakaz/`, `/orders/zakaz/bulk/`, `/orders/zakaz/{id}/batch/` | **`ResourcePage`** + **`ZakazEditor`** — ko‘p qator, `import_batch` guruhlash, batch tahrir, kassa chiqimi (§9a–9b, §17c); grid: To‘lov, Summa |
+| Kirim (nav/UI nomi; ilgari «Import») | `zakaz`, `zakazBulk`, `zakazBatch`, `create`, `update` | `/orders/zakaz/`, `/orders/zakaz/bulk/`, `/orders/zakaz/{id}/batch/` | **`ResourcePage`** + **`ZakazEditor`** — ko‘p qator, `import_batch` guruhlash, batch tahrir, kassa chiqimi (§9a–9b, §17c); grid: To‘lov, Summa; `resources.js`/`App.jsx` kaliti endi `'Kirim'` |
 | Shartnomalar | `contracts`, `retrieve` | `/orders/contracts/` | Read-only |
 | Korxona profili | `companyProfile`, `updateCompanyProfile` | `/company-profile/` | Profil dropdown |
 | Ombor | `products`, `create`, `update`, `addStock`, `productContracts` | `/warehouse/products/` | `warehouse_create` ability |
-| Kategoriyalar | `categories`, `create`, `update`, `remove` | `/warehouse/categories/` | |
-| Qoldiqlar | `stocks` | `/warehouse/stocks/` | |
+| ~~Kategoriyalar~~ | ~~`categories`~~ | ~~`/warehouse/categories/`~~ | **O'chirilgan** — nav/resource yozuvi comment qilingan |
+| Qoldiqlar | `stocks` | `/warehouse/stocks/` | Grid + status filtr (`in_stock`/`low_stock`/`out_of_stock`/`on_the_way`, §11 pastda) |
 | Mijozlar (ro‘yxat) | `clients`, `create`, `update`, `remove` | `/clients/` | Grid + filtr; qator → mijoz kartasi |
 | Mijoz kartasi | `retrieve`, `orders`, `sales`, `payments`, `invoices` | `/clients/{uuid}/`, `/orders/`, … | URL: `/mijozlar/{id}[/{tab}]` — `ClientDetailPage` |
 | Sotuvlar | `sales`, `salesBulk`, `create`, `update` | `/sales/` | Yaratilganda avtomatik kassaga tushum (`sync_sale_payment`, §17c) |
@@ -398,7 +400,9 @@ Ro‘yxatdan **ko‘z** ikonkasi URL o‘zgartirmaydi — `loadInvoiceForView(id
 
 ### Grid ro‘yxatlar, filtr, pagination (`ResourcePage` + `listFilters.js`)
 
-**Grid sahifalar** (`GRID_PAGES` — `App.jsx`): Mijozlar, Sotuvlar, Import, Ombor, Xarajatlar. **Kassa** va **Buyurtmalar** alohida: `KassaPage` (`/moliya/kassa`), `BuyurtmalarPage` (`/invoices/`).
+**Grid sahifalar** (`GRID_PAGES` — `App.jsx`): Mijozlar, Sotuvlar, Kirim (ilgari «Import»), Ombor, Qoldiqlar, Xarajatlar. **Kassa** va **Buyurtmalar** alohida: `KassaPage` (`/moliya/kassa`), `BuyurtmalarPage` (`/invoices/`).
+
+**Kirim filtri (`import_type`):** `ListFiltersPanel`da «Kirim turi» dropdown — `domestic` / `import` / `charter` + «Hammasi» (`MODULE_FILTER_FEATURES.Kirim.importType`, `IMPORT_TYPE_OPTIONS` — `listFilters.js`); `buildListQueryParams` orqali `?import_type=` sifatida yuboriladi.
 
 | Parametr | Qiymat |
 |---|---|
@@ -413,13 +417,14 @@ Filtr paneli: `ListFiltersPanel` + `frontend/src/listFilters.js`.
 | Mijozlar | `is_active` | — | — | ✅ |
 | Sotuvlar | — | ✅ | — | ✅ |
 | Import | `status` | — | — | ✅ |
-| Ombor | — | — | ✅ `category` | — |
+| Ombor | — | — | ~~✅ `category`~~ (o'chirilgan) | — |
+| Qoldiqlar | `status` (`in_stock`/`low_stock`/`out_of_stock`/`on_the_way`) | — | — | ✅ |
 | Kassa | `status` | ✅ | — | ✅ (UI yuboradi; backend `/cash/payments/` hozircha e’tiborsiz) |
 | Xarajatlar | — | — | — | ✅ |
 
-`buildListQueryParams(title, filters)` → API query: `status` yoki `is_active`, `client`, `category`, `date_from`, `date_to`.
+`buildListQueryParams(title, filters)` → API query: `status` yoki `is_active`, `client`, `date_from`, `date_to` (`category` — o'chirilgan, endi yuborilmaydi).
 
-Kategoriya filtri daraxt ko‘rinishida (`— ` bilan bosqichlangan) va 8 tadan ko‘p bo‘lsa qidiruv maydoni bilan chiqadi; backend tanlangan kategoriya bilan birga **ost-kategoriyalarni** ham qamrab oladi.
+Kategoriya funksiyasi (daraxt filtri, `ListFiltersPanel`dagi kategoriya select'i) vaqtincha **o'chirilgan** — kod comment qilib qoldirilgan (`listFilters.js`, `ListFiltersPanel.jsx`), keyinchalik qaytariladi.
 
 Backend sana maydoni (`apps/common/querysets.apply_date_range`):
 
@@ -491,7 +496,7 @@ Shu bilan birga o‘sha mahsulot uchun **import (zakaz) yozuvi** ham ochiladi �
 | Prop | Joylashuv | Ko‘rinish | Ruxsat |
 |---|---|---|---|
 | `header` | Topbar (bosh sahifa) | **Bank dropdown** (Infinbank MB + 6 ta bank + saqlangan qo‘lda) + faol kurs + ixtiyoriy ↻ | Dropdown va ↻ — `users_manage` |
-| `compact` | Import / Xarajat editorlari | **Bank dropdown** + **Sotish/Sotib olish** (market bank tanlanganda) + **Qo‘lda** tugmasi. Qo‘lda rejimda input (`Kurs kiriting`), blur/Enter da saqlash | Dropdown, qo‘lda saqlash, ↻ — `users_manage` |
+| `compact` | Import / Xarajat editorlari | **Bank dropdown** (har doim sotish kursi) + **Qo‘lda** tugmasi. Qo‘lda rejimda input (`Kurs kiriting`), blur/Enter da saqlash | Dropdown, qo‘lda saqlash, ↻ — `users_manage` |
 
 Dropdown ro‘yxati `market_rates.banks` + Infinbank MB (`infinbank.mb_rate`) + ixtiyoriy `manual`. Tanlangan kurs `mb_rate` / «Hisobda: …» da ko‘rsatiladi.
 
@@ -551,13 +556,31 @@ Jami **~95** HTTP endpoint (custom actionlar bilan). ✅ = `api.js` da wrapper b
 | PATCH | `/{id}/` | `{ asos, items[] }` | Operator+ | ✅ `update` |
 | GET | `/next-contract-number/` | `contract_date` | Auth | ✅ `nextContractNumber` |
 | POST | `/bulk/` | bulk order body | Operator+ | ✅ `ordersBulk` |
+
+> **Frontend holati:** `Order` (`/orders/`, bron) uchun hozircha yaratish/tahrirlash formasi frontendda **yo‘q** — `resources.js`da faqat ro‘yxat (`api.orders`) uchun ishlatiladi, «Buyurtmalar» sahifasi generic editorni chetlab o‘tadi (`active !== 'Buyurtmalar'`) va aslida `ElectronicInvoice` (`/invoices/`, `BuyurtmalarPage`) ni tahrirlaydi. `prepaid_percent` (quyida) shu model uchun **backend**da to‘liq qo‘shilgan va test qilingan, lekin uni tahrirlaydigan alohida `Order` UI hali yo‘q — bu doc yozilgan paytdagi kod holati.
+
+**Yangi maydon — `prepaid_percent`** (`decimal(5,2)`, nullable, standart `30`): oldindan to‘lov foizi, `prepaid_amount`dan mustaqil saqlanadi (avtomatik hisoblanmaydi). `POST`/`PATCH /orders/{id}/` va `POST /orders/bulk/` orqali yoziladi.
 | POST | `/{id}/fulfill/` | `{ contract_number, asos, faktura? }` | Operator/Management | ✅ `fulfillOrder` |
 | POST | `/{id}/cancel/` | `{ contract_number, asos, faktura? }` | Operator/Management | ✅ `cancelOrder` |
 | POST | `/{id}/create-zakaz/` | `{ contract_number, asos, supplier?, expected_date? }` | Operator/Management | ✅ `createOrderZakaz` |
 
 DELETE yo‘q — bekor qilish `/cancel/` orqali.
 
-### Zakaz (Import) — `/api/v1/orders/zakaz/`
+**Yangi — `items[].new_product` (omborda yo‘q mahsulot buyurtmada):** `OrderItemSerializer` endi `new_product` ni ham qabul qiladi — `Zakaz`dagi `new_product` bilan **bir xil** shakl (`name`, `category` majburiy, `serial_number`/`barcode`/`unit`/`vat_percent`/narxlar ixtiyoriy). `product` va `new_product` bir qatorda bir vaqtda bo‘lmaydi; yangi qator uchun ikkisidan biri + `quantity` majburiy.
+
+```json
+{
+  "contract_number": "SH-2026/045",
+  "items": [
+    { "new_product": { "name": "Omborda yo‘q noutbuk", "category": 3 },
+      "quantity": 7, "unit_price": "9000000" }
+  ]
+}
+```
+
+Natija: mahsulot `create_import_product` orqali `origin=import` bilan yaratiladi, so‘ng shu mahsulotga **MUSTAQIL (`zakaz_type=manual`) Zakaz** ochiladi (`order` FK shu buyurtmaga bog‘langan, `status=new`, `contract_number`/`contract_date`/`expected_date` buyurtmadan olinadi) — Kirim ro‘yxatida ko‘rinadi. Bu, ombordagi **mavjud** mahsulotning yetishmagan miqdoriga avtomatik ochiladigan `BACKORDER` zakazdan farqli — u alohida, o‘zgarmagan mantiq (`Order.create_backorder_zakaz`, miqdori aynan yetishmagan qism). Ikkalasi bir buyurtmada aralash bo‘lishi mumkin.
+
+### Zakaz (Import → UI da «Kirim») — `/api/v1/orders/zakaz/`
 
 | Method | Path | Query / body | Ruxsat | api.js |
 |---|---|---|---|---|
@@ -588,7 +611,7 @@ Chiqimlar kassa jurnalida `kind=out`, `source=import` ko‘rinadi. Excel export:
 
 **Narxlar (`unit_price` / `selling_price`):** import qatorida **kelish narxi** (`unit_price`) va **ketish narxi** (`selling_price`) `prices_manage` roli uchun MAJBURIY. Ikkalasi ham ombordagi mahsulotga yoziladi (`purchase_price` / `selling_price`) — mavjud mahsulot tanlansa ham yangilanadi. `vat_percent` qatorda beriladi (bo‘lmasa mahsulotniki olinadi); **QQS har doim kelish narxi asosida** hisoblanadi va javobda `vat_amount`, `total_with_vat` bo‘lib qaytadi.
 
-**Shartnoma raqami (yangilangan — endi umumiy, erkin matn):** `contract_number` yuborilmasa backend **umumiy** ketma-ket raqamni atomar band qiladi (endi kunlik emas — 1, 2, 3, ... hech qachon qayta boshlanmaydi, barcha modullar — buyurtma/zakaz/faktura — bitta hisoblagichdan oladi). `GET /orders/next-contract-number/` faqat ko‘rsatadi (band qilmaydi), shuning uchun forma raqamni oldindan ko‘rsatishi va saqlashda uni yubormasligi kerak (`contract_date` parametri endi natijaga ta'sir qilmaydi — faqat moslik uchun qabul qilinadi). Xodim istasa maydonga istalgan boshqa qiymatni ham qo‘lda yozishi mumkin — format tekshirilmaydi.
+**Shartnoma raqami (kunlik, `{tartib}/{DDMM}`):** `contract_number` yuborilmasa backend shu `contract_date` uchun keyingi kunlik raqamni atomar band qiladi (har bir sana mustaqil hisoblagichga ega, 1 dan boshlanadi — masalan bugun kecha uchun qoldirilgan hujjat kiritilsa, kechagi kunning mavjud hujjatlar sonidan davom etadi: `4/1808`). `GET /orders/next-contract-number/?contract_date=...` faqat ko‘rsatadi (band qilmaydi), shuning uchun forma raqamni oldindan ko‘rsatishi va saqlashda uni yubormasligi kerak. Xodim istasa maydonga istalgan boshqa qiymatni ham qo‘lda yozishi mumkin — format tekshirilmaydi.
 
 **Manual import — `new_product` inline** (POST body, `product` o‘rniga):
 
@@ -636,34 +659,25 @@ Read-only. Yozuvlar tizim avtomatik yaratadi.
 
 ### Ombor — `/api/v1/warehouse/`
 
-**Kategoriyalar** `/categories/`
+**Kategoriyalar (vaqtincha o'chirilgan)**
 
-| Method | Path | Query / body | Ruxsat | api.js |
-|---|---|---|---|---|
-| GET | `/` | `search` | Auth, read | ✅ `categories` |
-| POST | `/` | `{ name, parent }` | Operator+ | ✅ `create` |
-| GET/PATCH/DELETE | `/{id}/` | — | Operator+ | ✅ `retrieve`/`update`/`remove` |
-
-List faqat root node + `children` daraxti.
+`/warehouse/categories/` endpoint, `Category` viewset/serializer, `Product.category` maydoni — hammasi backendda **comment qilingan** (o'chirilmagan, faqat ishlatilmaydi), keyinchalik qaytariladi. Frontendda kategoriya select'i/ustuni/filtri yo'q. Bu qatorlar shuning uchun endi amal qilmaydi:
+- ~~`POST /warehouse/products/` — `category` majburiy~~ — endi majburiy EMAS, mahsulot kategoriyasiz yaratiladi.
+- ~~`POST /orders/zakaz/bulk/` — `new_product.category` majburiy~~ — endi majburiy EMAS.
+- ~~`POST/PATCH /invoices/` — `lines[].category` majburiy~~ — endi majburiy EMAS.
+- ~~Mahsulotlar ro‘yxatida **Kategoriya** ustuni~~ — olib tashlangan.
 
 **Mahsulotlar** `/products/`
 
 | Method | Path | Query / body | Ruxsat | api.js |
 |---|---|---|---|---|
-| GET | `/` | `search`, `category` (ost-kategoriyalar bilan), `purchase_price__isnull`, `selling_price__isnull` | Auth | ✅ `products` |
+| GET | `/` | `search`, `purchase_price__isnull`, `selling_price__isnull` (`category` filtri o'chirilgan) | Auth | ✅ `products` |
 | POST | `/` | product body | Operator+ | ✅ `create` |
 | GET/PATCH/DELETE | `/{id}/` | — | Operator+ | ✅ CRUD |
 | POST | `/{id}/add-stock/` | `{ quantity, asos, warehouse_location?, contract_number?, faktura? }` | Operator+ | ✅ `addStock` |
 | GET | `/{id}/contracts/` | — | Auth | ✅ `productContracts` |
 
 **Holati (`origin`):** `import` — tovar hali kelmagan (buyurtma/import qatoridan yaratilgan), ro‘yxatda «Import» deb ko‘rsatiladi va **buyurtma qatorlarida tanlash uchun chiqmaydi**. Import «Qabul qilindi» bo‘lgach (`Zakaz.receive()`) `origin` avtomatik `warehouse` ga o‘tadi — shundan keyin tovar oddiy ombor mahsuloti bo‘lib, buyurtmada tanlanadi.
-
-**`category` MAJBURIY — har uch yo‘lda:**
-- `POST /warehouse/products/` — `category` bo‘lmasa `400`; mahsulot formasi (yaratish va tahrirlash) kategoriya select’ini ko‘rsatadi.
-- `POST /orders/zakaz/bulk/` va `POST /orders/zakaz/` — `new_product.category` majburiy; import jadvalida «Kategoriya» ustuni bor.
-- `POST/PATCH /invoices/` — qator ombordagi mahsulotga mos kelmasa (yangi mahsulot ochiladi) `lines[].category` majburiy (write-only maydon, faqat mahsulot yaratish uchun); buyurtma jadvalida «Kategoriya» ustuni bor.
-
-Mahsulotlar ro‘yxatida **Kategoriya** (`category_name`) va **Model** ustunlari ko‘rsatiladi. Ro‘yxat **Filtr** panelida kategoriya bo‘yicha saralanadi (`?category=<id>`) — tanlangan kategoriya **va uning barcha ost-kategoriyalari** mahsulotlari chiqadi (MPTT `get_descendants`).
 
 `pending_import_quantity` — hali qabul qilinmagan (yo‘ldagi) import miqdori: faol zakazlar bo‘yicha `quantity − received_qty`. Ombor qoldig‘i (`available_quantity`) faqat import **«Qabul qilindi»** bo‘lgach oshadi, shuning uchun ro‘yxatda qoldiq yonida «+N yo‘lda» ko‘rsatiladi.
 
@@ -725,7 +739,7 @@ FIFO ombordan ayiradi. Operator uchun narx/foyda yashirilishi mumkin.
 | PATCH | `/{id}/` | kurs maydonlari | Auth | ❌ |
 | GET | `/latest/` | `refresh=true\|false` | Auth | ✅ `exchangeRateLatest` |
 | GET | `/settings/` | — | Auth | ✅ `exchangeRateSettings` |
-| PATCH | `/settings/` | `{ auto_fetch_enabled?, preferred_rate_source?, preferred_bank_code?, preferred_bank_side? }` | Management | ✅ `updateExchangeRateSettings` |
+| PATCH | `/settings/` | `{ auto_fetch_enabled?, preferred_rate_source?, preferred_bank_code? }` (`preferred_bank_side` read-only, doim `sell`) | Management | ✅ `updateExchangeRateSettings` |
 
 Celery beat: `refresh_infinbank_usd_rate` har **1 soat** (`root/celery.py`). `auto_fetch_enabled=false` bo‘lsa task o‘tkazib yuboriladi.
 
@@ -897,7 +911,6 @@ POST /api/v1/invoices/
     },
     {
       "product_name": "Bazada yo‘q tovar",
-      "category": 3,
       "quantity": 1,
       "unit_price": "500000",
       "selling_price": "800000",
@@ -909,7 +922,7 @@ POST /api/v1/invoices/
 
 Backend mahsulotdan `product_name`, `barcode`, `identification_code`, `unit`, narx va QQS ni to‘ldiradi; `delivery_amount`, `vat_amount`, `total_amount` hisoblanadi (`unit_price` — **kelish narxi**, QQS shundan).
 
-`contract_number` yuborilmasa o‘sha kunning keyingi raqami avtomatik band qilinadi. Ikkinchi qatordagidek ombordagi mahsulotga mos kelmaydigan tovar uchun `category` majburiy: backend mahsulotni `origin=import` bilan yaratadi va unga import (zakaz) yozuvini ochadi.
+`contract_number` yuborilmasa o‘sha kunning keyingi raqami avtomatik band qilinadi. Ikkinchi qatordagidek ombordagi mahsulotga mos kelmaydigan tovar uchun ham `category` endi kerak emas (kategoriya funksiyasi o'chirilgan): backend mahsulotni kategoriyasiz, `origin=import` bilan yaratadi va unga import (zakaz) yozuvini ochadi.
 
 **Boshqa korxona bajaruvchi sifatida:**
 
@@ -970,7 +983,7 @@ Ko‘rish — `InvoiceContractModal` (jadval + mazmun + «2. Tomonlarni yuridik 
 | `lines[].quantity` | Kamida 1 |
 | `lines[].unit_price` | Faqat `prices_view` bo‘lsa majburiy — bu **kelish narxi**, QQS shundan hisoblanadi |
 | `lines[].selling_price` | Ixtiyoriy («Sotuv narxi» ustuni) |
-| `lines[].category` | Qator ombordagi mahsulotga bog‘lanmagan bo‘lsa majburiy (yangi mahsulot ochiladi) |
+| ~~`lines[].category`~~ | **O'chirilgan** — kategoriya funksiyasi yo'q, yangi mahsulot kategoriyasiz ochiladi |
 | `lines` (umumiy) | Kamida bitta to‘liq qator (`product_name` + `quantity` + `identification_code`) |
 
 Xato kalitlari: `contract_number`, `client`, `executor_client`, `company`, `lines.0.product_name` va hokazo. Komponent: `EInvoiceFieldError`.
@@ -1146,7 +1159,7 @@ Frontend menyuni `abilities` bo‘yicha ko‘rsatadi. Ruxsat yo‘q menu UI’da
 | `procurement_view` | importlar ko‘rish | Operator, Accountant, Management |
 | `procurement_manage` | import yaratish/tahrirlash (status emas!) | Operator, Accountant, Management |
 | `contracts_view` | shartnomalar reestri | Operator, Accountant, Management |
-| `categories_view` | kategoriyalar | Operator, Management |
+| `categories_view` | kategoriyalar (ability hali backendda bor, lekin kategoriya funksiyasi vaqtincha o'chirilgani uchun frontendda hech qayerda ishlatilmaydi) | Operator, Management |
 | `stocks_view` | qoldiqlar | Operator, Management |
 | `einvoice_view` | Buyurtmalar sahifasini ko‘rish | Operator, Accountant, Management |
 | `einvoice_manage` | Buyurtma (invoice) yaratish/tahrirlash | Operator, Management |
@@ -1290,7 +1303,7 @@ Javob (faol kurs maydonlari + ikkala manba + bank kurslari):
 |---|---|
 | `infinbank` | `infinbank.mb_rate` (Infinbank.com MB kurs) |
 | `manual` | Bugungi qo‘lda kurs (`manual.mb_rate`) |
-| `bank` | `market_rates.banks[]` dan `preferred_bank_code` + `preferred_bank_side` (`buy` = sotib olish, `sell` = sotish) |
+| `bank` | `market_rates.banks[]` dan `preferred_bank_code`, doim **`sell_rate`** (sotish) — sotib olish (`buy`) kursi endi ishlatilmaydi/tanlanmaydi |
 
 `market_rates` — bankxizmatlari.uz dan olingan ro‘yxat (dropdown to‘ldirish uchun). Kurslar 1 soat keshlanadi; `refresh=true` majburiy yangilaydi.
 
@@ -1303,18 +1316,20 @@ Komponent: `BankRateDropdown` — `<select>` orqali bank tanlash.
 | Rejim | Prop | UI |
 |---|---|---|
 | Topbar | `header` | Dropdown (bank nomi + kurs) + faol summa + ↻ |
-| Import / Xarajat | `compact` | Dropdown + Sotish/Sotib olish select + Qo‘lda tugmasi/input |
+| Import / Xarajat | `compact` | Dropdown + Qo‘lda tugmasi/input |
 | Dashboard | (default) | Dropdown + ↻ + «Qo‘lda kurs» + «Hisobda: …» |
 
 Dropdown variantlari (misol):
 
 - `Infinbank MB — 11 889,95`
-- `Kapitalbank — 11 945,00` (tanlangan `preferred_bank_side` bo‘yicha)
+- `Kapitalbank — 11 945,00` (har doim **sotish** kursi)
 - `Qo‘lda — 11 950,00` (saqlangan bo‘lsa)
+
+Sotish/Sotib olish tanlash select'i **olib tashlangan** — faqat sotish (`sell_rate`) kursi ishlatiladi, buy/sell toggle endi yo‘q (`preferred_bank_side` backendda `read_only`, doim `sell`).
 
 **Ability gating (`users_manage`):**
 
-- Bank dropdown va Sotish/Sotib olish — faqat `users_manage`
+- Bank dropdown — faqat `users_manage`
 - Qo‘lda kurs saqlash (`POST /cash/exchange-rates/`) — faqat `users_manage`
 - ↻ (`?refresh=true`) — Infinbank MB + `market_rates` yangilaydi
 
@@ -1365,12 +1380,11 @@ Bank kursini tanlash:
 ```json
 {
   "preferred_rate_source": "bank",
-  "preferred_bank_code": "049",
-  "preferred_bank_side": "sell"
+  "preferred_bank_code": "049"
 }
 ```
 
-Javob: `{ "auto_fetch_enabled", "preferred_rate_source", "preferred_bank_code", "preferred_bank_side", "updated_at" }`.
+Javob: `{ "auto_fetch_enabled", "preferred_rate_source", "preferred_bank_code", "preferred_bank_side" (doim "sell", read-only), "updated_at" }`.
 
 Frontend: `api.exchangeRateSettings()`, `api.updateExchangeRateSettings(payload)`.
 
@@ -1578,7 +1592,7 @@ Base:
 ### Ro‘yxat
 
 ```http
-GET /api/v1/orders/zakaz/?page_size=30&status=new&zakaz_type=manual&payment_status=unpaid&product=1&order=5&contract_number=12/1108&search=monitor
+GET /api/v1/orders/zakaz/?page_size=30&status=new&zakaz_type=manual&import_type=import&payment_status=unpaid&product=1&order=5&contract_number=12/1108&search=monitor
 ```
 
 Status oqimi (backend qat’iy ketma-ketlik):
@@ -1622,6 +1636,20 @@ POST /api/v1/orders/zakaz/
 
 **Javobda qo‘shimcha maydonlar:** `selling_price`, `delivery_price`, `vat_percent`, `vat_amount` (kelish summasidan hisoblangan QQS), `total_with_vat`, `total`. `product_name` — faqat mahsulot nomi (seriya raqamisiz).
 
+> **UI nomi «Kirim».** Backend URL/model/maydon nomlari (`zakaz`, `Zakaz`, `zakaz_type=import`, `Product.origin=import`, ...) o‘zgarmagan — faqat frontendda ko‘rinadigan nom «Import»dan «Kirim»ga o‘zgardi (nav, sahifa sarlavhasi, breadcrumb, `resources.js`/`App.jsx`ning `resources`/`GRID_PAGES`/`listFilters.js` kalitlari endi `'Kirim'`).
+
+**Yangi maydonlar (`import_type`, `supplier_client`, `prepaid_percent`):**
+
+| Maydon | Turi | Izoh |
+|--------|------|------|
+| `import_type` | `'domestic' \| 'import' \| 'charter'` | Kirim turi — foydalanuvchi tanlaydi. Standart: `domestic`. Avtomatik (`backorder`) zakazda ham shu standart qo‘llanadi — foydalanuvchi ishtirokisiz. Ro‘yxatda filtrlanadi: `?import_type=import`. Javobda `import_type_display` (o‘qish uchun matn) ham qaytadi. |
+| `supplier_client` | UUID (yozish), nullable | Yetkazuvchi — `apps.clients.Client` dan tanlangan (ixtiyoriy). Eski erkin matn `supplier` maydoni **saqlanib qoldi** — ikkalasi bir vaqtda ishlaydi (biri yoki ikkalasi ham bo‘sh bo‘lishi mumkin). Javobda o‘qish-uchun `supplier_client_name` (`client_name`ga o‘xshash naqsh) qaytadi. |
+| `prepaid_percent` | `decimal(5,2)`, nullable | Oldindan to‘lov foizi — ma’lumot uchun, `paid_amount`/`payment_status` dan mustaqil saqlanadi. Standart: `30`. |
+
+`import_type`/`supplier_client`/`prepaid_percent` — bulk (`/orders/zakaz/bulk/`) so‘rovda ham qabul qilinadi (butun bulk uchun umumiy qiymat, har bir `items[]` qatorida ixtiyoriy ustidan yozish mumkin).
+
+**To‘liq tahrirlash (PATCH):** Ilgari backorder-turdagi zakazda `quantity`/`product`/`unit_price` operator uchun bloklangan edi — bu cheklov OLIB TASHLANDI: endi har qanday avtorizatsiyalangan (tizimga kirgan) foydalanuvchi `supplier`, `supplier_client`, narxlar, `quantity`, sanalar, `comment`, shartnoma maydonlari va `import_type`ni PATCH qila oladi. Yagona qolgan rol-cheklovi — `received_qty` (faqat Management, ombor hisobiga bevosita ta’sir qilgani uchun). Status o‘tishi (`asos` + shartnoma raqami majburiy, faqat Management) **o‘zgarmagan**.
+
 `import_batch` ixtiyoriy — berilmasa backend yangi UUID yaratadi. Mavjud import guruhiga bitta qator qo‘shishda shu UUID yuboriladi (tahrir modalidagi yangi qatorlar).
 
 ### Bulk zakaz
@@ -1651,7 +1679,6 @@ Bir nechta mahsulot uchun zakaz yaratadi. Har bir `items` qatori mavjud `product
     {
       "new_product": {
         "name": "AMD CHIP",
-        "category": 3,
         "serial_number": "1234",
         "unit": "piece"
       },
@@ -2031,31 +2058,14 @@ invoice_edited
 
 ## 11. Ombor
 
-### Kategoriyalar
+### Kategoriyalar (vaqtincha o'chirilgan)
 
-```http
-GET /api/v1/warehouse/categories/?page_size=30&search=texnika
-POST /api/v1/warehouse/categories/
-GET /api/v1/warehouse/categories/{id}/
-PATCH /api/v1/warehouse/categories/{id}/
-DELETE /api/v1/warehouse/categories/{id}/
-```
-
-So‘rov:
-
-```json
-{
-  "name": "Med texnika",
-  "parent": null
-}
-```
-
-Javobda `children` bor.
+`/api/v1/warehouse/categories/` endpointi va unga bog'liq hamma kod (model, serializer, viewset, url, admin, frontend UI) backendda **comment qilingan** — o'chirilmagan, faqat ishlatilmaydi, keyinchalik qaytariladi. Hozircha bu endpoint **404** qaytaradi.
 
 ### Mahsulotlar
 
 ```http
-GET /api/v1/warehouse/products/?page_size=30&search=monitor&category=1&purchase_price__isnull=true&selling_price__isnull=false
+GET /api/v1/warehouse/products/?page_size=30&search=monitor&purchase_price__isnull=true&selling_price__isnull=false
 POST /api/v1/warehouse/products/
 GET /api/v1/warehouse/products/{id}/
 PATCH /api/v1/warehouse/products/{id}/
@@ -2066,9 +2076,7 @@ So‘rov:
 
 ```json
 {
-  "category": 1,
   "name": "Samsung Odyssey G5 monitor",
-  "model": "G55C",
   "serial_number": "SM-G55C-2026-001",
   "purchase_price": "2100000",
   "selling_price": "2600000",
@@ -2081,6 +2089,11 @@ So‘rov:
 
 `quantity` yuborilsa `warehouse_location` majburiy va Stock yaratiladi.
 
+> **`model` maydoni vaqtincha o‘chirilgan** (backend + frontend, kategoriya
+> funksiyasi kabi) — API javobida qaytmaydi, so‘rovda yuborilsa e’tiborsiz
+> qoldiriladi (400 bermaydi, shunchaki saqlanmaydi). DB ustuni
+> (`Product.model`) o‘chirilmagan, keyinchalik qaytarilishi mumkin.
+
 Javob maydonlari:
 
 ```text
@@ -2089,15 +2102,18 @@ reserved_quantity
 available_quantity
 pending_import_quantity
 stock_status
-category_name
 origin
 origin_display
 unit_display
 ```
 
+`stock_status`: `in_stock` | `low_stock` | `out_of_stock` | `on_the_way`
+(qoldiq 0, lekin faol Zakaz/Kirim bilan yo‘lda miqdor bor — §11 pastda,
+Qoldiqlar bilan bir xil mantiq).
+
 Operator uchun `purchase_price`, `selling_price` qaytmasligi mumkin.
 
-`category` — **majburiy**; `serial_number` — ixtiyoriy (bo‘sh bo‘lsa `null`, avtomatik yaratilmaydi).
+`category` va `category_name` — **olib tashlangan** (kategoriya funksiyasi o'chirilgan). `serial_number` — ixtiyoriy (bo‘sh bo‘lsa `null`, avtomatik yaratilmaydi).
 
 ### Kirim
 
@@ -2122,14 +2138,42 @@ POST /api/v1/warehouse/products/{id}/add-stock/
 ### Qoldiqlar
 
 ```http
-GET /api/v1/warehouse/stocks/?page_size=30&product=1&category=2&warehouse_location=A-1&status=low_stock&date_from=2026-08-01&date_to=2026-08-31&search=monitor
+GET /api/v1/warehouse/stocks/?page_size=30&product=1&warehouse_location=A-1&status=low_stock&date_from=2026-08-01&date_to=2026-08-31&search=monitor
 POST /api/v1/warehouse/stocks/
 GET /api/v1/warehouse/stocks/{id}/
 PATCH /api/v1/warehouse/stocks/{id}/
 DELETE /api/v1/warehouse/stocks/{id}/
 ```
 
-`status`: `in_stock` | `low_stock` | `out_of_stock`. `reserved_quantity` read-only. Broni bor qatorni o‘chirib bo‘lmaydi.
+`status`: `in_stock` | `low_stock` | `out_of_stock` | `on_the_way`. `reserved_quantity` read-only. Broni bor qatorni o‘chirib bo‘lmaydi.
+
+**Standart ko‘rinish (default filtering, `?status` berilmasa):** qoldig‘i 0
+VA hech qanday faol (hali qabul qilinmagan) Zakaz/Kirim'i yo‘q mahsulotlar
+ro‘yxatdan yashiriladi — bo‘sh ombor ro‘yxatni chalkashtirmaydi. Qoldig‘i 0
+bo‘lsa-da yo‘lda (faol Zakaz/Kirim) miqdori bor mahsulot ro‘yxatda qoladi,
+`stock_status: "on_the_way"` bilan ("Yo‘lda"). Bu **hatto birorta ham
+`Stock` qatori hali yaratilmagan** (mahsulot butunlay import qilinmagan,
+hammasi yo‘lda) mahsulot uchun ham ishlaydi — bunday holatda backend
+DB'ga yozilmagan, sintetik bir qator qo‘shadi (`id: null`, `quantity: 0`,
+`warehouse_location: ""`); frontend bunday qatorlarda tahrirlash/o‘chirish
+tugmasini ko‘rsatmaydi (`id` yo‘q). Sintetik qatorlar `?warehouse_location=`
+filtri bilan birga qaytmaydi (haqiqiy joylashuvi yo‘q).
+
+`?status=out_of_stock` — chinakam bo‘sh (yo‘lda ham hech narsa yo‘q)
+qatorlarni ko‘rish uchun **aniq** so‘ralishi kerak (standart ko‘rinishda
+bunday qatorlar allaqachon yashirin). `?status=on_the_way` — faqat
+"Yo‘lda" qatorlarni qaytaradi.
+
+Bu filtrlash faqat `list` (ro‘yxat) amaliga tegishli — mavjud qatorni
+to‘g‘ridan-to‘g‘ri `retrieve`/`update`/`destroy` qilish (masalan tahrirlash
+formasi) qoldig‘idan qat’i nazar har doim ishlaydi.
+
+Javobda (`StockSerializer`) qo‘shimcha `pending_import_quantity` maydoni
+bor — shu mahsulotning yo‘ldagi umumiy miqdori (Ombor sahifasidagi
+`Product.pending_import_quantity` bilan bir xil).
+
+> **`product_model` maydoni vaqtincha o‘chirilgan** — `Product.model`
+> UI'dan olib tashlanishi bilan birga bu javobdan ham olib tashlandi.
 
 ## 12. Mijozlar
 
@@ -2860,7 +2904,7 @@ Biznes qoida (frontend ko‘rsatish):
 
 **Sotuv o‘chirilsa** bog‘liq kassa yozuvi ham o‘chadi (`PROTECT` xatosining oldi olingan). **Buyurtma bekor qilinsa** (`/cancel/`) — bog‘liq kassa yozuvi hozircha **tegilmaydi** (ochiq savol — refund siyosati aniqlanmagan).
 
-### Import grid ustunlari (`ResourcePage`, title=`Import`)
+### Kirim grid ustunlari (`ResourcePage`, title=`Kirim`; ilgari `Import`)
 
 | Ustun | Maydon | Eslatma |
 |---|---|---|
@@ -2876,6 +2920,8 @@ Biznes qoida (frontend ko‘rsatish):
 | Kutil. | `expected_date` | |
 | Holati | `status` | inline — `order_status_manage` |
 | Yaratdi | `created_by_name` | |
+
+Ustunlarda ko‘rsatilmasa ham, `import_type`/`import_type_display`, `supplier_client`/`supplier_client_name`, `prepaid_percent` javobda mavjud — tahrir formasida (`ZakazEditor`) to‘liq ko‘rinadi/tahrirlanadi; ro‘yxat esa `?import_type=` bo‘yicha filtrlanadi («Kirim turi» dropdown).
 
 Tarix tugmasi: zakaz `history` modal.
 
