@@ -242,6 +242,30 @@ class CashConversion(TimeStampedModel):
         return f'{self.get_direction_display()}: {self.amount_from} → {self.amount_to}'
 
 
+class CashLedgerLock(TimeStampedModel):
+    """Bitta (singleton, pk=1) qator — kassa balansi hech qayerda
+    saqlanmaydi (`ledger.ledger_totals()` har safar hisoblaydi), shuning
+    uchun "yetarlimi?" tekshiruvi bilan yozuvni ATOM qilib bo'lmaydi —
+    oddiy `select_for_update` qiladigan qator yo'q. Shu qator faqat MUTEX
+    sifatida ishlatiladi: balansni kamaytiruvchi amal (masalan valyuta
+    konvertatsiya) uni qulflab, keyin balansni qayta tekshirib yozadi —
+    shunda ikki parallel amal bir xil (eski) balansni ko'rib ikkalasi ham
+    o'tib ketolmaydi."""
+
+    class Meta:
+        db_table = 'cash_ledger_lock'
+        verbose_name = 'Kassa balansi qulfi'
+        verbose_name_plural = 'Kassa balansi qulfi'
+
+    @classmethod
+    def acquire(cls):
+        """Qatorni (kerak bo'lsa yaratib) QULFLAB qaytaradi — chaqiruvchi
+        `transaction.atomic()` ichida bo'lishi shart, aks holda qulf
+        darhol bo'shab ketadi."""
+        cls.objects.get_or_create(pk=1)
+        return cls.objects.select_for_update().get(pk=1)
+
+
 class CashBalanceAdjustment(TimeStampedModel):
     """
     Kassa balansini (UZS yoki USD) qo'lda tuzatish.

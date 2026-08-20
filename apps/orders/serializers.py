@@ -905,18 +905,40 @@ class ZakazSerializer(ModelSerializer):
                 if not _can_manage_payment(user):
                     _strip_zakaz_payment_fields(attrs)
         else:
-            # Qabul qilingan/bekor qilingan zakazda miqdor va narx qotib qoladi
-            locked = self.instance.status in (Zakaz.RECEIVED, Zakaz.CANCELLED)
-            if locked and ('quantity' in attrs or 'unit_price' in attrs):
+            # Qabul qilingan/bekor qilingan YOKI ombor qoldig'iga allaqachon
+            # ta'sir qilgan (stock_credited — masalan payment_status=paid
+            # orqali status hali "new" bo'lsa ham qoldiq kiritilgan bo'lishi
+            # mumkin) zakazda miqdor, narx va mahsulot qotib qoladi — aks
+            # holda kassa/ombor bilan zakaz ma'lumotlari mos kelmay qoladi.
+            locked = (self.instance.status in (Zakaz.RECEIVED, Zakaz.CANCELLED)
+                      or self.instance.stock_credited)
+            if locked and ({'quantity', 'unit_price', 'product'} & set(attrs)):
                 raise ValidationError(
+                    f'Ombor qoldig\'iga ta\'sir qilgan yoki '
                     f'"{self.instance.get_status_display()}" holatidagi zakazda '
-                    f'miqdor yoki narxni o\'zgartirib bo\'lmaydi.')
+                    f'miqdor, narx yoki mahsulotni o\'zgartirib bo\'lmaydi.')
+
+            user = self.context['request'].user
+
+            # Backorder (buyurtmadagi yetishmovchilikdan avtomatik ochilgan)
+            # zakazda miqdor/mahsulot/narxni faqat Management o'zgartira
+            # oladi — operator buni kamaytirib/almashtirib qo'ysa,
+            # Order.backorder_qty bilan Zakaz o'rtasida abadiy nomuvofiqlik
+            # paydo bo'ladi (eski zakaz hali FAOL bo'lgani uchun yangi
+            # backorder avtomatik ochilmaydi).
+            if (self.instance.is_backorder
+                    and not getattr(user, 'is_management', False)):
+                blocked = {'quantity', 'unit_price', 'product'} & set(attrs)
+                if blocked:
+                    raise PermissionDenied(
+                        'Avtomatik (backorder) zakazda ushbu maydonlarni '
+                        f'faqat boshqaruv (Management) o\'zgartira oladi: '
+                        f'{", ".join(sorted(blocked))}.')
 
             # Rol chegarasi: received_qty faqat Management (ombor hisobi
             # to'g'ridan-to'g'ri o'zgaradi). Boshqa hamma maydon (supplier,
-            # narxlar, miqdor, sanalar, izoh, shartnoma, import_type, ...)
+            # narxlar, sanalar, izoh, shartnoma, import_type, ...)
             # har qanday avtorizatsiyalangan foydalanuvchiga ochiq.
-            user = self.context['request'].user
             if not getattr(user, 'is_management', False):
                 blocked = set(attrs) & self._MANAGEMENT_ONLY_FIELDS
                 if blocked:

@@ -147,10 +147,13 @@ class PrepaidPercentTests(TestCase):
 
 class ZakazFullEditAccessTests(TestCase):
     """
-    2#4: Kirim yozuvining BARCHA maydonlari avtorizatsiyalangan foydalanuvchi
-    tomonidan PATCH qilinishi mumkin — status o'tishidan tashqari (u alohida
-    Management-only qoida bo'lib qoladi). Backorder zakazda ilgari operator
-    uchun quantity/product/unit_price bloklangan edi — endi ochiq.
+    2#4: Kirim yozuvining ko'pchilik maydoni (supplier, sanalar, izoh,
+    import_type, shartnoma, ...) avtorizatsiyalangan foydalanuvchi tomonidan
+    PATCH qilinishi mumkin — status o'tishidan tashqari (u alohida
+    Management-only qoida). Backorder (buyurtmadan avtomatik ochilgan)
+    zakazda quantity/product/unit_price — faqat Management: operator buni
+    o'zgartirsa, Order.backorder_qty bilan Zakaz orasida tiklab bo'lmas
+    nomuvofiqlik paydo bo'ladi (eski qoida saqlanib qolgan).
     """
 
     ZAKAZ_URL = '/api/v1/orders/zakaz/'
@@ -159,6 +162,8 @@ class ZakazFullEditAccessTests(TestCase):
         self.api = APIClient()
         self.operator = User.objects.create_user(
             'op_fe', password='x', role=User.OPERATOR)
+        self.management = User.objects.create_user(
+            'mgmt_fe', password='x', role=User.MANAGEMENT)
         self.product = Product.objects.create(
             name='Klaviatura', serial_number='KB-FE-1',
             purchase_price=Decimal('50000'))
@@ -179,9 +184,17 @@ class ZakazFullEditAccessTests(TestCase):
         self.assertEqual(res.status_code, 200, res.data)
         self.assertEqual(res.data['supplier'], 'Yangi yetkazuvchi')
 
-    def test_operator_can_edit_quantity_on_backorder_zakaz(self):
-        """Ilgari bloklangan — endi operator ham miqdorni o'zgartira oladi."""
+    def test_operator_cannot_edit_quantity_on_backorder_zakaz(self):
+        """Backorder zakazda miqdorni faqat Management o'zgartira oladi —
+        aks holda Order.backorder_qty bilan Zakaz orasida nomuvofiqlik
+        paydo bo'ladi (yangi backorder avtomatik ochilmaydi, eskisi FAOL)."""
         self.api.force_authenticate(self.operator)
+        res = self.api.patch(f'{self.ZAKAZ_URL}{self.backorder.pk}/',
+                             {'quantity': 6}, format='json')
+        self.assertEqual(res.status_code, 403, res.data)
+
+    def test_management_can_edit_quantity_on_backorder_zakaz(self):
+        self.api.force_authenticate(self.management)
         res = self.api.patch(f'{self.ZAKAZ_URL}{self.backorder.pk}/',
                              {'quantity': 6}, format='json')
         self.assertEqual(res.status_code, 200, res.data)

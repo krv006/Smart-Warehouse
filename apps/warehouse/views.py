@@ -268,7 +268,11 @@ class StockViewSet(ModelViewSet):
         super().perform_destroy(instance)
 
     def get_queryset(self):
-        qs = Stock.objects.select_related('product')
+        # `product__zakazlar` — StockSerializer.get_stock_status() har bir
+        # qator uchun `product.pending_import_quantity` ("Yo'lda") ni
+        # hisoblaydi, u esa `product.zakazlar.all()` ni aylanadi — shu
+        # prefetch bo'lmasa har bir qator uchun alohida so'rov ketadi.
+        qs = Stock.objects.select_related('product').prefetch_related('product__zakazlar')
         params = self.request.query_params
 
         date_from = params.get('date_from')

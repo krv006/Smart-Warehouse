@@ -65,9 +65,25 @@ def _seed_baseline_for_date(contract_date):
     return total
 
 
-def _get_or_init_row(contract_date):
+def _get_or_init_row(contract_date, _retries=3):
     """Berilgan sana uchun qatorni qaytaradi — birinchi marta yaratilsa,
-    o'sha sanadagi mavjud ma'lumotlardan boshlang'ich qiymat bilan."""
+    o'sha sanadagi mavjud ma'lumotlardan boshlang'ich qiymat bilan.
+
+    Bir vaqtda ikki so'rov bir xil (hali mavjud bo'lmagan) sana uchun
+    qator yaratmoqchi bo'lsa — yutqazgan tomon `IntegrityError` oladi.
+    G'olib tomonning tranzaksiyasi hali COMMIT bo'lmagan bo'lishi mumkin
+    (masalan, u katta buyurtma yaratish tranzaksiyasi ichida hali davom
+    etmoqda) — shu sabab darhol `.get()` ham qator topilmasligi (`DoesNotExist`)
+    mumkin. Shuning uchun bir necha marta qayta urinamiz.
+
+    ESLATMA: bu — Django o'zining `get_or_create()`si ishlatadigan xuddi shu
+    (bitta urinishli) naqsh, faqat bir necha marta qayta urinadigan qilingan.
+    Postgres'ning standart READ COMMITTED izolyatsiyasida buni HAR safar
+    to'g'ri hal qiladi (har bir SQL so'rov o'z boshida eng so'nggi COMMIT
+    qilingan holatni ko'radi). Loyiha ushbu standart darajani o'zgartirmaydi
+    (`DATABASES` sozlamasida maxsus ISOLATION LEVEL yo'q) — REPEATABLE READ/
+    SERIALIZABLE'ga o'tilsa, bu yerdagi mantiqni ham qayta ko'rib chiqish
+    kerak bo'ladi."""
     row = ContractSequence.objects.filter(date=contract_date).first()
     if row is not None:
         return row
@@ -77,7 +93,12 @@ def _get_or_init_row(contract_date):
                 date=contract_date,
                 last_number=_seed_baseline_for_date(contract_date))
     except IntegrityError:
-        return ContractSequence.objects.get(date=contract_date)
+        row = ContractSequence.objects.filter(date=contract_date).first()
+        if row is not None:
+            return row
+        if _retries > 0:
+            return _get_or_init_row(contract_date, _retries - 1)
+        raise
 
 
 def peek_contract_number(contract_date=None):

@@ -1,8 +1,11 @@
 from decimal import Decimal
 
+from django.db import transaction
+
 from apps.cash.models import Payment
 
 
+@transaction.atomic
 def sync_sale_payment(sale, user=None):
     """
     Sotuv tushumini kassaga yozadi/yangilaydi (Payment + tranzaksiya).
@@ -36,14 +39,20 @@ def sync_sale_payment(sale, user=None):
         payment.comment = comment
         payment.save()  # total_amount/commission sotuvdan qayta hisoblanadi
 
-    current = payment.paid_amount or Decimal('0')
+    # Qatorni qulflab QAYTA o'qiymiz — sotuv bir vaqtda ikki marta
+    # tahrirlansa (yoki tahrir bilan qo'lda kassa tuzatishi to'qnashsa),
+    # ikkalasi ham bir xil eski paid_amount'ni ko'rib, ikkalasi ham
+    # noto'g'ri farq yozib qo'ymasin (add_payment() ijobiy holatda buni
+    # allaqachon qiladi — manfiy tuzatish uchun ham xuddi shunday kerak).
+    locked = Payment.objects.select_for_update().get(pk=payment.pk)
+    current = locked.paid_amount or Decimal('0')
     diff = total - current
     if diff > 0:
-        payment.add_payment(diff, user=user, comment='Sotuv tushumi')
+        locked.add_payment(diff, user=user, comment='Sotuv tushumi')
     elif diff < 0:
-        payment.transactions.create(
+        locked.transactions.create(
             amount=diff, received_by=user,
             comment='To\'lov korrektsiyasi (sotuv tahriri)')
-        payment.paid_amount = total
-        payment.save()
-    return payment
+        locked.paid_amount = total
+        locked.save()
+    return locked

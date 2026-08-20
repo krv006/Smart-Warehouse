@@ -144,15 +144,17 @@ class InvoiceLineItem(TimeStampedModel):
             # hisoblanadi. Faqat narx bo'lmaganda jami summadan orqaga
             # (total → yetkazish + QQS) hisoblanadi.
             delivery = Decimal(delivery_amount or 0)
-            vat = Decimal(vat_amount or 0)
             total = Decimal(total_amount or 0)
             if qty > 0 and price > 0:
                 delivery = (qty * price).quantize(Decimal('0.01'))
             elif not delivery and total > 0:
                 divisor = Decimal('1') + vat_rate / Decimal('100')
                 delivery = (total / divisor).quantize(Decimal('0.01'))
-            if vat_rate > 0:
-                vat = (delivery * vat_rate / Decimal('100')).quantize(Decimal('0.01'))
+            # QQS doim `delivery`dan qayta hisoblanadi (vat_rate=0 bo'lsa
+            # ham) — aks holda so'rovda kelgan eski `vat_amount` (masalan
+            # foydalanuvchi avval 15% tanlab, keyin "QQS siz"ga o'tgan
+            # bo'lsa) o'chmasdan qolib, jamini noto'g'ri oshirib yuboradi.
+            vat = (delivery * vat_rate / Decimal('100')).quantize(Decimal('0.01'))
             total = (delivery + vat).quantize(Decimal('0.01'))
             return delivery, vat, total
 

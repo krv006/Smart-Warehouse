@@ -4410,7 +4410,10 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
         const paidSplits = showPayment && form.payment_status === 'partial'
           ? splitPartialPayment(form.paid_amount, lineTotals)
           : null
-        for (const [index, row] of importRows.entries()) {
+        // Qatorlar bir-biriga bog'liq emas — parallel yuboriladi (ketma-ket
+        // await qilish N ta qator uchun N marta round-trip kutishga majbur
+        // qilardi).
+        await Promise.all(importRows.map(async (row, index) => {
           const rowPayload = {
             quantity: Number(row.quantity || 1),
             vat_percent: row.vat_percent || 'none',
@@ -4444,7 +4447,7 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
             }
             await api.create('/orders/zakaz/', createPayload)
           }
-        }
+        }))
         notify('Kirim yangilandi.', 'success')
         done()
         return

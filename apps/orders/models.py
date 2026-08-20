@@ -17,8 +17,9 @@ from apps.orders.dates import current_year_end
 
 
 def build_contract_number(client=None, *, contract_number=None, contract_date=None):
-    """Shartnoma raqamini avtomatik BAND QILADI — yagona UMUMIY o'suvchi
-    tartib raqam (1, 2, 3, ...), kunlik qayta boshlanmaydi.
+    """Shartnoma raqamini avtomatik BAND QILADI — `{tartib}/{DDMM}`
+    formatida, HAR KUN uchun alohida (1 dan qayta boshlanadigan) o'suvchi
+    tartib raqam (batafsili: `apps/common/contracts.py`).
 
     `contract_number` berilgan bo'lsa (xodim qo'lda kiritgan bo'lsa,
     istalgan ko'rinishda — masalan "412412412") o'sha aynan ishlatiladi,
@@ -703,7 +704,14 @@ class Zakaz(TimeStampedModel):
         # payment_status=paid ikkalasi ham shu metodni chaqirishi mumkin
         # (masalan avval to'liq to'langan, keyin rasmiy qabul qilingan),
         # ikkinchi chaqiruv qoldiqni ikki marta oshirib yubormasligi kerak.
-        if self.stock_credited:
+        # `self.stock_credited` xotiradagi (eski) qiymat bo'lishi mumkin —
+        # shu qator ustida QULF olib, ENG SO'NGGI holatni DB'dan o'qiymiz,
+        # aks holda ikki parallel so'rov (masalan status=received va
+        # payment_status=paid bir vaqtda) qoldiqni ikki marta kiritib
+        # yuboradi.
+        locked = Zakaz.objects.select_for_update().get(pk=self.pk)
+        if locked.stock_credited:
+            self.stock_credited = True
             return
 
         qty = self.received_qty if self.received_qty > 0 else self.quantity

@@ -439,7 +439,8 @@ class ZakazViewSet(CreateModelMixin, ListModelMixin,
     O'chirish: admin panel orqali.
     """
     queryset           = (Zakaz.objects
-                          .select_related('product', 'created_by', 'order')
+                          .select_related('product', 'created_by', 'order',
+                                          'supplier_client')
                           .prefetch_related('history__changed_by'))
     serializer_class   = ZakazSerializer
     permission_classes = (IsAuthenticated,)
@@ -522,7 +523,8 @@ class ZakazViewSet(CreateModelMixin, ListModelMixin,
         siblings = (Zakaz.objects
                     .filter(zakaz_type=Zakaz.MANUAL)
                     .exclude(status=Zakaz.CANCELLED)
-                    .select_related('product', 'created_by', 'order')
+                    .select_related('product', 'created_by', 'order',
+                                    'supplier_client')
                     .prefetch_related('history__changed_by')
                     .order_by('id'))
 
