@@ -184,7 +184,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 
 /* App shell */
 .app-shell {
-  --sidebar-width: 260px;
+  --sidebar-width: 224px;
   min-height: 100dvh;
   display: grid;
   grid-template-columns: var(--sidebar-width) 1fr;
@@ -672,13 +672,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .profile small { color: var(--muted); font-size: var(--text-xs); }
 
 .page {
-  max-width: 1380px;
-  margin: 0 auto;
-  padding: 36px clamp(22px, 4vw, 48px) 56px;
-}
-.app-shell.sidebar-collapsed .page {
   max-width: none;
   width: 100%;
+  padding: 28px clamp(16px, 1.6vw, 28px) 40px;
+}
+.app-shell.sidebar-collapsed .page {
   padding-inline: clamp(18px, 2.2vw, 36px);
 }
 .app-shell.sidebar-collapsed .page h1 {

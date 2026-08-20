@@ -122,14 +122,20 @@ class ElectronicInvoiceSerializer(ModelSerializer):
         u "Import" deb ko'rsatiladi.
         """
         from apps.warehouse.models import ProductOrigin
-        from apps.warehouse.product_utils import create_import_product, find_product
+        from apps.warehouse.product_utils import (create_import_product, find_product,
+                                                   normalize_product_serial)
 
         if isinstance(line_data.get('product'), Product):
             return line_data
         name = (line_data.get('product_name') or '').strip()
         if not name:
             return line_data
-        product = find_product(
+        # `_check_duplicate_new_serials` (validate_lines) shu qatordagi
+        # seriya raqamini allaqachon qidirgan bo'lishi mumkin — topilgan
+        # bo'lsa qayta so'rov yubormasdan o'sha natijadan foydalanamiz.
+        serial = normalize_product_serial(line_data.get('identification_code'))
+        cached = getattr(self, '_serial_product_cache', {}).get(serial) if serial else None
+        product = cached or find_product(
             name=name,
             serial_number=line_data.get('identification_code'),
             barcode=line_data.get('barcode'),
@@ -259,13 +265,20 @@ class ElectronicInvoiceSerializer(ModelSerializer):
         """
         from apps.warehouse.product_utils import find_product, normalize_product_serial
 
+        # `_resolve_line_product` (create/update) shu seriya bo'yicha
+        # topilgan mahsulotni qayta so'ramasdan shu keshdan olishi uchun.
+        self._serial_product_cache = {}
         seen = {}
         for index, line in enumerate(lines, start=1):
             if isinstance(line.get('product'), Product):
                 continue  # FK aniq berilgan — chalkashlik yo'q
             serial = normalize_product_serial(line.get('identification_code'))
-            if not serial or find_product(serial_number=serial):
-                continue  # bo'sh yoki omborda ALLAQACHON mavjud mahsulot
+            if not serial:
+                continue
+            existing = find_product(serial_number=serial)
+            self._serial_product_cache[serial] = existing
+            if existing:
+                continue  # omborda ALLAQACHON mavjud mahsulot
             name = (line.get('product_name') or '').strip().lower()
             if serial in seen and seen[serial][0] != name:
                 raise ValidationError(
@@ -314,6 +327,7 @@ class ElectronicInvoiceSerializer(ModelSerializer):
         invoice = super().update(instance, validated_data)
 
         if lines_data is not None:
+            existing_lines = {line.pk: line for line in invoice.lines.all()}
             keep_ids = []
             for idx, raw in enumerate(lines_data, start=1):
                 line_data = dict(raw)
@@ -323,7 +337,7 @@ class ElectronicInvoiceSerializer(ModelSerializer):
                 line_data = self._apply_product_defaults(line_data)
                 line_data = self._compute_line(line_data, reverse)
                 if line_id:
-                    line = invoice.lines.filter(pk=line_id).first()
+                    line = existing_lines.get(line_id)
                     if line:
                         for key, val in line_data.items():
                             setattr(line, key, val)

@@ -1648,7 +1648,13 @@ POST /api/v1/orders/zakaz/
 
 `import_type`/`supplier_client`/`prepaid_percent` — bulk (`/orders/zakaz/bulk/`) so‘rovda ham qabul qilinadi (butun bulk uchun umumiy qiymat, har bir `items[]` qatorida ixtiyoriy ustidan yozish mumkin).
 
-**To‘liq tahrirlash (PATCH):** Ilgari backorder-turdagi zakazda `quantity`/`product`/`unit_price` operator uchun bloklangan edi — bu cheklov OLIB TASHLANDI: endi har qanday avtorizatsiyalangan (tizimga kirgan) foydalanuvchi `supplier`, `supplier_client`, narxlar, `quantity`, sanalar, `comment`, shartnoma maydonlari va `import_type`ni PATCH qila oladi. Yagona qolgan rol-cheklovi — `received_qty` (faqat Management, ombor hisobiga bevosita ta’sir qilgani uchun). Status o‘tishi (`asos` + shartnoma raqami majburiy, faqat Management) **o‘zgarmagan**.
+**To‘liq tahrirlash (PATCH):** har qanday avtorizatsiyalangan (tizimga kirgan) foydalanuvchi `supplier`, `supplier_client`, sanalar, `comment`, shartnoma maydonlari va `import_type`ni PATCH qila oladi. Ikkita chegara bor:
+- **`received_qty`** — faqat Management (ombor hisobiga bevosita ta’sir qilgani uchun).
+- **`quantity`/`product`/`unit_price`** — ikki holatda bloklanadi (`400`/`403`):
+  1. **Backorder-turdagi zakazda** (buyurtmadagi yetishmovchilikdan avtomatik ochilgan) — faqat Management o‘zgartira oladi (`403`). Sabab: operator buni kamaytirib/almashtirib qo‘ysa, `Order.backorder_qty` bilan Zakaz orasida tiklab bo‘lmas nomuvofiqlik paydo bo‘ladi (eski zakaz hali FAOL bo‘lgani uchun yangi backorder avtomatik ochilmaydi).
+  2. **Ombor qoldig‘iga allaqachon ta’sir qilgan zakazda** (`stock_credited=true` — masalan `payment_status=paid` orqali qoldiq allaqachon kiritilgan, `status` esa hali `new`/`confirmed`/`ordered` bo‘lishi mumkin) yoki `status` `received`/`cancelled` bo‘lsa — HAMMA foydalanuvchi (Management ham) uchun `400`.
+
+Status o‘tishi (`asos` + shartnoma raqami majburiy, faqat Management) **o‘zgarmagan**.
 
 `import_batch` ixtiyoriy — berilmasa backend yangi UUID yaratadi. Mavjud import guruhiga bitta qator qo‘shishda shu UUID yuboriladi (tahrir modalidagi yangi qatorlar).
 

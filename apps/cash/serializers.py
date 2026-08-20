@@ -318,38 +318,50 @@ class CashConversionCreateSerializer(Serializer):
     comment   = CharField(required=False, allow_blank=True, allow_null=True)
 
     def validate(self, attrs):
-        from apps.cash.ledger import ledger_totals
-
-        totals    = ledger_totals()
+        """Shakl/format tekshiruvi — balans yetarliligi `create()` ichida,
+        MUTEX qulf ostida qayta tekshiriladi (pastga qarang: shu yerda
+        tekshirish TOCTOU poyga holatiga yo'l qo'yadi)."""
         direction = attrs['direction']
         amount    = attrs['amount']
         rate      = attrs['rate']
+        attrs['amount_to'] = ((amount / rate) if direction == CashConversion.UZS_TO_USD
+                              else (amount * rate)).quantize(Decimal('0.01'))
+        return attrs
+
+    @transaction.atomic
+    def create(self, validated_data):
+        from apps.cash.ledger import ledger_totals
+        from apps.cash.models import CashLedgerLock
+
+        # Balans hech qayerda saqlanmaydi (har safar hisoblanadi) — shu
+        # sabab "yetarlimi?" tekshiruvini yozuv bilan ATOM qilish uchun
+        # MUTEX qator qulflanadi. Shu qulf ostida bo'lmasa, ikki parallel
+        # konvertatsiya bir xil (eski) balansni ko'rib, ikkalasi ham
+        # o'tib ketishi va balansni minusga tushirib yuborishi mumkin edi.
+        CashLedgerLock.acquire()
+
+        direction = validated_data['direction']
+        amount    = validated_data['amount']
+        totals    = ledger_totals()
 
         if direction == CashConversion.UZS_TO_USD:
             available = totals['net_balance_uzs']
-            amount_to = (amount / rate).quantize(Decimal('0.01'))
             if amount > available:
                 raise ValidationError({
                     'amount': (f'Kassa balansida yetarli UZS mablag\' yo\'q '
                               f'(mavjud: {available} UZS).')})
         else:
             available = totals['net_balance_usd']
-            amount_to = (amount * rate).quantize(Decimal('0.01'))
             if amount > available:
                 raise ValidationError({
                     'amount': (f'Kassa balansida yetarli USD mablag\' yo\'q '
                               f'(mavjud: {available} USD).')})
 
-        attrs['amount_to'] = amount_to
-        return attrs
-
-    @transaction.atomic
-    def create(self, validated_data):
         request = self.context.get('request')
         user = request.user if request else None
         return CashConversion.objects.create(
-            direction=validated_data['direction'],
-            amount_from=validated_data['amount'],
+            direction=direction,
+            amount_from=amount,
             amount_to=validated_data['amount_to'],
             rate=validated_data['rate'],
             comment=validated_data.get('comment') or '',
