@@ -8,6 +8,7 @@ export const PAGE_PATHS = {
   Qoldiqlar: '/ombor/qoldiqlar',
   Mijozlar: '/mijozlar',
   Sotuvlar: '/sotuvlar',
+  Bron: '/bron',
   Kassa: '/moliya/kassa',
   Xarajatlar: '/moliya/xarajatlar',
   Konfigurator: '/konfigurator',

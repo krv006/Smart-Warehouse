@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import {
-  Warehouse, ArrowLeft, Bell, Buildings, CaretDown, ChartLineUp,
+  Warehouse, ArrowLeft, Bell, Bookmarks, Buildings, CaretDown, ChartLineUp,
   ClipboardText, ClockCounterClockwise, CurrencyCircleDollar, DownloadSimple, Eye, FileText, Funnel, House, MagnifyingGlass,
   Package, PencilSimple, Plus, Sliders, SignOut, SpinnerGap, Trash, TrendDown, TrendUp, Truck, UserGear, Users, Wallet, WarningCircle, X, XCircle, DotsThree, CaretLeft, CaretRight, CheckCircle,
 } from '@phosphor-icons/react'
@@ -9,6 +9,7 @@ import { api, clearStoredSession, refreshAccessToken, saveSession, setAuthFailur
 import DataTable, { BulkActionsBar, StatusBadge, TablePagination } from './components/DataTable'
 import GlobalSearch, { useGlobalSearchHotkey } from './components/GlobalSearch'
 import ClientDetailPage from './components/ClientDetailPage'
+import BookingPage from './components/BookingPage'
 import ConfiguratorPage from './components/ConfiguratorPage'
 import KassaPage from './components/KassaPage'
 import ReportExportPanel from './components/ReportExportPanel'
@@ -45,6 +46,7 @@ const SIDEBAR_NAV = [
   ['Ombor', Package, '__group_ombor__'],
   ['Mijozlar', Users, 'clients_view'],
   ['Sotuvlar', TrendUp, 'sales_view'],
+  ['Bron', Bookmarks, 'booking_view'],
   ['Moliya', CurrencyCircleDollar, '__group_moliya__'],
   ['Konfigurator', Sliders, 'configurator_view'],
   ['Hisobotlar', ChartLineUp, 'reports_view'],
@@ -1509,6 +1511,9 @@ function App() {
         {routeInfo.kind !== 'client-detail' && active === 'Konfigurator' && can(session, 'configurator_view') && (
           <ConfiguratorPage notify={notify} session={session} reloadKey={resourceReloadKey} />
         )}
+        {routeInfo.kind !== 'client-detail' && active === 'Bron' && can(session, 'booking_view') && (
+          <BookingPage notify={notify} session={session} reloadKey={resourceReloadKey} />
+        )}
         {(routeInfo.kind === 'import-new' || routeInfo.kind === 'import-edit') && active === 'Kirim' && can(session, 'procurement_view') && (
           <ImportEditorPage
             zakazId={routeInfo.zakazId || null}
@@ -1522,7 +1527,7 @@ function App() {
             }}
           />
         )}
-        {routeInfo.kind === 'page' && routeInfo.kind !== 'client-detail' && active !== 'Bosh sahifa' && active !== 'Hisobotlar' && active !== 'Buyurtmalar' && active !== 'Kassa' && active !== 'Konfigurator' && isAccessiblePage(session, active) && resources[active] && (
+        {routeInfo.kind === 'page' && routeInfo.kind !== 'client-detail' && active !== 'Bosh sahifa' && active !== 'Hisobotlar' && active !== 'Buyurtmalar' && active !== 'Kassa' && active !== 'Konfigurator' && active !== 'Bron' && isAccessiblePage(session, active) && resources[active] && (
           <>
             {activeGroup && (
               <SectionTabs groupKey={activeGroup} active={active} onSelect={(page) => routerNavigate(pathForPage(page))} session={session} />

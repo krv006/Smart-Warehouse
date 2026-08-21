@@ -72,11 +72,14 @@ function ConfigurationBuilder({ item, products, clients, close, done, notify }) 
   }
 
   return (
-    <div className="modal-backdrop" onClick={close}>
-      <form className="modal-panel configurator-builder" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
-        <div className="modal-header">
-          <h2>{item?.id ? 'Konfiguratsiyani tahrirlash' : 'Yangi konfiguratsiya'}</h2>
-          <button type="button" className="icon-button" onClick={close}><X size={18} /></button>
+    <div className="modal-backdrop" role="presentation">
+      <form className="editor configurator-builder" onSubmit={submit}>
+        <div className="editor-head">
+          <div>
+            <p className="eyebrow">KONFIGURATOR</p>
+            <h3>{item?.id ? 'Konfiguratsiyani tahrirlash' : 'Yangi konfiguratsiya'}</h3>
+          </div>
+          <button type="button" className="icon-button" onClick={close} aria-label="Yopish"><X size={18} /></button>
         </div>
         <div className="form-grid">
           <label>Nomi<input value={name} onChange={(e) => setName(e.target.value)} placeholder="Masalan: Mijoz X uchun server" /></label>
