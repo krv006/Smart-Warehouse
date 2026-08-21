@@ -1,5 +1,5 @@
 import {
-  ChartLineUp, ClipboardText, CurrencyCircleDollar, FileText, House, Package, TrendUp, Truck, Users,
+  ChartLineUp, ClipboardText, CurrencyCircleDollar, FileText, House, Package, Sliders, TrendUp, Truck, Users,
 } from '@phosphor-icons/react'
 
 export const AUTO_REFRESH_MS = 30000
@@ -27,6 +27,7 @@ export const SIDEBAR_NAV = [
   ['Mijozlar', Users, 'clients_view'],
   ['Sotuvlar', TrendUp, 'sales_view'],
   ['Moliya', CurrencyCircleDollar, '__group_moliya__'],
+  ['Konfigurator', Sliders, 'configurator_view'],
   ['Hisobotlar', ChartLineUp, 'reports_view'],
   ['Elektron faktura', FileText, 'einvoice_view'],
 ]

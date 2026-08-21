@@ -10,6 +10,7 @@ export const PAGE_PATHS = {
   Sotuvlar: '/sotuvlar',
   Kassa: '/moliya/kassa',
   Xarajatlar: '/moliya/xarajatlar',
+  Konfigurator: '/konfigurator',
   Hisobotlar: '/hisobotlar',
   Bildirishnomalar: '/bildirishnomalar',
   Foydalanuvchilar: '/foydalanuvchilar',

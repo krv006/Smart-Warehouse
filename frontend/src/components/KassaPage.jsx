@@ -278,6 +278,7 @@ function PaymentCreateModal({ close, done, notify }) {
               <select value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })}>
                 <option value="UZS">UZS</option>
                 <option value="USD">USD</option>
+                <option value="EUR">EUR</option>
               </select>
             </label>
             <label className="full-width">To‘lov muddati<input type="date" value={form.due_date} min={todayValue()} onChange={(e) => setForm({ ...form, due_date: e.target.value })} /></label>

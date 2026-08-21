@@ -14,37 +14,42 @@ def user_abilities(user):
     is_management = bool(getattr(user, 'is_management', False))
     is_operator = bool(getattr(user, 'is_operator', False))
     is_accountant = bool(getattr(user, 'is_accountant', False))
+    is_sales = bool(getattr(user, 'is_sales', False))
     can_view_clients = bool(getattr(user, 'can_view_clients', False))
+    full_access = is_operator or is_management or is_accountant
 
     return {
-        'dashboard': is_accountant or is_management,
+        'dashboard': is_accountant or is_management or is_sales,
         'orders_view': is_operator or is_management,
         'orders_manage': is_operator or is_management,
         'order_status_manage': is_management,
-        'warehouse_view': is_operator or is_management or is_accountant,
+        'warehouse_view': full_access or is_sales,
         'warehouse_create': is_operator or is_management,
         'warehouse_manage': is_operator or is_management,
-        'prices_view': is_accountant or is_management,
+        'prices_view': is_accountant or is_management or is_sales,
         'prices_manage': is_management,
-        'clients_view': can_view_clients,
-        'clients_manage': can_view_clients,
-        'sales_view': is_operator or is_management or is_accountant,
+        'clients_view': can_view_clients or full_access or is_sales,
+        'clients_manage': can_view_clients or full_access or is_sales,
+        'sales_view': full_access,
         'sales_manage': is_operator or is_management,
         'cash_view': is_operator or is_accountant or is_management,
         'cash_manage': is_accountant or is_management,
         'expenses_view': is_operator or is_accountant or is_management,
         'expenses_manage': is_accountant or is_management,
-        'reports_view': is_accountant or is_management,
+        'reports_view': is_accountant or is_management or is_sales,
         'notifications_view': True,
-        'procurement_view': is_operator or is_management or is_accountant,
-        'procurement_manage': is_operator or is_management or is_accountant,
-        'contracts_view': is_operator or is_management or is_accountant,
+        'procurement_view': full_access,
+        'procurement_manage': full_access,
+        'contracts_view': full_access,
         'categories_view': is_operator or is_management,
-        'stocks_view': is_operator or is_management,
+        'stocks_view': is_operator or is_management or is_sales,
         'users_view': is_management,
         'users_manage': is_management,
-        'einvoice_view': is_operator or is_management or is_accountant,
+        'einvoice_view': full_access,
         'einvoice_manage': is_operator or is_management,
+        'configurator_view': full_access or is_sales,
+        'booking_view': is_sales or is_management,
+        'booking_manage': is_management,
     }
 
 

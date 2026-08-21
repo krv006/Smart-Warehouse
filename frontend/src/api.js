@@ -281,6 +281,7 @@ export const api = {
   updateExchangeRateSettings: (payload) => request('/cash/exchange-rates/settings/', { method: 'PATCH', body: JSON.stringify(payload) }),
   companyProfile: () => request('/company-profile/'),
   updateCompanyProfile: (payload) => request('/company-profile/', { method: 'PATCH', body: JSON.stringify(payload) }),
+  configurations: (params = {}) => request(`/configurator/${toQuery({ page_size: 100, ...params })}`),
   invoices: (params = {}) => request(`/invoices/${toQuery({ page_size: 30, ...params })}`),
   invoice: (id) => request(`/invoices/${id}/`),
   createInvoice: (payload) => request('/invoices/', { method: 'POST', body: JSON.stringify(payload) }),
