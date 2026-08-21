@@ -6,11 +6,13 @@ class User(AbstractUser):
     OPERATOR    = 'OPERATOR'
     ACCOUNTANT  = 'ACCOUNTANT'
     MANAGEMENT  = 'MANAGEMENT'
+    SALES       = 'SALES'
 
     ROLES = (
         (OPERATOR,   'Operator (Ishchi)'),
         (ACCOUNTANT, 'Accountant (Buxgalter)'),
         (MANAGEMENT, 'Management (Boshqaruv)'),
+        (SALES,      'Sales (Sotuvchi)'),
     )
 
     role             = CharField(max_length=20, choices=ROLES, default=OPERATOR)
@@ -29,8 +31,25 @@ class User(AbstractUser):
 
     @property
     def is_operator(self):
+        # Operator (Buxgalter deb ham yuritiladi) — to'liq dostup: Management
+        # bilan bir xil huquqqa ega, faqat status o'zgartirishlar (Zakaz/Order
+        # holati) Management tomonidan tasdiqlanishi kerak (is_pending_approval).
         return self.role == self.OPERATOR or self.is_superuser
 
     @property
     def is_accountant(self):
+        # Admin (Management) va Buxgalter (Accountant) bir xil imkoniyatlarga
+        # ega — faqat Buxgalter kiritgan o'zgarish Adminga tasdiqlash uchun
+        # ketadi (bu view/serializer darajasida hal qilinadi, is_accountant
+        # o'zi to'liq huquq beradi).
         return self.role == self.ACCOUNTANT or self.is_superuser
+
+    @property
+    def is_sales(self):
+        return self.role == self.SALES or self.is_superuser
+
+    @property
+    def requires_change_approval(self):
+        """Buxgalter (ACCOUNTANT) qilgan o'zgarishlar Admin tasdig'iga muhtoj —
+        Management/Operator/superuser/Sales uchun False."""
+        return self.role == self.ACCOUNTANT and not self.is_superuser

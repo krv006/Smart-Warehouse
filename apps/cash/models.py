@@ -11,7 +11,8 @@ from apps.common.models import TimeStampedModel
 
 class ExchangeRate(TimeStampedModel):
     USD = 'USD'
-    CURRENCY_CHOICES = ((USD, 'USD'),)
+    EUR = 'EUR'
+    CURRENCY_CHOICES = ((USD, 'USD'), (EUR, 'EUR'))
 
     currency       = CharField(max_length=3, choices=CURRENCY_CHOICES, default=USD)
     mb_rate        = DecimalField(max_digits=14, decimal_places=2, default=Decimal('0'))
@@ -51,7 +52,8 @@ class Payment(TimeStampedModel):
 
     UZS = 'UZS'
     USD = 'USD'
-    CURRENCY_CHOICES = ((UZS, 'UZS'), (USD, 'USD'))
+    EUR = 'EUR'
+    CURRENCY_CHOICES = ((UZS, 'UZS'), (USD, 'USD'), (EUR, 'EUR'))
 
     COMMISSION_RATE = Decimal('0.15')
 
@@ -216,10 +218,34 @@ class CashConversion(TimeStampedModel):
     """
     UZS_TO_USD = 'uzs_to_usd'
     USD_TO_UZS = 'usd_to_uzs'
+    UZS_TO_EUR = 'uzs_to_eur'
+    EUR_TO_UZS = 'eur_to_uzs'
+    USD_TO_EUR = 'usd_to_eur'
+    EUR_TO_USD = 'eur_to_usd'
     DIRECTION_CHOICES = (
         (UZS_TO_USD, 'UZS → USD'),
         (USD_TO_UZS, 'USD → UZS'),
+        (UZS_TO_EUR, 'UZS → EUR'),
+        (EUR_TO_UZS, 'EUR → UZS'),
+        (USD_TO_EUR, 'USD → EUR'),
+        (EUR_TO_USD, 'EUR → USD'),
     )
+
+    # Har bir juftlik uchun "baza" valyuta — `rate` doim shu valyutaning
+    # boshqasidagi qiymatini bildiradi (masalan UZS<->USD juftligida rate =
+    # "1 USD nechа UZS"). Base -> boshqa: amount * rate. Boshqa -> base:
+    # amount / rate.
+    PAIR_BASE_CURRENCY = {
+        frozenset({'UZS', 'USD'}): 'USD',
+        frozenset({'UZS', 'EUR'}): 'EUR',
+        frozenset({'USD', 'EUR'}): 'EUR',
+    }
+
+    @classmethod
+    def parse_direction(cls, direction):
+        """`'uzs_to_usd'` -> `('UZS', 'USD')`."""
+        from_cur, _, to_cur = direction.partition('_to_')
+        return from_cur.upper(), to_cur.upper()
 
     direction   = CharField(max_length=16, choices=DIRECTION_CHOICES)
     amount_from = DecimalField(max_digits=18, decimal_places=2,
@@ -278,7 +304,8 @@ class CashBalanceAdjustment(TimeStampedModel):
     """
     UZS = 'UZS'
     USD = 'USD'
-    CURRENCY_CHOICES = ((UZS, 'UZS'), (USD, 'USD'))
+    EUR = 'EUR'
+    CURRENCY_CHOICES = ((UZS, 'UZS'), (USD, 'USD'), (EUR, 'EUR'))
 
     currency   = CharField(max_length=3, choices=CURRENCY_CHOICES)
     amount     = DecimalField(max_digits=18, decimal_places=2,

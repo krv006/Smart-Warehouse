@@ -306,10 +306,12 @@ class CashConversionSerializer(ModelSerializer):
 
 class CashConversionCreateSerializer(Serializer):
     """
-    Kassa balansi orasida UZS <-> USD konvertatsiya qilish.
+    Kassa balansi orasida UZS/USD/EUR orasida konvertatsiya qilish.
 
-    `amount` — manba valyutadagi summa (ayiriladi), `rate` — 1 USD necha
-    UZS ekanligi. Maqsad valyutadagi summa (`amount_to`) shu yerda
+    `amount` — manba valyutadagi summa (ayiriladi). `rate` juftlikning
+    "baza" valyutasi (`CashConversion.PAIR_BASE_CURRENCY`) bo'yicha
+    o'qiladi — masalan UZS<->USD uchun "1 USD nechа UZS", USD<->EUR uchun
+    "1 EUR nechа USD". Maqsad valyutadagi summa (`amount_to`) shu yerda
     hisoblanadi va kassa balansi yetarli bo'lmasa rad etiladi.
     """
     direction = ChoiceField(choices=CashConversion.DIRECTION_CHOICES)
@@ -324,8 +326,10 @@ class CashConversionCreateSerializer(Serializer):
         direction = attrs['direction']
         amount    = attrs['amount']
         rate      = attrs['rate']
-        attrs['amount_to'] = ((amount / rate) if direction == CashConversion.UZS_TO_USD
-                              else (amount * rate)).quantize(Decimal('0.01'))
+        from_cur, to_cur = CashConversion.parse_direction(direction)
+        base = CashConversion.PAIR_BASE_CURRENCY[frozenset({from_cur, to_cur})]
+        attrs['amount_to'] = ((amount * rate) if from_cur == base
+                              else (amount / rate)).quantize(Decimal('0.01'))
         return attrs
 
     @transaction.atomic
@@ -342,20 +346,14 @@ class CashConversionCreateSerializer(Serializer):
 
         direction = validated_data['direction']
         amount    = validated_data['amount']
+        from_cur, _ = CashConversion.parse_direction(direction)
         totals    = ledger_totals()
 
-        if direction == CashConversion.UZS_TO_USD:
-            available = totals['net_balance_uzs']
-            if amount > available:
-                raise ValidationError({
-                    'amount': (f'Kassa balansida yetarli UZS mablag\' yo\'q '
-                              f'(mavjud: {available} UZS).')})
-        else:
-            available = totals['net_balance_usd']
-            if amount > available:
-                raise ValidationError({
-                    'amount': (f'Kassa balansida yetarli USD mablag\' yo\'q '
-                              f'(mavjud: {available} USD).')})
+        available = totals[f'net_balance_{from_cur.lower()}']
+        if amount > available:
+            raise ValidationError({
+                'amount': (f'Kassa balansida yetarli {from_cur} mablag\' yo\'q '
+                          f'(mavjud: {available} {from_cur}).')})
 
         request = self.context.get('request')
         user = request.user if request else None

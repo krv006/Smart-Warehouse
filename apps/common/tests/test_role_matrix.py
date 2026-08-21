@@ -144,7 +144,7 @@ class RoleMatrixTests(TestCase):
             'amount': '1000',
             'currency': 'UZS',
             'date': date.today().isoformat(),
-        }).status_code, (201, 400))  # 400 if expense_type seed yo'q
+        }).status_code, (201, 202, 400))  # 202: Buxgalter — Admin tasdig'i navbatiga; 400 if expense_type seed yo'q
 
     def test_rule7_operator_payment_has_no_amounts(self):
         self._auth(self.manager)

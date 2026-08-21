@@ -31,7 +31,7 @@ const NAV_GROUPS = {
     { page: 'Qoldiqlar', label: 'Qoldiqlar', ability: 'stocks_view' },
   ],
   Moliya: [
-    { page: 'Kassa', label: 'Kassa', ability: 'cash_view' },
+    { page: 'Kassa', label: 'Buxgalteriya', ability: 'cash_view' },
     { page: 'Xarajatlar', label: 'Xarajatlar', ability: 'expenses_view' },
   ],
 }

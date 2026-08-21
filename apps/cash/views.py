@@ -18,7 +18,7 @@ from apps.cash.serializers import (CashBalanceAdjustmentCreateSerializer,
                                    PaymentPaySerializer)
 from apps.cash.services import (ExchangeRateFetchError, get_active_rate_info,
                                 get_cached_market_usd_rates, get_market_usd_rates,
-                                get_today_rate, sync_today_usd_rate)
+                                get_today_rate, sync_today_rate, sync_today_usd_rate)
 from apps.common.permissions import (IsAccountantOrManagement,
                                      IsAccountantWithManagementRead,
                                      IsManagement)
@@ -47,8 +47,9 @@ class ExchangeRateViewSet(ModelViewSet):
         return super().get_permissions()
 
     def perform_create(self, serializer):
+        currency = serializer.validated_data.get('currency') or ExchangeRate.USD
         serializer.save(
-            currency=ExchangeRate.USD,
+            currency=currency,
             buy_rate=serializer.validated_data.get('buy_rate') or serializer.validated_data['mb_rate'],
             sell_rate=serializer.validated_data.get('sell_rate') or serializer.validated_data['mb_rate'],
             rate_date=timezone.localdate(),
@@ -58,7 +59,34 @@ class ExchangeRateViewSet(ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='latest')
     def latest(self, request):
+        currency = (request.query_params.get('currency') or 'USD').upper()
         refresh = request.query_params.get('refresh', '').lower() in {'1', 'true', 'yes'}
+
+        if currency != ExchangeRate.USD:
+            # EUR (va boshqa) — Infinbank sahifasida bo'lsa avtomatik olinadi,
+            # bo'lmasa faqat qo'lda kiritilgan kurs qaytadi. Bank/market
+            # taqqoslash (bankxizmatlari.uz) faqat USD uchun qo'llab-quvvatlanadi.
+            if refresh or get_today_rate(manual=False, currency=currency) is None:
+                try:
+                    sync_today_rate(currency=currency, force=refresh)
+                except ExchangeRateFetchError:
+                    pass
+            auto = get_today_rate(manual=False, currency=currency)
+            manual = get_today_rate(manual=True, currency=currency)
+            active = manual or auto or ExchangeRate.get_latest(currency)
+            payload = {
+                'infinbank': ExchangeRateSerializer(auto).data if auto else None,
+                'manual': ExchangeRateSerializer(manual).data if manual else None,
+                'active_source': 'manual' if manual else 'infinbank',
+                'currency': currency,
+                'mb_rate': str(active.mb_rate) if active else '0',
+                'source': active.source if active else None,
+                'rate_date': str(timezone.localdate()),
+            }
+            if active:
+                payload.update(ExchangeRateSerializer(active).data)
+            return Response(payload)
+
         settings = ExchangeRateSettings.get_settings()
         if refresh:
             try:
@@ -244,6 +272,8 @@ class PaymentViewSet(ModelViewSet):
                                        s=Sum('paid_amount'))['s'] or 0,
             'sum_paid_usd':        qs.filter(currency=Payment.USD, zakaz__isnull=True).aggregate(
                                        s=Sum('paid_amount'))['s'] or 0,
+            'sum_paid_eur':        qs.filter(currency=Payment.EUR, zakaz__isnull=True).aggregate(
+                                       s=Sum('paid_amount'))['s'] or 0,
             'total_commission_uzs': qs.filter(currency=Payment.UZS, zakaz__isnull=True).aggregate(
                                         s=Sum('commission'))['s'] or 0,
 
@@ -263,13 +293,15 @@ class PaymentViewSet(ModelViewSet):
         return Response(data)
 
     @extend_schema(
-        summary="Valyuta konvertatsiyasi (UZS ↔ USD, kassa balansi)",
+        summary="Valyuta konvertatsiyasi (UZS ↔ USD ↔ EUR, kassa balansi)",
         description=(
-            "Kassa balansi orasida UZS↔USD ko'chiradi va DBda saqlaydi. "
-            "`direction`: `uzs_to_usd` yoki `usd_to_uzs`. `amount` — manba "
-            "valyutadagi summa (ayiriladi), `rate` — 1 USD necha UZS "
-            "ekanligi (natija shunga qarab hisoblanadi). Balans yetarli "
-            "bo'lmasa 400 qaytadi.\n\n"
+            "Kassa balansi orasida UZS/USD/EUR o'rtasida ko'chiradi va DBda "
+            "saqlaydi. `direction`: `uzs_to_usd`, `usd_to_uzs`, `uzs_to_eur`, "
+            "`eur_to_uzs`, `usd_to_eur`, `eur_to_usd`. `amount` — manba "
+            "valyutadagi summa (ayiriladi), `rate` — juftlikning \"baza\" "
+            "valyutasi bo'yicha (UZS↔USD uchun 1 USD nechа UZS, UZS↔EUR "
+            "uchun 1 EUR nechа UZS, USD↔EUR uchun 1 EUR nechа USD). Balans "
+            "yetarli bo'lmasa 400 qaytadi.\n\n"
             "```json\n"
             "{ \"direction\": \"uzs_to_usd\", \"amount\": \"15000000\", "
             "\"rate\": \"11857.35\" }\n"

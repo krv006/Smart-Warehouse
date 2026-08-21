@@ -1,8 +1,8 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
-from rest_framework.serializers import ModelSerializer, ValidationError
+from rest_framework.serializers import ModelSerializer, ValidationError, SerializerMethodField
 
 from apps.clients.encryption import encrypt, decrypt
-from apps.clients.models import Client
+from apps.clients.models import Client, lookup_hash
 from apps.common.validators import validate_jshshir
 
 _ENCRYPT_FIELDS = (
@@ -13,6 +13,8 @@ _ENCRYPT_FIELDS = (
 
 
 class ClientSerializer(ModelSerializer):
+    created_by_name = SerializerMethodField()
+
     class Meta:
         model  = Client
         fields = ('id', 'full_name', 'first_name', 'last_name', 'middle_name',
@@ -20,8 +22,11 @@ class ClientSerializer(ModelSerializer):
                   'director_jshshr', 'director_fish', 'mfo', 'oked',
                   'bank_name', 'bank_account',
                   'passport_number', 'phone', 'email', 'address', 'comment',
-                  'is_active', 'created_at')
-        read_only_fields = ('id', 'created_at')
+                  'is_active', 'created_by', 'created_by_name', 'created_at')
+        read_only_fields = ('id', 'created_by', 'created_by_name', 'created_at')
+
+    def get_created_by_name(self, obj):
+        return str(obj.created_by) if obj.created_by_id else None
         # Uzunlik OCHIQ matnga qo'llanadi (encrypt'dan oldin tekshiriladi)
         extra_kwargs = {
             'full_name': {'max_length': 512},
@@ -71,8 +76,28 @@ class ClientSerializer(ModelSerializer):
         except DjangoValidationError as exc:
             raise ValidationError(list(exc.messages)) from exc
 
+    def _check_duplicates(self, raw):
+        """Bazada shu telefon/INN/PINFL bilan mijoz bor bo'lsa — rad etadi
+        (item 6: sales bazada bor mijozni qayta qo'sha olmaydi)."""
+        checks = (
+            ('phone_hash', raw.get('phone'), 'Bu telefon raqamli mijoz allaqachon bazada mavjud.'),
+            ('inn_hash', raw.get('inn'), 'Bu INN li mijoz allaqachon bazada mavjud.'),
+            ('pinfl_hash', raw.get('pinfl'), 'Bu JSHSHIR li mijoz allaqachon bazada mavjud.'),
+        )
+        for field, plaintext, message in checks:
+            h = lookup_hash(plaintext)
+            if not h:
+                continue
+            raw[field] = h
+            qs = Client.objects.filter(**{field: h}, is_active=True)
+            if self.instance is not None:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise ValidationError({field.replace('_hash', ''): message})
+
     def to_internal_value(self, data):
         raw = super().to_internal_value(data)
+        self._check_duplicates(raw)
 
         if raw.get('client_type') == Client.INDIVIDUAL:
             parts = [raw.get('last_name') or '', raw.get('first_name') or '', raw.get('middle_name') or '']

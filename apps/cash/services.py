@@ -200,23 +200,28 @@ def get_market_usd_rates(*, force=False):
     return payload
 
 
-def parse_infinbank_usd_mb_rate(html):
+def parse_infinbank_mb_rate(html, currency='USD'):
     parser = RatesTableParser()
     parser.feed(html)
 
-    header_row = next((row for row in parser.rows if 'USD' in row), None)
+    header_row = next((row for row in parser.rows if currency in row), None)
     if not header_row:
-        raise ExchangeRateFetchError('Infinbank sahifasida USD ustuni topilmadi.')
+        raise ExchangeRateFetchError(f'Infinbank sahifasida {currency} ustuni topilmadi.')
 
-    usd_index = header_row.index('USD')
+    idx = header_row.index(currency)
     mb_row = next((row for row in parser.rows if row and row[0].strip().lower() == 'mb kurs'), None)
-    if not mb_row or len(mb_row) <= usd_index:
-        raise ExchangeRateFetchError('Infinbank sahifasida USD MB kursi topilmadi.')
+    if not mb_row or len(mb_row) <= idx:
+        raise ExchangeRateFetchError(f'Infinbank sahifasida {currency} MB kursi topilmadi.')
 
-    return parse_decimal(mb_row[usd_index])
+    return parse_decimal(mb_row[idx])
 
 
-def fetch_infinbank_usd_mb_rate():
+# Orqaga moslik — eski nom
+def parse_infinbank_usd_mb_rate(html):
+    return parse_infinbank_mb_rate(html, currency='USD')
+
+
+def fetch_infinbank_mb_rate(currency='USD'):
     try:
         response = _request_infinbank()
         response.raise_for_status()
@@ -229,7 +234,12 @@ def fetch_infinbank_usd_mb_rate():
             raise ExchangeRateFetchError('Infinbank sahifasiga ulanishda xatolik.') from exc
     except requests.RequestException as exc:
         raise ExchangeRateFetchError('Infinbank sahifasiga ulanishda xatolik.') from exc
-    return parse_infinbank_usd_mb_rate(response.text)
+    return parse_infinbank_mb_rate(response.text, currency=currency)
+
+
+# Orqaga moslik — eski nom
+def fetch_infinbank_usd_mb_rate():
+    return fetch_infinbank_mb_rate('USD')
 
 
 def _request_infinbank(verify=True):
@@ -244,19 +254,19 @@ def _request_infinbank(verify=True):
     )
 
 
-def sync_today_usd_rate(*, force=False):
+def sync_today_rate(*, currency='USD', force=False):
     """Infinbank kursini yangilaydi — qo'lda kurs alohida saqlanadi va bloklamaydi."""
     today = timezone.localdate()
-    mb_rate = fetch_infinbank_usd_mb_rate()
+    mb_rate = fetch_infinbank_mb_rate(currency)
     rate = (
         ExchangeRate.objects
-        .filter(currency=ExchangeRate.USD, rate_date=today, manual_override=False)
+        .filter(currency=currency, rate_date=today, manual_override=False)
         .order_by('-created_at')
         .first()
     )
 
     if rate is None:
-        rate = ExchangeRate(currency=ExchangeRate.USD, rate_date=today)
+        rate = ExchangeRate(currency=currency, rate_date=today)
 
     rate.mb_rate = mb_rate
     rate.buy_rate = mb_rate
@@ -268,11 +278,16 @@ def sync_today_usd_rate(*, force=False):
     return rate, True
 
 
-def get_today_rate(*, manual):
+# Orqaga moslik — eski nom
+def sync_today_usd_rate(*, force=False):
+    return sync_today_rate(currency='USD', force=force)
+
+
+def get_today_rate(*, manual, currency='USD'):
     today = timezone.localdate()
     return (
         ExchangeRate.objects
-        .filter(currency=ExchangeRate.USD, rate_date=today, manual_override=manual)
+        .filter(currency=currency, rate_date=today, manual_override=manual)
         .order_by('-created_at')
         .first()
     )

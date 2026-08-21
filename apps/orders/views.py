@@ -7,7 +7,7 @@ from django.db.models import Q
 from drf_spectacular.utils import extend_schema, extend_schema_view
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
-from rest_framework.mixins import (CreateModelMixin, ListModelMixin,
+from rest_framework.mixins import (CreateModelMixin, DestroyModelMixin, ListModelMixin,
                                    RetrieveModelMixin, UpdateModelMixin)
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
@@ -35,8 +35,8 @@ def _require_action_fields(request, *, faktura_required=False):
     return contract_number, asos, faktura
 
 from apps.common.permissions import (IsOperatorOrManagementWrite,
-                                     IsOperatorOrManagement)
-from apps.orders.models import (Order, OrderHistory, Zakaz, ZakazHistory,
+                                     IsFullAccessOrSales, IsManagement)
+from apps.orders.models import (Order, OrderHistory, Zakaz, ZakazHistory, Booking,
                                 ProductContract, register_contract,
                                 allocate_pending_orders, build_contract_number)
 from apps.orders.serializers import (OrderSerializer, OrderOperatorSerializer,
@@ -44,6 +44,7 @@ from apps.orders.serializers import (OrderSerializer, OrderOperatorSerializer,
                                      OrderBulkCreateSerializer,
                                      ZakazBulkCreateSerializer,
                                      ProductContractSerializer,
+                                     BookingSerializer, BookingReassignSerializer,
                                      order_serializer_class)
 
 
@@ -237,7 +238,7 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
         tags=["Orders / Bron"],
     )
     @action(detail=True, methods=['post'],
-            permission_classes=[IsOperatorOrManagement])
+            permission_classes=[IsOperatorOrManagementWrite])
     def fulfill(self, request, pk=None):
         contract_number, asos, faktura = _require_action_fields(request)
         with transaction.atomic():
@@ -297,7 +298,7 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
         tags=["Orders / Bron"],
     )
     @action(detail=True, methods=['post'],
-            permission_classes=[IsOperatorOrManagement])
+            permission_classes=[IsOperatorOrManagementWrite])
     def cancel(self, request, pk=None):
         contract_number, asos, faktura = _require_action_fields(request)
         with transaction.atomic():
@@ -345,7 +346,7 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
         tags=["Orders / Bron"],
     )
     @action(detail=True, methods=['post'], url_path='create-zakaz',
-            permission_classes=[IsOperatorOrManagement])
+            permission_classes=[IsOperatorOrManagementWrite])
     def create_zakaz(self, request, pk=None):
         order = self.get_object()
         if order.backorder_qty <= 0:
@@ -580,3 +581,70 @@ class ProductContractViewSet(ListModelMixin, RetrieveModelMixin,
     search_fields      = ('contract_number', 'faktura', 'asos',
                           'product__name', 'product__serial_number')
     ordering_fields    = ('created_at', 'contract_date')
+
+
+# ── Booking (Bron — Sales) ──────────────────────────────────────────────────
+
+@extend_schema_view(
+    list=extend_schema(summary="Bronlar ro'yxati", tags=["Bookings"]),
+    retrieve=extend_schema(summary="Bron", tags=["Bookings"]),
+    create=extend_schema(
+        summary="Yangi bron so'rovi (Sales)",
+        description="Darhol qoldiqdan band qiladi (PENDING) va Managementga xabar yuboradi.",
+        tags=["Bookings"],
+    ),
+    destroy=extend_schema(summary="Bronni bekor qilish (bandlik bo'shatiladi)", tags=["Bookings"]),
+)
+class BookingViewSet(CreateModelMixin, ListModelMixin, RetrieveModelMixin,
+                     DestroyModelMixin, GenericViewSet):
+    queryset            = Booking.objects.select_related('product', 'client', 'sales_rep', 'decided_by')
+    serializer_class    = BookingSerializer
+    permission_classes  = (IsFullAccessOrSales,)
+    filterset_fields    = ('product', 'status', 'sales_rep')
+    search_fields       = ('product__name', 'comment')
+    ordering_fields     = ('created_at', 'status')
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        if (getattr(user, 'is_sales', False)
+                and not (getattr(user, 'is_operator', False)
+                         or getattr(user, 'is_accountant', False)
+                         or getattr(user, 'is_management', False))):
+            qs = qs.filter(sales_rep=user)
+        return qs
+
+    def perform_destroy(self, instance):
+        instance.cancel(user=self.request.user)
+
+    @extend_schema(summary="Bronni tasdiqlash (Management)", tags=["Bookings"], request=None)
+    @action(detail=True, methods=['post'], permission_classes=(IsManagement,))
+    def confirm(self, request, pk=None):
+        booking = self.get_object()
+        if booking.status != Booking.PENDING:
+            raise ValidationError({'detail': 'Faqat kutilayotgan (pending) bron tasdiqlanadi.'})
+        booking.confirm(user=request.user)
+        return Response(BookingSerializer(booking).data)
+
+    @extend_schema(summary="Bronni rad etish (Management)", tags=["Bookings"], request=None)
+    @action(detail=True, methods=['post'], permission_classes=(IsManagement,))
+    def reject(self, request, pk=None):
+        booking = self.get_object()
+        if booking.status != Booking.PENDING:
+            raise ValidationError({'detail': 'Faqat kutilayotgan (pending) bron rad etiladi.'})
+        booking.reject(user=request.user)
+        return Response(BookingSerializer(booking).data)
+
+    @extend_schema(
+        summary="Bronni boshqa Sales xodimiga o'tkazish (Management)",
+        tags=["Bookings"], request=BookingReassignSerializer,
+    )
+    @action(detail=True, methods=['post'], permission_classes=(IsManagement,))
+    def reassign(self, request, pk=None):
+        booking = self.get_object()
+        if booking.status not in Booking.ACTIVE_STATUSES:
+            raise ValidationError({'detail': 'Faqat faol (pending/confirmed) bron boshqa xodimga o\'tkaziladi.'})
+        serializer = BookingReassignSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        booking.reassign(new_sales_rep=serializer.validated_data['sales_rep'], user=request.user)
+        return Response(BookingSerializer(booking).data)

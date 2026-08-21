@@ -146,7 +146,7 @@ export function crumbFromPath(pathname) {
     if (parsed.page === 'Qoldiqlar') return 'Ombor / Qoldiqlar'
   }
   if (parsed.page === 'Kassa' || parsed.page === 'Xarajatlar') {
-    if (parsed.page === 'Kassa') return 'Moliya / Kassa'
+    if (parsed.page === 'Kassa') return 'Moliya / Buxgalteriya'
     return 'Moliya / Xarajatlar'
   }
   return parsed.page || 'Bosh sahifa'

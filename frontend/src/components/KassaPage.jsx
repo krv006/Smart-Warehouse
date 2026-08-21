@@ -541,7 +541,7 @@ export default function KassaPage({ notify, session, onDataChange, reloadKey = 0
       <div className="page-heading">
         <div>
           <p className="eyebrow">MOLIYA</p>
-          <h1>Kassa</h1>
+          <h1>Buxgalteriya</h1>
           <p className="muted">Sotuv tushumlari, import chiqimlari va kassa balansi.</p>
         </div>
         {canManage && (

@@ -12,6 +12,10 @@ class Notification(TimeStampedModel):
                            related_name='notifications')
     product   = ForeignKey('warehouse.Product', on_delete=SET_NULL,
                            null=True, blank=True, related_name='price_notifications')
+    booking   = ForeignKey('orders.Booking', on_delete=SET_NULL,
+                           null=True, blank=True, related_name='notifications',
+                           help_text='Sales bron so\'rovi haqida bo\'lsa — bosilganda '
+                                     'shu bronning batafsil holatiga o\'tish uchun')
     title     = CharField(max_length=255)
     message   = TextField()
     is_read   = BooleanField(default=False)
@@ -24,6 +28,18 @@ class Notification(TimeStampedModel):
 
     def __str__(self):
         return f'{self.title} → {self.recipient}'
+
+    @classmethod
+    def notify_new_booking(cls, booking):
+        """Sales xodimi yangi bron so'ragach — barcha Managementga xabar beradi."""
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        title = "Yangi bron — tasdiq kutilmoqda"
+        message = (f'{booking.sales_rep} "{booking.product.name}" mahsulotidan '
+                   f'{booking.quantity} dona bron so\'radi. '
+                   "Tasdiqlash/rad etish uchun ko'rib chiqing.")
+        for manager in User.objects.filter(role=User.MANAGEMENT, is_active=True):
+            cls.objects.create(recipient=manager, booking=booking, title=title, message=message)
 
     @classmethod
     def notify_missing_price(cls, product):

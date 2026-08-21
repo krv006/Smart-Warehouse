@@ -2,6 +2,7 @@ import json
 import uuid
 from decimal import Decimal
 
+from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied
@@ -16,13 +17,13 @@ from rest_framework.serializers import (ModelSerializer, Serializer,
 from apps.clients.models import Client
 from apps.orders.dates import current_year_end
 from apps.orders.models import (Order, OrderItem, OrderHistory,
-                                Zakaz, ZakazHistory,
+                                Zakaz, ZakazHistory, Booking,
                                 ProductContract, register_contract,
                                 allocate_pending_orders, build_contract_number)
 from apps.warehouse.models import Product  # Category vaqtincha ishlatilmaydi
 
 # Buyurtma sarlavha tahririda kuzatiladigan maydonlar (tarixga yoziladi)
-_ORDER_TRACKED_FIELDS = ('client', 'prepaid_amount', 'prepaid_percent',
+_ORDER_TRACKED_FIELDS = ('client', 'prepaid_amount', 'payment_status', 'prepaid_percent',
                          'contract_number', 'contract_date', 'due_date', 'comment')
 
 _ZAKAZ_TRACKED_FIELDS = ('quantity', 'received_qty', 'supplier', 'supplier_client',
@@ -70,23 +71,23 @@ def _strip_zakaz_payment_fields(attrs):
     attrs.pop('paid_amount', None)
 
 
-def _validate_partial_paid_amount(payment_status, paid_amount, total, *, require_total=False):
-    if payment_status != Zakaz.PARTIAL:
+def _validate_prepaid_amount(payment_status, paid_amount, total, *, require_total=False):
+    if payment_status != Zakaz.PREPAID:
         return
     if paid_amount in (None, '') or Decimal(str(paid_amount or 0)) <= 0:
         raise ValidationError({
-            'paid_amount': 'Qisman to\'lov uchun to\'langan miqdorni kiriting.'})
+            'paid_amount': 'Oldindan to\'lov uchun to\'langan miqdorni kiriting.'})
     if require_total and (total is None or total <= 0):
         raise ValidationError({
-            'paid_amount': 'Qisman to\'lov uchun avval narx (unit_price) kiritilishi kerak.'})
+            'paid_amount': 'Oldindan to\'lov uchun avval narx (unit_price) kiritilishi kerak.'})
     if total is not None and total > 0 and Decimal(str(paid_amount)) > total:
         raise ValidationError({
             'paid_amount': (
                 f'To\'langan summa jami import summasidan ({total}) oshmasligi kerak.')})
 
 
-def _split_partial_payment(paid_amount, line_totals):
-    """Qisman to'lovni qatorlar bo'yicha taqsimlash; qoldiq oxirgi qatorga."""
+def _split_prepaid_amount(paid_amount, line_totals):
+    """Oldindan to'lovni qatorlar bo'yicha taqsimlash; qoldiq oxirgi qatorga."""
     if not line_totals:
         return []
     grand_total = sum(line_totals, Decimal('0'))
@@ -327,7 +328,7 @@ class OrderSerializer(ModelSerializer):
             'items',
             'product', 'quantity', 'unit_price',   # legacy (write-only)
             'total_quantity', 'total',
-            'prepaid_amount', 'prepaid_percent', 'balance_due',
+            'prepaid_amount', 'payment_status', 'prepaid_percent', 'balance_due',
             'contract_number', 'contract_date', 'contract_file',
             'reserved_qty', 'backorder_qty',
             'has_active_zakaz',
@@ -335,8 +336,7 @@ class OrderSerializer(ModelSerializer):
             'asos', 'history',
         )
         read_only_fields = ('status', 'created_at')
-        extra_kwargs = {'prepaid_amount': {'min_value': 0},
-                        'prepaid_percent': {'min_value': 0, 'max_value': 100}}
+        extra_kwargs = {'prepaid_amount': {'min_value': 0}}
 
     def get_client_name(self, obj):
         return str(obj.client) if obj.client else None
@@ -667,7 +667,7 @@ class OrderOperatorSerializer(OrderSerializer):
             'id', 'client', 'client_name',
             'items',
             'total_quantity',
-            'prepaid_percent',
+            'payment_status', 'prepaid_percent',
             'contract_number', 'contract_date', 'contract_file',
             'reserved_qty', 'backorder_qty',
             'has_active_zakaz',
@@ -818,8 +818,7 @@ class ZakazSerializer(ModelSerializer):
         # order'ni ko'chirish buyurtma↔zakaz bog'lanishini buzadi)
         read_only_fields = ('created_by', 'confirmed_at', 'created_at',
                             'zakaz_type', 'order')
-        extra_kwargs = {'product': {'required': False, 'allow_null': True},
-                        'prepaid_percent': {'min_value': 0, 'max_value': 100}}
+        extra_kwargs = {'product': {'required': False, 'allow_null': True}}
 
     def get_product_name(self, obj):
         # Import ro'yxatida faqat mahsulot nomi — seriya raqamisiz
@@ -973,7 +972,7 @@ class ZakazSerializer(ModelSerializer):
         payment_touched = ('payment_status' in attrs or 'paid_amount' in attrs
                            or 'quantity' in attrs or 'unit_price' in attrs
                            or self.instance is None)
-        if payment_status == Zakaz.PARTIAL and payment_touched:
+        if payment_status == Zakaz.PREPAID and payment_touched:
             line_total = None
             if self.instance:
                 qty = attrs.get('quantity', self.instance.quantity)
@@ -985,7 +984,7 @@ class ZakazSerializer(ModelSerializer):
                               * Decimal(str(attrs['quantity'])))
             # Narx noma'lum bo'lsa qisman to'lovni tekshirib bo'lmaydi —
             # summa jami importdan oshib ketishi mumkin, shuning uchun taqiq
-            _validate_partial_paid_amount(
+            _validate_prepaid_amount(
                 payment_status, paid_amount, line_total, require_total=True)
         elif payment_status == Zakaz.UNPAID:
             attrs['paid_amount'] = Decimal('0')
@@ -1309,8 +1308,8 @@ class ZakazBulkCreateSerializer(Serializer):
             payment_status = attrs.get('payment_status') or Zakaz.UNPAID
             paid_amount = attrs.get('paid_amount')
             grand_total = sum(self._line_totals(items), Decimal('0'))
-            if payment_status == Zakaz.PARTIAL:
-                _validate_partial_paid_amount(
+            if payment_status == Zakaz.PREPAID:
+                _validate_prepaid_amount(
                     payment_status, paid_amount, grand_total, require_total=True)
             elif payment_status == Zakaz.UNPAID:
                 attrs['paid_amount'] = Decimal('0')
@@ -1374,8 +1373,8 @@ class ZakazBulkCreateSerializer(Serializer):
         grand_total     = sum(line_totals, Decimal('0'))
         batch_id        = validated_data.pop('import_batch', None) or uuid.uuid4()
         line_paid_splits = (
-            _split_partial_payment(paid_amount, line_totals)
-            if payment_status == Zakaz.PARTIAL and paid_amount and grand_total > 0
+            _split_prepaid_amount(paid_amount, line_totals)
+            if payment_status == Zakaz.PREPAID and paid_amount and grand_total > 0
             else None
         )
 
@@ -1450,3 +1449,33 @@ class ZakazBulkCreateSerializer(Serializer):
         user = getattr(request, 'user', None) if request else None
         serializer_class = zakaz_serializer_class(user)
         return {'zakazlar': serializer_class(instance, many=True, context=self.context).data}
+
+
+# ── Booking (Bron — Sales) ────────────────────────────────────────────────
+
+class BookingSerializer(ModelSerializer):
+    product_name  = ReadOnlyField(source='product.name')
+    sales_rep_name = ReadOnlyField(source='sales_rep.get_full_name')
+
+    class Meta:
+        model  = Booking
+        fields = ('id', 'product', 'product_name', 'client', 'quantity',
+                 'sales_rep', 'sales_rep_name', 'status', 'comment',
+                 'decided_by', 'decided_at', 'created_at')
+        read_only_fields = ('id', 'sales_rep', 'status', 'decided_by',
+                            'decided_at', 'created_at')
+
+    def create(self, validated_data):
+        request = self.context['request']
+        validated_data['sales_rep'] = request.user
+        booking = Booking(**validated_data)
+        return booking.create_and_reserve()
+
+
+def _sales_users_queryset():
+    User = get_user_model()
+    return User.objects.filter(role=User.SALES, is_active=True)
+
+
+class BookingReassignSerializer(Serializer):
+    sales_rep = PrimaryKeyRelatedField(queryset=_sales_users_queryset())

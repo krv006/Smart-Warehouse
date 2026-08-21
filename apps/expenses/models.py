@@ -53,7 +53,8 @@ class ExpenseSubType(TimeStampedModel):
 class Expense(TimeStampedModel):
     UZS = 'UZS'
     USD = 'USD'
-    CURRENCY_CHOICES = ((UZS, 'UZS'), (USD, 'USD'))
+    EUR = 'EUR'
+    CURRENCY_CHOICES = ((UZS, 'UZS'), (USD, 'USD'), (EUR, 'EUR'))
 
     expense_type = ForeignKey(ExpenseType, on_delete=PROTECT, related_name='expenses')
     sub_type     = ForeignKey(ExpenseSubType, on_delete=SET_NULL,
