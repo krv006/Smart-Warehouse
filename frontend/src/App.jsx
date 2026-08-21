@@ -9,6 +9,7 @@ import { api, clearStoredSession, refreshAccessToken, saveSession, setAuthFailur
 import DataTable, { BulkActionsBar, StatusBadge, TablePagination } from './components/DataTable'
 import GlobalSearch, { useGlobalSearchHotkey } from './components/GlobalSearch'
 import ClientDetailPage from './components/ClientDetailPage'
+import ApprovalsPage from './components/ApprovalsPage'
 import BookingPage from './components/BookingPage'
 import ConfiguratorPage from './components/ConfiguratorPage'
 import KassaPage from './components/KassaPage'
@@ -49,6 +50,7 @@ const SIDEBAR_NAV = [
   ['Bron', Bookmarks, 'booking_view'],
   ['Moliya', CurrencyCircleDollar, '__group_moliya__'],
   ['Konfigurator', Sliders, 'configurator_view'],
+  ['Tasdiqlash', CheckCircle, 'approvals_view'],
   ['Hisobotlar', ChartLineUp, 'reports_view'],
 ]
 
@@ -1514,6 +1516,9 @@ function App() {
         {routeInfo.kind !== 'client-detail' && active === 'Bron' && can(session, 'booking_view') && (
           <BookingPage notify={notify} session={session} reloadKey={resourceReloadKey} />
         )}
+        {routeInfo.kind !== 'client-detail' && active === 'Tasdiqlash' && can(session, 'approvals_view') && (
+          <ApprovalsPage notify={notify} session={session} reloadKey={resourceReloadKey} />
+        )}
         {(routeInfo.kind === 'import-new' || routeInfo.kind === 'import-edit') && active === 'Kirim' && can(session, 'procurement_view') && (
           <ImportEditorPage
             zakazId={routeInfo.zakazId || null}
@@ -1527,7 +1532,7 @@ function App() {
             }}
           />
         )}
-        {routeInfo.kind === 'page' && routeInfo.kind !== 'client-detail' && active !== 'Bosh sahifa' && active !== 'Hisobotlar' && active !== 'Buyurtmalar' && active !== 'Kassa' && active !== 'Konfigurator' && active !== 'Bron' && isAccessiblePage(session, active) && resources[active] && (
+        {routeInfo.kind === 'page' && routeInfo.kind !== 'client-detail' && active !== 'Bosh sahifa' && active !== 'Hisobotlar' && active !== 'Buyurtmalar' && active !== 'Kassa' && active !== 'Konfigurator' && active !== 'Bron' && active !== 'Tasdiqlash' && isAccessiblePage(session, active) && resources[active] && (
           <>
             {activeGroup && (
               <SectionTabs groupKey={activeGroup} active={active} onSelect={(page) => routerNavigate(pathForPage(page))} session={session} />

@@ -12,6 +12,7 @@ export const PAGE_PATHS = {
   Kassa: '/moliya/kassa',
   Xarajatlar: '/moliya/xarajatlar',
   Konfigurator: '/konfigurator',
+  Tasdiqlash: '/tasdiqlash',
   Hisobotlar: '/hisobotlar',
   Bildirishnomalar: '/bildirishnomalar',
   Foydalanuvchilar: '/foydalanuvchilar',

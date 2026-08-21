@@ -50,6 +50,8 @@ def user_abilities(user):
         'configurator_view': full_access or is_sales,
         'booking_view': is_sales or is_management,
         'booking_manage': is_management,
+        'approvals_view': is_management or is_accountant,
+        'approvals_manage': is_management,
     }
 
 
