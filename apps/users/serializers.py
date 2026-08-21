@@ -39,7 +39,9 @@ def user_abilities(user):
         'cash_manage': is_accountant or is_management,
         'expenses_view': is_operator or is_accountant or is_management,
         'expenses_manage': is_accountant or is_management,
-        'reports_view': is_accountant or is_management or is_sales,
+        # /reports/* endpoints are IsAccountantOrManagement-only — no scoped
+        # Sales report exists yet, so don't grant a page that would 403.
+        'reports_view': is_accountant or is_management,
         'notifications_view': True,
         'procurement_view': full_access,
         'procurement_manage': full_access,
