@@ -8,8 +8,11 @@ export const PAGE_PATHS = {
   Qoldiqlar: '/ombor/qoldiqlar',
   Mijozlar: '/mijozlar',
   Sotuvlar: '/sotuvlar',
+  Bron: '/bron',
   Kassa: '/moliya/kassa',
   Xarajatlar: '/moliya/xarajatlar',
+  Konfigurator: '/konfigurator',
+  Tasdiqlash: '/tasdiqlash',
   Hisobotlar: '/hisobotlar',
   Bildirishnomalar: '/bildirishnomalar',
   Foydalanuvchilar: '/foydalanuvchilar',
@@ -146,7 +149,7 @@ export function crumbFromPath(pathname) {
     if (parsed.page === 'Qoldiqlar') return 'Ombor / Qoldiqlar'
   }
   if (parsed.page === 'Kassa' || parsed.page === 'Xarajatlar') {
-    if (parsed.page === 'Kassa') return 'Moliya / Kassa'
+    if (parsed.page === 'Kassa') return 'Moliya / Buxgalteriya'
     return 'Moliya / Xarajatlar'
   }
   return parsed.page || 'Bosh sahifa'

@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import {
-  Warehouse, ArrowLeft, Bell, Buildings, CaretDown, ChartLineUp,
+  Warehouse, ArrowLeft, Bell, Bookmarks, Buildings, CaretDown, ChartLineUp,
   ClipboardText, ClockCounterClockwise, CurrencyCircleDollar, DownloadSimple, Eye, FileText, Funnel, House, MagnifyingGlass,
-  Package, PencilSimple, Plus, SignOut, SpinnerGap, Trash, TrendDown, TrendUp, Truck, UserGear, Users, Wallet, WarningCircle, X, XCircle, DotsThree, CaretLeft, CaretRight, CheckCircle,
+  Package, PencilSimple, Plus, Sliders, SignOut, SpinnerGap, Trash, TrendDown, TrendUp, Truck, UserGear, Users, Wallet, WarningCircle, X, XCircle, DotsThree, CaretLeft, CaretRight, CheckCircle,
 } from '@phosphor-icons/react'
 import { api, clearStoredSession, refreshAccessToken, saveSession, setAuthFailureHandler, tokenExpiresAt } from './api'
 import DataTable, { BulkActionsBar, StatusBadge, TablePagination } from './components/DataTable'
 import GlobalSearch, { useGlobalSearchHotkey } from './components/GlobalSearch'
 import ClientDetailPage from './components/ClientDetailPage'
+import ApprovalsPage from './components/ApprovalsPage'
+import BookingPage from './components/BookingPage'
+import ConfiguratorPage from './components/ConfiguratorPage'
 import KassaPage from './components/KassaPage'
 import ReportExportPanel from './components/ReportExportPanel'
 import FilterDateRangeCalendar from './components/FilterDateRangeCalendar'
@@ -31,7 +34,7 @@ const NAV_GROUPS = {
     { page: 'Qoldiqlar', label: 'Qoldiqlar', ability: 'stocks_view' },
   ],
   Moliya: [
-    { page: 'Kassa', label: 'Kassa', ability: 'cash_view' },
+    { page: 'Kassa', label: 'Buxgalteriya', ability: 'cash_view' },
     { page: 'Xarajatlar', label: 'Xarajatlar', ability: 'expenses_view' },
   ],
 }
@@ -44,7 +47,10 @@ const SIDEBAR_NAV = [
   ['Ombor', Package, '__group_ombor__'],
   ['Mijozlar', Users, 'clients_view'],
   ['Sotuvlar', TrendUp, 'sales_view'],
+  ['Bron', Bookmarks, 'booking_view'],
   ['Moliya', CurrencyCircleDollar, '__group_moliya__'],
+  ['Konfigurator', Sliders, 'configurator_view'],
+  ['Tasdiqlash', CheckCircle, 'approvals_view'],
   ['Hisobotlar', ChartLineUp, 'reports_view'],
 ]
 
@@ -664,6 +670,7 @@ const CURRENCY_FILTERS = [
   { id: '', label: 'Hammasi' },
   { id: 'UZS', label: 'UZS' },
   { id: 'USD', label: 'USD' },
+  { id: 'EUR', label: 'EUR' },
 ]
 
 const PAYMENT_STATUS_FILTERS = [
@@ -937,8 +944,19 @@ function defaultGroupPage(session, groupKey) {
   return NAV_GROUPS[groupKey]?.find((tab) => can(session, tab.ability))?.page
 }
 
+// Admin (Management) uchun soddalashtirilgan navigatsiya — backend darajasida
+// hech narsa cheklanmaydi (abilities o'zgarmagan), faqat sidebar'da diqqatni
+// asosiy ishlarga (bildirishnoma, tasdiqlash, buyurtmalar) jamlaydi. Operator
+// kundalik operatsion ishni (ombor/kirim/sotuv/moliya) allaqachon to'liq
+// qamrab oladi (item 3) — Admin uchun ular sidebar'da ortiqcha shovqin.
+const MANAGEMENT_SIMPLIFIED_PAGES = new Set(['Bosh sahifa', 'Buyurtmalar', 'Bron', 'Tasdiqlash', 'Hisobotlar'])
+
 function allowedSidebar(session) {
-  return SIDEBAR_NAV.filter(([, , ability]) => canNavItem(session, ability))
+  const items = SIDEBAR_NAV.filter(([, , ability]) => canNavItem(session, ability))
+  if (session?.role === 'MANAGEMENT' && !session?.is_superuser) {
+    return items.filter(([label]) => MANAGEMENT_SIMPLIFIED_PAGES.has(label))
+  }
+  return items
 }
 
 function getPageDisplayTitle(page) {
@@ -1290,8 +1308,8 @@ function App() {
   const secondaryMobileNav = navItems.slice(4)
   const activeGroup = getGroupForPage(active)
   useGlobalSearchHotkey(() => setGlobalSearchOpen(true))
-  const navigateToPath = (path) => {
-    routerNavigate(path)
+  const navigateToPath = (path, options) => {
+    routerNavigate(path, options)
     setMobileMenuOpen(false)
   }
   const navigate = (label) => {
@@ -1503,6 +1521,15 @@ function App() {
             <KassaPage notify={notify} session={session} reloadKey={resourceReloadKey} onDataChange={() => loadDashboard(true)} />
           </>
         )}
+        {routeInfo.kind !== 'client-detail' && active === 'Konfigurator' && can(session, 'configurator_view') && (
+          <ConfiguratorPage notify={notify} session={session} reloadKey={resourceReloadKey} />
+        )}
+        {routeInfo.kind !== 'client-detail' && active === 'Bron' && can(session, 'booking_view') && (
+          <BookingPage notify={notify} session={session} reloadKey={resourceReloadKey} />
+        )}
+        {routeInfo.kind !== 'client-detail' && active === 'Tasdiqlash' && can(session, 'approvals_view') && (
+          <ApprovalsPage notify={notify} session={session} reloadKey={resourceReloadKey} />
+        )}
         {(routeInfo.kind === 'import-new' || routeInfo.kind === 'import-edit') && active === 'Kirim' && can(session, 'procurement_view') && (
           <ImportEditorPage
             zakazId={routeInfo.zakazId || null}
@@ -1516,7 +1543,7 @@ function App() {
             }}
           />
         )}
-        {routeInfo.kind === 'page' && routeInfo.kind !== 'client-detail' && active !== 'Bosh sahifa' && active !== 'Hisobotlar' && active !== 'Buyurtmalar' && active !== 'Kassa' && isAccessiblePage(session, active) && resources[active] && (
+        {routeInfo.kind === 'page' && routeInfo.kind !== 'client-detail' && active !== 'Bosh sahifa' && active !== 'Hisobotlar' && active !== 'Buyurtmalar' && active !== 'Kassa' && active !== 'Konfigurator' && active !== 'Bron' && active !== 'Tasdiqlash' && isAccessiblePage(session, active) && resources[active] && (
           <>
             {activeGroup && (
               <SectionTabs groupKey={activeGroup} active={active} onSelect={(page) => routerNavigate(pathForPage(page))} session={session} />
@@ -2491,7 +2518,7 @@ const ORDER_STATUS_BADGES = {
 
 const IMPORT_PAYMENT_BADGES = {
   unpaid: { label: 'To‘lanmagan', tone: 'neutral' },
-  partial: { label: 'Qisman', tone: 'warning' },
+  prepaid: { label: 'Oldindan to‘lov', tone: 'warning' },
   paid: { label: 'To‘langan', tone: 'success' },
 }
 
@@ -2593,7 +2620,7 @@ function importPaymentLabel(row) {
     label: row.payment_status_display || row.payment_status || '—',
     tone: 'neutral',
   }
-  if (row.payment_status === 'partial' && Number(row.paid_amount) > 0) {
+  if (row.payment_status === 'prepaid' && Number(row.paid_amount) > 0) {
     return { ...meta, label: `Qisman · ${money(row.paid_amount)} ${row.currency || 'UZS'}` }
   }
   return meta
@@ -3254,9 +3281,13 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
           <div className="product-list">
             {rows.map((row, index) => (
               <div
-                className={`product-row${title === 'Shartnomalar' ? ' product-row-clickable' : ''}`}
+                className={`product-row${title === 'Shartnomalar' || (title === 'Bildirishnomalar' && row.booking) ? ' product-row-clickable' : ''}`}
                 key={row.id || index}
-                onClick={title === 'Shartnomalar' ? () => setContractDetailId(row.id) : undefined}
+                onClick={
+                  title === 'Shartnomalar' ? () => setContractDetailId(row.id)
+                    : (title === 'Bildirishnomalar' && row.booking) ? () => { handleMarkRead(row.id); navigateToPath(pathForPage('Bron'), { state: { highlightBookingId: row.booking } }) }
+                      : undefined
+                }
                 onKeyDown={title === 'Shartnomalar' ? (event) => {
                   if (event.key === 'Enter' || event.key === ' ') {
                     event.preventDefault()
@@ -3271,10 +3302,10 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
                   <>
                     <div className="product-name">
                       <b>{row.title}</b>
-                      <small>{row.message}</small>
+                      <small>{row.message}{row.booking ? ' · Bron sahifasida ko‘rish uchun bosing' : ''}</small>
                     </div>
                     <b>{row.is_read ? 'O‘qilgan' : 'Yangi'}</b>
-                    <button className="row-action" onClick={() => handleMarkRead(row.id)}>{row.is_read ? '✓' : 'O‘qish'}</button>
+                    <button className="row-action" onClick={(e) => { e.stopPropagation(); handleMarkRead(row.id) }}>{row.is_read ? '✓' : 'O‘qish'}</button>
                   </>
                 ) : (
                   <>
@@ -3861,7 +3892,7 @@ function ExpenseEditor({ close, done, notify, item = null, session }) {
           <label>Toifa<select required value={form.expense_type} onChange={(event) => setForm({ ...form, expense_type: event.target.value, sub_type: '' })}><option value="">Tanlang</option>{expenseTypes.map((type) => <option value={type.id} key={type.id}>{type.name}</option>)}</select><FieldError message={errors.expense_type} /></label>
           <label>Turi<select value={form.sub_type} onChange={(event) => setForm({ ...form, sub_type: event.target.value })}><option value="">Tanlanmagan</option>{subTypes.map((type) => <option value={type.id} key={type.id}>{type.name}</option>)}</select></label>
           <label>Summa<input required min="0" step="0.01" type="number" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /><FieldError message={errors.amount} /></label>
-          <label>Valyuta<select value={form.currency} onChange={(event) => setForm({ ...form, currency: event.target.value })}><option value="UZS">UZS</option><option value="USD">USD</option></select></label>
+          <label>Valyuta<select value={form.currency} onChange={(event) => setForm({ ...form, currency: event.target.value })}><option value="UZS">UZS</option><option value="USD">USD</option><option value="EUR">EUR</option></select></label>
           {form.currency === 'USD' && session && (
             <div className="full-width"><FxRatePanel session={session} notify={notify} compact /></div>
           )}
@@ -3972,43 +4003,24 @@ function splitPartialPayment(totalPaid, lineTotals) {
   return splits
 }
 
-// Oldindan to'lov foizi — 5/10/15/30% tayyor variantlar + o'zi kiritish.
+// Oldindan to'lov foizi — backend faqat shu 5 ta qiymatni qabul qiladi
+// (Zakaz.PREPAID_PERCENT_CHOICES / Order.PREPAID_PERCENT_CHOICES bilan bir xil).
 // Kirim (Zakaz) va Buyurtma (Order) editorlarida bir xil ishlatiladi.
-const PREPAID_PERCENT_PRESETS = ['5', '10', '15', '30']
+const PREPAID_PERCENT_PRESETS = ['5', '10', '15', '20', '30']
 
 function PrepaidPercentField({ value, onChange, label = 'Oldindan to‘lov (%)' }) {
-  const isPreset = PREPAID_PERCENT_PRESETS.includes(String(value ?? ''))
-  const selectValue = value === '' || value == null ? '' : (isPreset ? String(value) : 'custom')
   return (
     <label>
       {label}
-      <div className="prepaid-percent-field">
-        <select
-          value={selectValue}
-          onChange={(event) => {
-            const next = event.target.value
-            onChange(next === 'custom' ? (isPreset ? '' : String(value ?? '')) : next)
-          }}
-        >
-          <option value="">—</option>
-          {PREPAID_PERCENT_PRESETS.map((preset) => (
-            <option value={preset} key={preset}>{preset}%</option>
-          ))}
-          <option value="custom">Boshqa...</option>
-        </select>
-        {(selectValue === 'custom') && (
-          <input
-            type="number"
-            min="0"
-            max="100"
-            step="0.01"
-            value={value ?? ''}
-            onChange={(event) => onChange(event.target.value)}
-            placeholder="Masalan, 20"
-            aria-label="Oldindan to‘lov foizi (o‘zi kiritish)"
-          />
-        )}
-      </div>
+      <select
+        value={value === '' || value == null ? '' : String(value)}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        <option value="">—</option>
+        {PREPAID_PERCENT_PRESETS.map((preset) => (
+          <option value={preset} key={preset}>{preset}%</option>
+        ))}
+      </select>
     </label>
   )
 }
@@ -4116,7 +4128,7 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
           prepaid_percent: anchor.prepaid_percent != null ? String(anchor.prepaid_percent) : '30',
           status: anchor.status || 'new',
           payment_status: anchor.payment_status || 'unpaid',
-          paid_amount: anchor.payment_status === 'partial' && batchPaid > 0
+          paid_amount: anchor.payment_status === 'prepaid' && batchPaid > 0
             ? String(batchPaid)
             : (anchor.paid_amount || ''),
           contract_number: anchor.contract_number || '',
@@ -4261,42 +4273,44 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
     : Number(form.unit_price || 0) * Number(form.quantity || 0)
 
   const validatePartialPayment = () => {
-    if (!showPayment || form.payment_status !== 'partial') return
+    if (!showPayment || form.payment_status !== 'prepaid') return
     const paid = Number(form.paid_amount || 0)
     if (!form.paid_amount || paid <= 0) {
-      throw new Error('Qisman to\'lov uchun summa kiriting.')
+      throw new Error('Oldindan to\'lov uchun summa kiriting.')
     }
     if (importGrandTotal <= 0) {
-      throw new Error('Qisman to\'lov uchun avval kelish narxini kiriting.')
+      throw new Error('Oldindan to\'lov uchun avval kelish narxini kiriting.')
     }
     if (paid > importGrandTotal) {
-      throw new Error(`Qisman to‘langan summa jami import summasidan (${money(importGrandTotal)}) oshmasligi kerak.`)
+      throw new Error(`Oldindan to‘langan summa jami import summasidan (${money(importGrandTotal)}) oshmasligi kerak.`)
     }
   }
 
   const importPaymentFields = showPayment && !isBackorder && (
     <>
-      <label>Valyuta<select value={form.currency} onChange={(event) => setForm({ ...form, currency: event.target.value })}><option value="UZS">UZS</option><option value="USD">USD</option></select></label>
+      <label>Valyuta<select value={form.currency} onChange={(event) => setForm({ ...form, currency: event.target.value })}><option value="UZS">UZS</option><option value="USD">USD</option><option value="EUR">EUR</option></select></label>
       <label>To‘lov statusi
         <select
           value={form.payment_status}
           onChange={(event) => setForm({
             ...form,
             payment_status: event.target.value,
-            paid_amount: event.target.value === 'partial' ? form.paid_amount : '',
+            paid_amount: event.target.value === 'prepaid' ? form.paid_amount : '',
           })}
         >
           <option value="unpaid">To‘lanmagan</option>
-          <option value="partial">Qisman</option>
+          <option value="prepaid">Oldindan to‘lov</option>
           <option value="paid">To‘langan</option>
         </select>
       </label>
-      <PrepaidPercentField
-        value={form.prepaid_percent}
-        onChange={(value) => setForm({ ...form, prepaid_percent: value })}
-      />
-      {form.payment_status === 'partial' && (
-        <label>Qisman to‘langan summa
+      {form.payment_status === 'prepaid' && (
+        <PrepaidPercentField
+          value={form.prepaid_percent}
+          onChange={(value) => setForm({ ...form, prepaid_percent: value })}
+        />
+      )}
+      {form.payment_status === 'prepaid' && (
+        <label>Oldindan to‘langan summa
           <input
             required
             min="0.01"
@@ -4310,10 +4324,10 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
           />
         </label>
       )}
-      {form.payment_status === 'partial' && (
+      {form.payment_status === 'prepaid' && (
         importGrandTotal > 0 && Number(form.paid_amount || 0) > importGrandTotal ? (
           <p className="full-width import-payment-hint field-error">
-            Qisman to‘langan summa jami import summasidan ({money(importGrandTotal)} {form.currency || 'UZS'}) oshmasligi kerak.
+            Oldindan to‘langan summa jami import summasidan ({money(importGrandTotal)} {form.currency || 'UZS'}) oshmasligi kerak.
           </p>
         ) : (
           <p className="muted full-width import-payment-hint">
@@ -4345,7 +4359,7 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
       }
       return payload
     }
-    if (payload.payment_status === 'partial') {
+    if (payload.payment_status === 'prepaid') {
       payload.paid_amount = Number(form.paid_amount)
     } else {
       delete payload.paid_amount
@@ -4369,7 +4383,7 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
           if (showPayment) {
             bulkPayload.currency = form.currency
             bulkPayload.payment_status = form.payment_status
-            if (form.payment_status === 'partial') {
+            if (form.payment_status === 'prepaid') {
               bulkPayload.paid_amount = Number(form.paid_amount)
             }
           }
@@ -4404,10 +4418,10 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
         const lineTotals = importRows.map(
           (row) => Number(row.unit_price || 0) * Number(row.quantity || 0))
         const grandTotal = lineTotals.reduce((sum, value) => sum + value, 0)
-        if (showPayment && form.payment_status === 'partial' && grandTotal <= 0) {
+        if (showPayment && form.payment_status === 'prepaid' && grandTotal <= 0) {
           throw new Error('Qisman to\'lov uchun avval barcha qatorlarga narx kiritilishi kerak.')
         }
-        const paidSplits = showPayment && form.payment_status === 'partial'
+        const paidSplits = showPayment && form.payment_status === 'prepaid'
           ? splitPartialPayment(form.paid_amount, lineTotals)
           : null
         // Qatorlar bir-biriga bog'liq emas — parallel yuboriladi (ketma-ket
@@ -4434,7 +4448,7 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
           }
           if (row.zakazId) {
             const patchPayload = { ...common, ...rowPayload, ...statusPayload }
-            if (patchPayload.payment_status !== 'partial') delete patchPayload.paid_amount
+            if (patchPayload.payment_status !== 'prepaid') delete patchPayload.paid_amount
             await api.update('/orders/zakaz/', row.zakazId, patchPayload)
           } else {
             const createPayload = applyPaymentPayload({
@@ -4465,7 +4479,7 @@ function ZakazEditor({ close, done, notify, item = null, session, asPage = false
         delete payload.currency
         delete payload.payment_status
         delete payload.paid_amount
-      } else if (payload.payment_status !== 'partial') {
+      } else if (payload.payment_status !== 'prepaid') {
         delete payload.paid_amount
       }
       await api.update('/orders/zakaz/', item.id, payload)

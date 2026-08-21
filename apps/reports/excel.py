@@ -331,7 +331,7 @@ def export_imports(queryset, date_from=None, date_to=None) -> HttpResponse:
         cell.fill = HEADER_FILL
         cell.alignment = CENTER
 
-    pay_labels = {'unpaid': 'To\'lanmagan', 'partial': 'Qisman', 'paid': 'To\'langan'}
+    pay_labels = {'unpaid': 'To\'lanmagan', 'prepaid': 'Oldindan to\'lov', 'paid': 'To\'langan'}
     for i, z in enumerate(queryset, 1):
         ws.append([
             i,

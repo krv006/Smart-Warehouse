@@ -21,7 +21,7 @@ def _target_expense_amount(zakaz):
         return None
     if zakaz.payment_status == Zakaz.PAID:
         return total
-    if zakaz.payment_status == Zakaz.PARTIAL:
+    if zakaz.payment_status == Zakaz.PREPAID:
         paid = Decimal(str(zakaz.paid_amount or 0))
         return paid if paid > 0 else None
     # To'lanmagan — hali kassadan pul chiqmagan, chiqim yozilmaydi

@@ -1,9 +1,30 @@
+import hashlib
+import re
 import uuid
 
+from django.conf import settings
 from django.db.models import (UUIDField, CharField, TextField, BooleanField,
-                              EmailField)
+                              EmailField, ForeignKey, SET_NULL)
 
 from apps.common.models import TimeStampedModel
+
+
+def normalize_for_hash(value):
+    """Telefon/INN kabi maydonlarni solishtirish uchun normallashtiradi
+    (faqat raqamlar) — takrorlanishni aniqlash shifrlangan matnni ochmasdan
+    ishlashi uchun."""
+    if not value:
+        return ''
+    return re.sub(r'\D', '', str(value))
+
+
+def lookup_hash(value):
+    """Normallashtirilgan qiymatning SHA-256 xeshi — unique lookup uchun
+    (ochiq matnni saqlamaydi, faqat solishtirish imkonini beradi)."""
+    normalized = normalize_for_hash(value)
+    if not normalized:
+        return ''
+    return hashlib.sha256(normalized.encode()).hexdigest()
 
 
 class Client(TimeStampedModel):
@@ -48,6 +69,15 @@ class Client(TimeStampedModel):
     address      = TextField(blank=True, null=True)
     comment      = TextField(blank=True, null=True)
     is_active    = BooleanField(default=True)
+    created_by   = ForeignKey(settings.AUTH_USER_MODEL, on_delete=SET_NULL,
+                              null=True, blank=True, related_name='clients_created',
+                              help_text='Mijozni qo\'shgan foydalanuvchi (Sales — '
+                                        'o\'z mijozlarini ko\'rish uchun)')
+    # Telefon/INN takrorlanishini shifrlangan matnni ochmasdan aniqlash uchun
+    # (bir xil qiymatning har doim bir xil xeshi bo'ladi)
+    phone_hash   = CharField(max_length=64, blank=True, default='', db_index=True)
+    inn_hash     = CharField(max_length=64, blank=True, default='', db_index=True)
+    pinfl_hash   = CharField(max_length=64, blank=True, default='', db_index=True)
 
     class Meta:
         db_table         = 'clients_client'

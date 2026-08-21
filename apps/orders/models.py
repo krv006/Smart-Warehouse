@@ -16,6 +16,25 @@ from apps.common.models import TimeStampedModel
 from apps.orders.dates import current_year_end
 
 
+# ── To'lov holati / oldindan to'lov foizi — Order va Zakaz ikkalasida
+# BIR XIL (Buyurtmalar va Kirim/Import qismlari uchun umumiy) ──────────────
+PAYMENT_UNPAID  = 'unpaid'
+PAYMENT_PREPAID = 'prepaid'
+PAYMENT_PAID    = 'paid'
+PAYMENT_STATUS_CHOICES = (
+    (PAYMENT_UNPAID,  'To\'lanmagan (qarz)'),
+    (PAYMENT_PREPAID, 'Oldindan to\'lov'),
+    (PAYMENT_PAID,    'To\'landi'),
+)
+PREPAID_PERCENT_CHOICES = (
+    (Decimal('5'),  '5%'),
+    (Decimal('10'), '10%'),
+    (Decimal('15'), '15%'),
+    (Decimal('20'), '20%'),
+    (Decimal('30'), '30%'),
+)
+
+
 def build_contract_number(client=None, *, contract_number=None, contract_date=None):
     """Shartnoma raqamini avtomatik BAND QILADI — `{tartib}/{DDMM}`
     formatida, HAR KUN uchun alohida (1 dan qayta boshlanadigan) o'suvchi
@@ -62,6 +81,12 @@ class Order(TimeStampedModel):
         (CANCELLED, 'Bekor qilindi'),
     )
 
+    # ── To'lov holati (mijozga nisbatan — Kirim/Zakaz'dagi bilan bir xil) ──
+    UNPAID  = PAYMENT_UNPAID
+    PREPAID = PAYMENT_PREPAID
+    PAID    = PAYMENT_PAID
+    PAYMENT_STATUS_CHOICES = PAYMENT_STATUS_CHOICES
+
     client          = ForeignKey('clients.Client', on_delete=SET_NULL,
                                  null=True, blank=True, related_name='orders')
     prepaid_amount  = DecimalField(max_digits=14, decimal_places=2, default=0,
@@ -75,10 +100,11 @@ class Order(TimeStampedModel):
     due_date        = DateField(default=current_year_end,
                                 help_text='Yetkazish muddati — joriy yil 31-dekabr')
     status          = CharField(max_length=12, choices=STATUS_CHOICES, default=PENDING)
+    payment_status  = CharField(max_length=10, choices=PAYMENT_STATUS_CHOICES, default=PAYMENT_UNPAID,
+                                help_text='To\'lov holati — oldindan to\'lov tanlansa prepaid_percent ishlatiladi')
     prepaid_percent = DecimalField(max_digits=5, decimal_places=2, null=True, blank=True,
-                                   default=Decimal('30'),
-                                   help_text='Oldindan to\'lov foizi (ma\'lumot uchun — '
-                                             'mutlaq summadan mustaqil saqlanadi)')
+                                   choices=PREPAID_PERCENT_CHOICES, default=Decimal('30'),
+                                   help_text='Oldindan to\'lov foizi (payment_status=prepaid da tanlanadi)')
     comment         = TextField(blank=True, null=True)
 
     class Meta:
@@ -539,18 +565,15 @@ class Zakaz(TimeStampedModel):
     )
 
     # ── To'lov holati (faqat MANUAL zakaz uchun) ────────────────────────────────
-    UNPAID  = 'unpaid'
-    PARTIAL = 'partial'
-    PAID    = 'paid'
-    PAYMENT_STATUS_CHOICES = (
-        (UNPAID,  'To\'lanmagan (qarz)'),
-        (PARTIAL, 'Qisman to\'landi'),
-        (PAID,    'To\'landi'),
-    )
+    UNPAID  = PAYMENT_UNPAID
+    PREPAID = PAYMENT_PREPAID
+    PAID    = PAYMENT_PAID
+    PAYMENT_STATUS_CHOICES = PAYMENT_STATUS_CHOICES
 
     UZS = 'UZS'
     USD = 'USD'
-    CURRENCY_CHOICES = ((UZS, 'UZS'), (USD, 'USD'))
+    EUR = 'EUR'
+    CURRENCY_CHOICES = ((UZS, 'UZS'), (USD, 'USD'), (EUR, 'EUR'))
 
     zakaz_type         = CharField(max_length=10, choices=TYPE_CHOICES,
                                    default=MANUAL,
@@ -596,8 +619,8 @@ class Zakaz(TimeStampedModel):
                                      related_name='zakaz_supplier_for',
                                      help_text='Etkazuvchi — mijozlar bazasidan tanlangan')
     prepaid_percent    = DecimalField(max_digits=5, decimal_places=2, null=True, blank=True,
-                                      default=Decimal('30'),
-                                      help_text='Oldindan to\'lov foizi (ma\'lumot uchun)')
+                                      choices=PREPAID_PERCENT_CHOICES, default=Decimal('30'),
+                                      help_text='Oldindan to\'lov foizi (payment_status=prepaid da tanlanadi)')
     status             = CharField(max_length=12, choices=STATUS_CHOICES, default=NEW)
 
     # Shartnoma (dogovor) — har bir ish holati uchun asos
@@ -967,6 +990,136 @@ class ZakazHistory(models.Model):
 
     def __str__(self):
         return f'Zakaz #{self.zakaz_id} — {self.get_action_display()} @ {self.created_at:%Y-%m-%d %H:%M}'
+
+
+# ── Bron (Booking) — Sales rolidagi xodim sotuvdan oldin mahsulotni
+# vaqtincha band qilib qo'yishi uchun. Order/Zakaz'dagi eski "bron" bilan
+# ARALASHTIRMASLIK KERAK: bu YANGI, Adminning tasdig'ini talab qiladigan,
+# alohida workflow (item 6) ────────────────────────────────────────────────
+
+class Booking(TimeStampedModel):
+    """
+    Sales xodimi bron so'rovi. Yaratilgan zahoti Stock.reserved_quantity'dan
+    band qilinadi (shu orqali boshqa sales xodimi bir xil mahsulotni band
+    qila olmaydi — mavjud qoldiq yetarli bo'lmasa so'rov rad etiladi).
+    Admin PENDING'ni CONFIRMED (yoki REJECTED) qiladi; istalgan vaqtda
+    CANCEL (bron bo'shatiladi) yoki boshqa sales xodimiga REASSIGN qilinishi
+    mumkin (bandlik saqlanib qoladi, faqat egasi almashadi).
+    """
+    PENDING   = 'pending'
+    CONFIRMED = 'confirmed'
+    REJECTED  = 'rejected'
+    CANCELLED = 'cancelled'
+
+    STATUS_CHOICES = (
+        (PENDING,   'Kutilmoqda (Admin tasdig\'i kerak)'),
+        (CONFIRMED, 'Tasdiqlangan bron'),
+        (REJECTED,  'Rad etildi'),
+        (CANCELLED, 'Bekor qilindi'),
+    )
+    ACTIVE_STATUSES = (PENDING, CONFIRMED)
+
+    product      = ForeignKey('warehouse.Product', on_delete=PROTECT, related_name='bookings')
+    client       = ForeignKey('clients.Client', on_delete=SET_NULL,
+                              null=True, blank=True, related_name='bookings')
+    quantity     = PositiveIntegerField()
+    sales_rep    = ForeignKey(settings.AUTH_USER_MODEL, on_delete=CASCADE,
+                              related_name='bookings',
+                              help_text='Bronni so\'ragan (yoki hozir egasi bo\'lgan) Sales xodimi')
+    status       = CharField(max_length=10, choices=STATUS_CHOICES, default=PENDING)
+    comment      = TextField(blank=True, null=True)
+    decided_by   = ForeignKey(settings.AUTH_USER_MODEL, on_delete=SET_NULL,
+                              null=True, blank=True, related_name='booking_decisions')
+    decided_at   = DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table            = 'orders_booking'
+        ordering            = ('-created_at',)
+        verbose_name        = 'Bron'
+        verbose_name_plural = 'Bronlar'
+
+    def __str__(self):
+        return f'{self.product.name} x{self.quantity} → {self.sales_rep} [{self.get_status_display()}]'
+
+    @transaction.atomic
+    def _reserve_stock(self):
+        from apps.warehouse.models import Stock
+        still_needed = self.quantity
+        rows = list(Stock.objects.select_for_update()
+                    .filter(product=self.product, quantity__gt=0).order_by('id'))
+        if sum(max(0, s.quantity - s.reserved_quantity) for s in rows) < still_needed:
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError({
+                'quantity': 'Ombordagi mavjud (bandlanmagan) qoldiq yetarli emas — '
+                            'bu mahsulot allaqachon boshqa bron/buyurtma tomonidan band qilingan bo\'lishi mumkin.'
+            })
+        for stock in rows:
+            available = stock.quantity - stock.reserved_quantity
+            if available <= 0:
+                continue
+            take = min(available, still_needed)
+            stock.reserved_quantity = F('reserved_quantity') + take
+            stock.save(update_fields=['reserved_quantity'])
+            still_needed -= take
+            if still_needed <= 0:
+                break
+
+    @transaction.atomic
+    def _release_stock(self):
+        from apps.warehouse.models import Stock
+        to_release = self.quantity
+        for stock in (Stock.objects.select_for_update()
+                      .filter(product=self.product, reserved_quantity__gt=0).order_by('id')):
+            take = min(stock.reserved_quantity, to_release)
+            stock.reserved_quantity = F('reserved_quantity') - take
+            stock.save(update_fields=['reserved_quantity'])
+            to_release -= take
+            if to_release <= 0:
+                break
+
+    @transaction.atomic
+    def create_and_reserve(self):
+        """Yangi bron — darhol qoldiqdan band qiladi va Managementga xabar beradi."""
+        self._reserve_stock()
+        self.save()
+        from apps.notifications.models import Notification
+        Notification.notify_new_booking(self)
+        return self
+
+    @transaction.atomic
+    def confirm(self, *, user):
+        self.status = self.CONFIRMED
+        self.decided_by = user
+        self.decided_at = timezone.now()
+        self.save(update_fields=['status', 'decided_by', 'decided_at'])
+        return self
+
+    @transaction.atomic
+    def reject(self, *, user):
+        self._release_stock()
+        self.status = self.REJECTED
+        self.decided_by = user
+        self.decided_at = timezone.now()
+        self.save(update_fields=['status', 'decided_by', 'decided_at'])
+        return self
+
+    @transaction.atomic
+    def cancel(self, *, user):
+        """Admin bronni butunlay olib tashlaydi — bandlik bo'shatiladi."""
+        self._release_stock()
+        self.status = self.CANCELLED
+        self.decided_by = user
+        self.decided_at = timezone.now()
+        self.save(update_fields=['status', 'decided_by', 'decided_at'])
+        return self
+
+    def reassign(self, *, new_sales_rep, user):
+        """Bandlikni saqlab, faqat egasini (sales_rep) almashtiradi."""
+        self.sales_rep = new_sales_rep
+        self.decided_by = user
+        self.decided_at = timezone.now()
+        self.save(update_fields=['sales_rep', 'decided_by', 'decided_at'])
+        return self
 
 
 # ── Yordamchi funksiya ────────────────────────────────────────────────────────

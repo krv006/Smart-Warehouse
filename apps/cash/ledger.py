@@ -139,74 +139,51 @@ def build_ledger_entries(search=None, source=None, kind=None,
     return entries
 
 
+CURRENCIES = ('UZS', 'USD', 'EUR')
+
+
 def ledger_totals():
-    in_uzs = (
-        PaymentTransaction.objects
-        .filter(payment__zakaz__isnull=True, payment__currency=Payment.UZS)
-        .aggregate(s=Sum('amount'))['s'] or Decimal('0')
-    )
-    in_usd = (
-        PaymentTransaction.objects
-        .filter(payment__zakaz__isnull=True, payment__currency=Payment.USD)
-        .aggregate(s=Sum('amount'))['s'] or Decimal('0')
-    )
-    out_import_uzs = (
-        Expense.objects
-        .filter(Q(zakaz__isnull=False) | Q(invoice__isnull=False), currency=Expense.UZS)
-        .aggregate(s=Sum('amount'))['s'] or Decimal('0')
-    )
-    out_import_usd = (
-        Expense.objects
-        .filter(Q(zakaz__isnull=False) | Q(invoice__isnull=False), currency=Expense.USD)
-        .aggregate(s=Sum('amount'))['s'] or Decimal('0')
-    )
-    out_uzs = (
-        Expense.objects
-        .filter(currency=Expense.UZS)
-        .aggregate(s=Sum('amount'))['s'] or Decimal('0')
-    )
-    out_usd = (
-        Expense.objects
-        .filter(currency=Expense.USD)
-        .aggregate(s=Sum('amount'))['s'] or Decimal('0')
-    )
+    totals = {}
+    conv_out = {c: Decimal('0') for c in CURRENCIES}
+    conv_in  = {c: Decimal('0') for c in CURRENCIES}
+    for value, _label in CashConversion.DIRECTION_CHOICES:
+        from_cur, to_cur = CashConversion.parse_direction(value)
+        agg = CashConversion.objects.filter(direction=value).aggregate(
+            frm=Sum('amount_from'), to=Sum('amount_to'))
+        conv_out[from_cur] += agg['frm'] or Decimal('0')
+        conv_in[to_cur]    += agg['to'] or Decimal('0')
 
-    # Valyuta konvertatsiyalari — UZS→USD manba balansdan ayiradi, maqsad
-    # balansga qo'shadi (va aksincha), ikkala kassa balansiga ta'sir qiladi
-    conv_uzs_to_usd = CashConversion.objects.filter(
-        direction=CashConversion.UZS_TO_USD
-    ).aggregate(frm=Sum('amount_from'), to=Sum('amount_to'))
-    conv_usd_to_uzs = CashConversion.objects.filter(
-        direction=CashConversion.USD_TO_UZS
-    ).aggregate(frm=Sum('amount_from'), to=Sum('amount_to'))
-    conv_uzs_out = conv_uzs_to_usd['frm'] or Decimal('0')
-    conv_usd_in  = conv_uzs_to_usd['to'] or Decimal('0')
-    conv_usd_out = conv_usd_to_uzs['frm'] or Decimal('0')
-    conv_uzs_in  = conv_usd_to_uzs['to'] or Decimal('0')
-
-    # Qo'lda kiritilgan balans tuzatishlari (manfiy bo'lishi mumkin)
-    adj_uzs = (
-        CashBalanceAdjustment.objects
-        .filter(currency=CashBalanceAdjustment.UZS)
-        .aggregate(s=Sum('amount'))['s'] or Decimal('0')
-    )
-    adj_usd = (
-        CashBalanceAdjustment.objects
-        .filter(currency=CashBalanceAdjustment.USD)
-        .aggregate(s=Sum('amount'))['s'] or Decimal('0')
-    )
-
-    return {
-        'sum_in_uzs': in_uzs,
-        'sum_in_usd': in_usd,
+    for cur in CURRENCIES:
+        in_cur = (
+            PaymentTransaction.objects
+            .filter(payment__zakaz__isnull=True, payment__currency=cur)
+            .aggregate(s=Sum('amount'))['s'] or Decimal('0')
+        )
+        out_import_cur = (
+            Expense.objects
+            .filter(Q(zakaz__isnull=False) | Q(invoice__isnull=False), currency=cur)
+            .aggregate(s=Sum('amount'))['s'] or Decimal('0')
+        )
+        out_cur = (
+            Expense.objects
+            .filter(currency=cur)
+            .aggregate(s=Sum('amount'))['s'] or Decimal('0')
+        )
+        # Qo'lda kiritilgan balans tuzatishlari (manfiy bo'lishi mumkin)
+        adj_cur = (
+            CashBalanceAdjustment.objects
+            .filter(currency=cur)
+            .aggregate(s=Sum('amount'))['s'] or Decimal('0')
+        )
+        key = cur.lower()
+        totals[f'sum_in_{key}'] = in_cur
         # Faqat import (zakaz/faktura) chiqimi — eski maydonlar, moslik uchun
-        'sum_import_uzs': out_import_uzs,
-        'sum_import_usd': out_import_usd,
+        totals[f'sum_import_{key}'] = out_import_cur
         # Barcha rasxodlar (import + ofis/transport/oylik/...)
-        'sum_out_uzs': out_uzs,
-        'sum_out_usd': out_usd,
+        totals[f'sum_out_{key}'] = out_cur
         # Kassa umumiy balansi — BARCHA chiqimlar, valyuta konvertatsiyalari
         # VA qo'lda kiritilgan tuzatishlar hisobga olingan holda
-        'net_balance_uzs': in_uzs - out_uzs - conv_uzs_out + conv_uzs_in + adj_uzs,
-        'net_balance_usd': in_usd - out_usd + conv_usd_in - conv_usd_out + adj_usd,
-    }
+        totals[f'net_balance_{key}'] = (
+            in_cur - out_cur - conv_out[cur] + conv_in[cur] + adj_cur)
+
+    return totals

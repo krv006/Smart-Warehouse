@@ -12,8 +12,16 @@ export function canNavItem(session, ability) {
   return can(session, ability)
 }
 
+// Admin (Management) uchun soddalashtirilgan navigatsiya — App.jsx'dagi bilan
+// bir xil (backend cheklanmaydi, faqat sidebar diqqatni jamlaydi).
+const MANAGEMENT_SIMPLIFIED_PAGES = new Set(['Bosh sahifa', 'Buyurtmalar', 'Bron', 'Tasdiqlash', 'Hisobotlar'])
+
 export function allowedSidebar(session) {
-  return SIDEBAR_NAV.filter(([, , ability]) => canNavItem(session, ability))
+  const items = SIDEBAR_NAV.filter(([, , ability]) => canNavItem(session, ability))
+  if (session?.role === 'MANAGEMENT' && !session?.is_superuser) {
+    return items.filter(([label]) => MANAGEMENT_SIMPLIFIED_PAGES.has(label))
+  }
+  return items
 }
 
 export function isAccessiblePage(session, page) {

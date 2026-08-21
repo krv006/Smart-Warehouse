@@ -29,6 +29,9 @@ Production override: `VITE_API_BASE_URL` (masalan `https://api.example.com/api/v
 | 17a | Buyurtmalar — `/invoices/` (batafsil) |
 | 17b | Excel export UI — `ReportExportPanel`, `FilterDateRangeCalendar` |
 | 17c | Kassa jurnali va avtomatik moliyaviy sinxron |
+| 17d | Tasdiqlash — Buxgalter o‘zgarishlari (`PendingChange`) *(yangi)* |
+| 17e | Konfigurator — server/to‘plam yig‘ish *(yangi)* |
+| 17f | Bron (Booking) — Sales bron so‘rovlari *(yangi)* |
 | 18–22 | Yangi endpoint qo‘shish, performance, checklist, rol matritsasi |
 
 ---
@@ -215,9 +218,9 @@ Timeout: **8 soniya**. Xato klassi: `ApiError(message, status, fields?)` — `fi
 | `paymentsSummary()` | GET | `/cash/payments/summary/` | — |
 | `kassaLedger(params)` | GET | `/cash/payments/ledger/` | `page`, `page_size`, `search`, `source` (`sale`\|`order`\|`import`\|`expense`) |
 | `pay(id, payload)` | POST | `/cash/payments/{id}/pay/` | `{ amount, comment }` |
-| `cashConvert(payload)` | POST | `/cash/payments/convert/` | `{ direction: 'uzs_to_usd'\|'usd_to_uzs', amount, rate }` |
-| `adjustCashBalance(payload)` | POST | `/cash/payments/adjust-balance/` | `{ currency: 'UZS'\|'USD', target_balance, asos }` |
-| `exchangeRateLatest(refresh)` | GET | `/cash/exchange-rates/latest/` | `refresh=true\|false` |
+| `cashConvert(payload)` | POST | `/cash/payments/convert/` | `{ direction, amount, rate }` — backend endi 6 ta yo‘nalishni qabul qiladi: `uzs_to_usd`, `usd_to_uzs`, `uzs_to_eur`, `eur_to_uzs`, `usd_to_eur`, `eur_to_usd` (`CashConversion.DIRECTION_CHOICES`); **frontend `KassaPage.jsx` konvertatsiya vidjeti hozircha faqat UZS↔USD (2 yo‘nalish) UI ko‘rsatadi** — qolgan 4 ta yo‘nalish backendda ishlaydi va `api.cashConvert` orqali chaqirilishi mumkin, lekin ularga maxsus UI hali yo‘q |
+| `adjustCashBalance(payload)` | POST | `/cash/payments/adjust-balance/` | `{ currency: 'UZS'\|'USD'\|'EUR', target_balance, asos }` |
+| `exchangeRateLatest(refresh)` | GET | `/cash/exchange-rates/latest/` | `refresh=true\|false` — backend endi `?currency=UZS\|USD\|EUR` ham qabul qiladi (standart `USD`), lekin **frontend wrapper hali faqat USD so‘raydi** (`FxRatePanel` EUR uchun kengaytirilmagan — ma’lum kamchilik) |
 | `exchangeRateSettings()` | GET | `/cash/exchange-rates/settings/` | — |
 | `updateExchangeRateSettings(payload)` | PATCH | `/cash/exchange-rates/settings/` | `{ auto_fetch_enabled?, preferred_rate_source?, preferred_bank_code? }` (`infinbank` \| `manual` \| `bank`); `preferred_bank_side` is read-only now, always `sell` |
 | `companyProfile()` | GET | `/company-profile/` | — |
@@ -529,7 +532,7 @@ Tablar `abilities` bo‘yicha yashirin (`einvoice_view`, `sales_view`, `cash_vie
 
 ## 4. Barcha endpointlar — to‘liq jadval
 
-Jami **~95** HTTP endpoint (custom actionlar bilan). ✅ = `api.js` da wrapper bor.
+Jami **~111** HTTP endpoint (custom actionlar bilan; avval ~95 edi — bu sessiyada Bron (7), Konfigurator (5), Tasdiqlash (4) va Sales xodimi hisoboti (1) qo‘shildi). ✅ = `api.js` da wrapper bor.
 
 ### Auth — `/api/v1/auth/`
 
@@ -595,7 +598,9 @@ Natija: mahsulot `create_import_product` orqali `origin=import` bilan yaratiladi
 
 **`import_batch` (UUID, nullable):** har bir manual import qatoriga yoziladi. Yangi bulk yaratishda avtomatik yangi UUID; mavjud guruhga qator qo‘shishda ixtiyoriy yuboriladi (`POST /bulk/` yoki `POST /` body da). Tahrir (`PATCH`) da o‘zgartirilmaydi. Javobda barcha rollar uchun qaytariladi (Operator serializer ham).
 
-**Qisman to‘lov chegarasi:** `payment_status=partial` bo‘lganda `paid_amount` **jami import summasidan** (`unit_price × quantity`) oshmasligi kerak — bulk, single `POST` va `PATCH` da bir xil tekshiriladi (`400`). Narx (`unit_price`) yo‘q importda qisman to‘lov umuman qabul qilinmaydi — summani solishtirib bo‘lmaydi. UI da input `max` bilan cheklangan, jami summa ko‘rsatiladi va saqlashdan oldin xato matni chiqadi.
+**Oldindan to‘lov chegarasi:** `payment_status=prepaid` bo‘lganda `paid_amount` **jami import summasidan** (`unit_price × quantity`) oshmasligi kerak — bulk, single `POST` va `PATCH` da bir xil tekshiriladi (`400`). Narx (`unit_price`) yo‘q importda oldindan to‘lov umuman qabul qilinmaydi — summani solishtirib bo‘lmaydi. UI da input `max` bilan cheklangan, jami summa ko‘rsatiladi va saqlashdan oldin xato matni chiqadi.
+
+**`prepaid_percent`** (`decimal(5,2)`, nullable, standart `30`): oldindan to‘lov foizi — **qat’iy tanlov maydoni**, faqat `5`/`10`/`15`/`20`/`30` qiymatlari qabul qilinadi (boshqa qiymat `400`). Erkin matn (custom foiz) endi yo‘q — frontendda oddiy `<select>`. `prepaid_amount`/`paid_amount`dan mustaqil saqlanadi (avtomatik hisoblanmaydi). Bir xil maydon **ham `Order`, ham `Zakaz`da** (umumiy `PREPAID_PERCENT_CHOICES`).
 
 **Operator to‘lov himoyasi:** Operator `PATCH` da `payment_status` / `paid_amount` yuborsa ham serializer maydonlari cheklangan — DB dagi qiymatlar o‘zgarmaydi (`ZakazOperatorSerializer`). Bulk va single `POST` da backend to‘lov maydonlarini strip qiladi.
 
@@ -604,7 +609,7 @@ Natija: mahsulot `create_import_product` orqali `origin=import` bilan yaratiladi
 | `payment_status` | Chiqim summasi (`Expense.amount`) |
 |---|---|
 | `paid` | Jami import summasi (`total`) |
-| `partial` | `paid_amount` (0 dan katta bo‘lishi shart) |
+| `prepaid` | `paid_amount` (0 dan katta bo‘lishi shart) |
 | `unpaid` | Jami import summasi (`total`) — to‘lanmagan bo‘lsa ham kassadan chiqim sifatida qayd etiladi |
 
 Chiqimlar kassa jurnalida `kind=out`, `source=import` ko‘rinadi. Excel export: `GET /reports/excel/kassa/` (jurnal) yoki `GET /reports/excel/imports/` (zakaz ro‘yxati).
@@ -624,7 +629,8 @@ Chiqimlar kassa jurnalida `kind=out`, `source=import` ko‘rinadi. Excel export:
   "unit_price": "1500000",
   "selling_price": "1900000",
   "vat_percent": "12",
-  "payment_status": "partial",
+  "payment_status": "prepaid",
+  "prepaid_percent": "30",
   "paid_amount": "500000",
   "currency": "UZS",
   "new_product": {
@@ -718,14 +724,14 @@ FIFO ombordan ayiradi. Operator uchun narx/foyda yashirilishi mumkin.
 | POST | `/{id}/pay/` | `{ amount, comment }` | Accountant/Management | ✅ `pay` |
 | GET | `/summary/` | — | Accountant/Management | ✅ `paymentsSummary` |
 | GET | `/ledger/` | `page`, `page_size`, `search`, `source`, `kind` | Accountant/Management (`IsAccountantWithManagementRead`, yozish yo‘q — faqat GET) | ✅ `kassaLedger` |
-| POST | `/convert/` | `{ direction: 'uzs_to_usd'\|'usd_to_uzs', amount, rate }` | Accountant/Management | ✅ `cashConvert` |
-| POST | `/adjust-balance/` | `{ currency: 'UZS'\|'USD', target_balance, asos }` | **Management** (`IsManagement`) | ✅ `adjustCashBalance` |
+| POST | `/convert/` | `{ direction, amount, rate }` — 6 yo‘nalish (quyida) | Accountant/Management | ✅ `cashConvert` |
+| POST | `/adjust-balance/` | `{ currency: 'UZS'\|'USD'\|'EUR', target_balance, asos }` | **Management** (`IsManagement`) | ✅ `adjustCashBalance` |
 
 **Ro‘yxatda `paid` yashirin** — `?status=paid` yoki `?include_paid=true`.
 
-**Valyuta konvertatsiyasi (`/payments/convert/`)** — kassa balansi (UZS/USD) orasida pul ko'chiradi va DBga (`CashConversion`) yozadi. `amount` — manba valyutadagi summa (kassadan ayiriladi), `rate` — 1 USD necha UZS ekanligi. `uzs_to_usd`: `amount_to = amount / rate` (USD balansga qo'shiladi). `usd_to_uzs`: `amount_to = amount * rate` (UZS balansga qo'shiladi). Manba valyutada balans yetarli bo'lmasa `400` (`{amount: "..."}`). Javob: `{id, direction, amount_from, amount_to, rate, comment, created_by, created_by_name, created_at}`. `GET /payments/summary/` javobidagi `net_balance_uzs`/`net_balance_usd` konvertatsiyalarni ham hisobga oladi.
+**Valyuta konvertatsiyasi (`/payments/convert/`)** — kassa balansi (UZS/USD/EUR) orasida pul ko'chiradi va DBga (`CashConversion`) yozadi. `direction` — `uzs_to_usd`, `usd_to_uzs`, `uzs_to_eur`, `eur_to_uzs`, `usd_to_eur`, `eur_to_usd` (`CashConversion.DIRECTION_CHOICES`). `amount` — manba valyutadagi summa (kassadan ayiriladi). `rate` ning ma'nosi juftlikning **baza valyutasiga** bog'liq (`CashConversion.PAIR_BASE_CURRENCY`) — UZS/USD juftligida baza **USD** (avvalgidek: `rate` = 1 USD nechа UZS), UZS/EUR va USD/EUR juftliklarida baza **EUR** (`rate` = 1 EUR nechа UZS/USD). Yo'nalish baza valyutadan boshqasiga bo'lsa `amount_to = amount * rate`, aksincha `amount_to = amount / rate`. Manba valyutada balans yetarli bo'lmasa `400` (`{amount: "..."}`). Javob: `{id, direction, amount_from, amount_to, rate, comment, created_by, created_by_name, created_at}`. `GET /payments/summary/` javobidagi `net_balance_uzs`/`net_balance_usd`/`net_balance_eur` konvertatsiyalarni ham hisobga oladi. **Frontend hozircha faqat UZS↔USD yo'nalishlar uchun UI beradi** (`KassaPage.jsx`) — qolgan 4 yo'nalish backendda tayyor, lekin UI yo'q.
 
-**Balansni qo'lda tuzatish (`/payments/adjust-balance/`)** — kassa balansi (UZS yoki USD) ko'rsatilgan `target_balance`ga o'zgartiriladi; farq (`target_balance − joriy balans`) backendda hisoblanadi va DBga (`CashBalanceAdjustment`) yoziladi. `asos` **MAJBURIY** (bo'sh/faqat probel — `400`). Faqat **Management** (Accountant ham `403` oladi — pul konvertatsiyasidan farqli). Javob: `{id, currency, amount, asos, created_by, created_by_name, created_at}` (`amount` — hisoblangan farq, manfiy bo'lishi mumkin). Har bir tuzatish `GET /payments/ledger/` jurnalida `source=adjustment` sifatida ko'rinadi (kim/`client_name` = `created_by_name`, izoh = `asos`) — shu orqali "kim, qachon, nima uchun" tarixi saqlanadi. Frontend: `KassaMetric` balans kartalarining qalam (✏️) tugmasi — faqat `session.is_management` bo'lganda ko'rinadi.
+**Balansni qo'lda tuzatish (`/payments/adjust-balance/`)** — kassa balansi (UZS, USD yoki EUR) ko'rsatilgan `target_balance`ga o'zgartiriladi; farq (`target_balance − joriy balans`) backendda hisoblanadi va DBga (`CashBalanceAdjustment`) yoziladi. `asos` **MAJBURIY** (bo'sh/faqat probel — `400`). Faqat **Management** (Accountant ham `403` oladi — pul konvertatsiyasidan farqli). Javob: `{id, currency, amount, asos, created_by, created_by_name, created_at}` (`amount` — hisoblangan farq, manfiy bo'lishi mumkin). Har bir tuzatish `GET /payments/ledger/` jurnalida `source=adjustment` sifatida ko'rinadi (kim/`client_name` = `created_by_name`, izoh = `asos`) — shu orqali "kim, qachon, nima uchun" tarixi saqlanadi. Frontend: `KassaMetric` balans kartalarining qalam (✏️) tugmasi — faqat `session.is_management` bo'lganda ko'rinadi (frontend UI hozircha faqat UZS/USD kartalar uchun — EUR balans kartasi yo'q).
 
 **Operator kassani ko‘radi, lekin pul yo‘q:** `GET /cash/payments/` va `/{id}/` Operatorga ham ochiq (`IsAccountantWithManagementRead`), lekin backend `PaymentOperatorSerializer` qaytaradi — javobda `total_amount`, `commission`, `paid_amount`, `remaining` maydonlari **umuman yo‘q**. Frontend bu maydonlar bo‘lmasligiga tayyor bo‘lsin (§21, qoida 7). Yozish (`POST`/`PATCH`/`DELETE`/`pay`) Operatorga hech qachon ochiq emas — `403`.
 
@@ -733,15 +739,15 @@ FIFO ombordan ayiradi. Operator uchun narx/foyda yashirilishi mumkin.
 
 | Method | Path | Query / body | Ruxsat | api.js |
 |---|---|---|---|---|
-| GET | `/` | `currency`, `manual_override`, `rate_date` | Auth | ❌ (faqat latest UI da) |
+| GET | `/` | `currency` (`UZS`\|`USD`\|`EUR`), `manual_override`, `rate_date` | Auth | ❌ (faqat latest UI da) |
 | GET | `/{id}/` | — | Auth | ❌ |
-| POST | `/` | `{ mb_rate, buy_rate?, sell_rate?, note? }` | Management | ✅ `create('/cash/exchange-rates/')` |
+| POST | `/` | `{ currency?, mb_rate, buy_rate?, sell_rate?, note? }` — `currency` berilmasa `USD` | Management | ✅ `create('/cash/exchange-rates/')` |
 | PATCH | `/{id}/` | kurs maydonlari | Auth | ❌ |
-| GET | `/latest/` | `refresh=true\|false` | Auth | ✅ `exchangeRateLatest` |
+| GET | `/latest/` | `refresh=true\|false`, `currency` (`UZS`\|`USD`\|`EUR`, standart `USD`) | Auth | ✅ `exchangeRateLatest` (wrapper hozircha `currency` yubormaydi — doim USD) |
 | GET | `/settings/` | — | Auth | ✅ `exchangeRateSettings` |
 | PATCH | `/settings/` | `{ auto_fetch_enabled?, preferred_rate_source?, preferred_bank_code? }` (`preferred_bank_side` read-only, doim `sell`) | Management | ✅ `updateExchangeRateSettings` |
 
-Celery beat: `refresh_infinbank_usd_rate` har **1 soat** (`root/celery.py`). `auto_fetch_enabled=false` bo‘lsa task o‘tkazib yuboriladi.
+Celery beat: `refresh_infinbank_usd_rate` har **1 soat** (`root/celery.py`). `auto_fetch_enabled=false` bo‘lsa task o‘tkazib yuboriladi. Qo'shimcha `refresh_infinbank_eur_rate` task ham bor — EUR Infinbank sahifasida ustun sifatida bo'lmasligi mumkin, shu sabab bu task xatoni jim yutadi (`ExchangeRateFetchError` tutiladi, natija `{skipped: True, reason: ...}`) — EUR kursi ishlamasa ham kassa EUR balansi bilan ishlayveradi, faqat avtomatik kurs ko'rsatilmaydi (qo'lda kiritish kerak bo'ladi).
 
 ### Korxona profili — `/api/v1/company-profile/`
 
@@ -859,6 +865,37 @@ Primary key — **UUID**. Maxfiy maydonlar bazada shifrlanadi.
 | POST | `/mark_all_read/` | — | Auth | ✅ `notificationsMarkAllRead` |
 
 Javob `mark_all_read`: `{ "status": "ok", "marked_read": 5 }`.
+
+### Bron (Booking) — `/api/v1/orders/booking/` *(yangi — §17f batafsil)*
+
+| Method | Path | Query / body | Ruxsat | api.js |
+|---|---|---|---|---|
+| GET | `/` | `product`, `status`, `sales_rep`, `search`, `ordering` | Sales/Operator/Accountant/Management | ✅ `bookings` |
+| GET | `/{id}/` | — | yuqoridagidek | ✅ `retrieve` |
+| POST | `/` | `{ product, quantity, client?, comment? }` | yuqoridagidek | ✅ `create` |
+| DELETE | `/{id}/` | — | egasi yoki to‘liq huquqli rollar | ✅ `remove` |
+| POST | `/{id}/confirm/` | — | Management | ✅ `bookingConfirm` |
+| POST | `/{id}/reject/` | — | Management | ✅ `bookingReject` |
+| POST | `/{id}/reassign/` | `{ sales_rep }` | Management | ✅ `bookingReassign` |
+
+### Konfigurator — `/api/v1/configurator/` *(yangi — §17e batafsil)*
+
+| Method | Path | Query / body | Ruxsat | api.js |
+|---|---|---|---|---|
+| GET | `/` | `client`, `search`, `ordering` | Sales/Operator/Accountant/Management | ✅ `configurations` |
+| GET | `/{id}/` | — | yuqoridagidek | ✅ `retrieve` |
+| POST | `/` | `{ name?, client?, comment?, items[] }` | yuqoridagidek | ✅ `create` |
+| PATCH | `/{id}/` | yuqoridagi shakl | yuqoridagidek | ✅ `update` |
+| DELETE | `/{id}/` | — | egasi (Sales) yoki to‘liq huquqli rollar | ✅ `remove` |
+
+### Tasdiqlash — `/api/v1/common/pending-changes/` *(yangi — §17d batafsil)*
+
+| Method | Path | Query / body | Ruxsat | api.js |
+|---|---|---|---|---|
+| GET | `/` | `status`, `kind` | Auth — Management hammasini, boshqasi o‘zinikini | ✅ `pendingChanges` |
+| GET | `/{id}/` | — | yuqoridagidek | ✅ `retrieve` |
+| POST | `/{id}/approve/` | — | Management | ✅ `pendingChangeApprove` |
+| POST | `/{id}/reject/` | `{ review_note }` | Management | ✅ `pendingChangeReject` |
 
 ### Backendda bor, `api.js` da wrapper yo‘q
 
@@ -1133,21 +1170,25 @@ Superuser oddiy manager ro‘yxatida ko‘rinmaydi. Manager superuserni o‘zgar
 
 ## 6. Role va UI permission
 
+To‘rt rol bor: **Operator** (kolloquial «Buxgalter» deb ham yuritiladi — `apps/users/models.py`dagi hamma huquq tekshiruvlari deyarli har doim `is_operator`/`is_management`/`is_accountant`/`is_sales` property’lari orqali, `role` maydonining o‘zi orqali emas), **Accountant**, **Management** va yangi **Sales** (`User.SALES`, `is_sales`). `is_superuser` har qanday rol tekshiruvidan **avtomatik o‘tadi**.
+
+**Accountant → Management tasdiqlash zanjiri:** `User.requires_change_approval` (`role == ACCOUNTANT and not is_superuser`) `True` bo‘lganda, Accountant kiritgan **Mijoz** yoki **Xarajat** yozuvi darhol saqlanmaydi — `PendingChange` navbatiga tushadi (§17d). Operator/Management/Sales uchun bu cheklov yo‘q; ular yozuvi darhol kuchga kiradi.
+
 Frontend menyuni `abilities` bo‘yicha ko‘rsatadi. Ruxsat yo‘q menu UI’da ko‘rinmasligi kerak.
 
 | Ability | Ma’nosi | Kimda |
 |---|---|---|
 | `dashboard` | bosh sahifa statistikasi | Accountant, Management |
-| `orders_view` | eski buyurtmalar API (`/orders/`) — UI da ishlatilmaydi | — |
-| `orders_manage` | eski buyurtmalar CRUD — UI da ishlatilmaydi | — |
+| `orders_view` | eski buyurtmalar API (`/orders/`) — UI da ishlatilmaydi | Operator, Management |
+| `orders_manage` | eski buyurtmalar CRUD — UI da ishlatilmaydi | Operator, Management |
 | `order_status_manage` | import status (`confirmed`/`ordered`/`received`/…) — inline va bulk | Management |
-| `warehouse_view` | mahsulotlarni ko‘rish | Operator, Accountant, Management |
+| `warehouse_view` | mahsulotlarni ko‘rish | Operator, Accountant, Management, Sales |
 | `warehouse_create` | mahsulot qo‘shish (narxsiz) | Operator, Management |
 | `warehouse_manage` | mahsulot/kirim boshqarish | Operator, Management |
-| `prices_view` | narx/kelish narxi, invoice/order summalari ko‘rish | Accountant, Management |
+| `prices_view` | narx/kelish narxi, invoice/order summalari ko‘rish | Accountant, Management, Sales |
 | `prices_manage` | narx boshqarish | Management |
-| `clients_view` | mijozlarni ko‘rish; `api.clients()` dropdown yuklash | `can_view_clients` |
-| `clients_manage` | mijoz CRUD | `can_view_clients` |
+| `clients_view` | mijozlarni ko‘rish; `api.clients()` dropdown yuklash | `can_view_clients` flag, yoki Operator/Accountant/Management/Sales (rolning o'zi yetarli, `can_view_clients=False` bo'lsa ham) |
+| `clients_manage` | mijoz CRUD (Sales — faqat o'zi qo'shgan, `ClientViewSet.get_queryset` scoping) | `can_view_clients` flag, yoki Operator/Accountant/Management/Sales |
 | `sales_view` | sotuvlarni ko‘rish | Operator, Accountant, Management |
 | `sales_manage` | sotuv yaratish/tahrirlash | Operator, Management |
 | `cash_view` | kassa ko‘rish | hammaga (summalar Accountant/Management) |
@@ -1160,11 +1201,18 @@ Frontend menyuni `abilities` bo‘yicha ko‘rsatadi. Ruxsat yo‘q menu UI’da
 | `procurement_manage` | import yaratish/tahrirlash (status emas!) | Operator, Accountant, Management |
 | `contracts_view` | shartnomalar reestri | Operator, Accountant, Management |
 | `categories_view` | kategoriyalar (ability hali backendda bor, lekin kategoriya funksiyasi vaqtincha o'chirilgani uchun frontendda hech qayerda ishlatilmaydi) | Operator, Management |
-| `stocks_view` | qoldiqlar | Operator, Management |
+| `stocks_view` | qoldiqlar | Operator, Management, Sales |
 | `einvoice_view` | Buyurtmalar sahifasini ko‘rish | Operator, Accountant, Management |
 | `einvoice_manage` | Buyurtma (invoice) yaratish/tahrirlash | Operator, Management |
 | `users_view` | userlarni ko‘rish | Management |
 | `users_manage` | user boshqarish; FX sozlamalar, kurs manbasi, qo‘lda kurs | Management |
+| `configurator_view` *(yangi)* | Konfigurator sahifasi (§17e) | Operator, Accountant, Management, Sales |
+| `booking_view` *(yangi)* | Bron sahifasi (§17f) — Sales o'zinikini, Management hammasini | Sales, Management |
+| `booking_manage` *(yangi)* | Bronni tasdiqlash/rad etish/o'tkazish | Management |
+| `approvals_view` *(yangi)* | Tasdiqlash sahifasi (§17d) — Accountant o'zi yuborganini, Management hammasini | Accountant, Management |
+| `approvals_manage` *(yangi)* | PendingChange tasdiqlash/rad etish | Management |
+
+**Sales'ning o'z faoliyati:** `dashboard`/`reports_view` Sales uchun ataylab `False` — bu ikkalasi ochadigan backend endpointlar (`/reports/summary/`, `/reports/cash/`, ... — barchasi `IsAccountantOrManagement`) kompaniya moliyaviy ma'lumotlarini qaytaradi, Sales'ga tegishli emas. Buning o'rniga Sales o'z faoliyatini **`GET /reports/sales-rep-summary/`** orqali ko'radi (§17f oxiri) — bronlar soni (jami/kutilmoqda/tasdiqlangan), qo'shgan mijozlari, yaratgan konfiguratsiyalari soni, hammasi `sales_rep`/`created_by` bo'yicha real scoped. Management xuddi shu endpointdan `?sales_rep=<id>` bilan istalgan Sales xodimini ko'radi (item 8).
 
 **Muhim farqlar:**
 
@@ -1672,7 +1720,8 @@ Bir nechta mahsulot uchun zakaz yaratadi. Har bir `items` qatori mavjud `product
   "contract_number": "13/1108",
   "contract_date": "2026-08-13",
   "currency": "UZS",
-  "payment_status": "partial",
+  "payment_status": "prepaid",
+  "prepaid_percent": "30",
   "paid_amount": "500000.00",
   "import_batch": "550e8400-e29b-41d4-a716-446655440000",
   "items": [
@@ -1697,7 +1746,7 @@ Bir nechta mahsulot uchun zakaz yaratadi. Har bir `items` qatori mavjud `product
 }
 ```
 
-`payment_status` / `paid_amount` / `currency` bulk so‘rovda umumiy maydon — barcha qatorlarga qo‘llanadi. `partial` bo‘lganda `paid_amount` qatorlar jami summasiga **proporsional** taqsimlanadi; yaxlitlash qoldig‘i **oxirgi qator** `paid_amount` ga qo‘shiladi (yig‘indi doim kiritilgan summa bilan teng). **`paid_amount` jami summadan oshmasligi** va **narx (`unit_price`) bo‘lmasa qisman to‘lov qabul qilinmaydi** (`400`). To‘lov maydonlarini faqat **Management** yoki **Buxgalter** (`prices_manage` / `cash_manage`) yuboradi — Operator API orqali ham yubora olmaydi (backend strip qiladi).
+`payment_status` / `paid_amount` / `currency` bulk so‘rovda umumiy maydon — barcha qatorlarga qo‘llanadi. `prepaid` bo‘lganda `paid_amount` qatorlar jami summasiga **proporsional** taqsimlanadi; yaxlitlash qoldig‘i **oxirgi qator** `paid_amount` ga qo‘shiladi (yig‘indi doim kiritilgan summa bilan teng). **`paid_amount` jami summadan oshmasligi** va **narx (`unit_price`) bo‘lmasa oldindan to‘lov qabul qilinmaydi** (`400`). To‘lov maydonlarini faqat **Management** yoki **Buxgalter** (`prices_manage` / `cash_manage`) yuboradi — Operator API orqali ham yubora olmaydi (backend strip qiladi).
 
 **Bir xil mahsulotga bir nechta faol zakaz — ruxsat etilgan:** avval `product` uchun faol (`new`/`confirmed`/`ordered`) zakaz mavjud bo‘lsa bulk endpoint butunlay rad etardi («bu mahsulot uchun faol zakaz allaqachon mavjud»); bu global taqiq noto‘g‘ri edi (turli buyurtmalar/holatlar bir xil mahsulotni talab qilishi mumkin) — **olib tashlandi**. Endi bir xil `product`ga istalgancha zakaz ochish mumkin. Faqat bitta so‘rov ICHIDA takrorlangan **seriya raqami** (`new_product.serial_number`) hali ham `400` bilan rad etiladi.
 
@@ -1895,20 +1944,21 @@ Frontend validatsiya (toast xato):
 - `{N}-qator: yangi mahsulot uchun kategoriya tanlanishi shart.`
 - `{N}-qator: kelish narxi kiritilishi shart.`
 - `{N}-qator: ketish narxi kiritilishi shart.`
-- `Qisman to‘langan summa jami import summasidan ({jami}) oshmasligi kerak.`
+- `Oldindan to‘langan summa jami import summasidan ({jami}) oshmasligi kerak.`
 - `{N}-qator: narx kiritilishi shart.` (`prices_manage`)
-- **`Qisman to'lov uchun summa kiriting.`**
-- **`Qisman to'lov uchun avval barcha qatorlarga narx kiritilishi kerak.`** — guruh tahririda `partial` + barcha qator jami (`grandTotal`) 0 bo‘lsa
+- **`Oldindan to'lov uchun summa kiriting.`**
+- **`Oldindan to'lov uchun avval barcha qatorlarga narx kiritilishi kerak.`** — guruh tahririda `prepaid` + barcha qator jami (`grandTotal`) 0 bo‘lsa
 
 #### 9b.2. Umumiy maydonlar (barcha rejimlar)
 
 | Label | Maydon | Eslatma |
 |---|---|---|
-| Valyuta | `<select>` | **`UZS`** / **`USD`** — `showPayment` (`prices_manage` \|\| `cash_manage`) |
-| To‘lov statusi | `<select>` | **`To‘lanmagan`** / **`Qisman`** / **`To‘langan`** — `showPayment` |
+| Valyuta | `<select>` | **`UZS`** / **`USD`** / **`EUR`** — `showPayment` (`prices_manage` \|\| `cash_manage`) |
+| To‘lov statusi | `<select>` | **`To‘lanmagan`** / **`Oldindan to‘lov`** / **`To‘langan`** — `showPayment` |
 | Operator hint | **`To‘lov holati (qisman / to‘langan) faqat boshqaruv yoki buxgalter tomonidan belgilanadi.`** | `!showPayment` |
-| Qisman to‘langan summa | `number` | faqat `partial`; placeholder: **`Masalan, 500000`** |
-| Hint (partial) | **`Kiritilgan summa saqlangach kassadan chiqim (xarajat) sifatida yoziladi.`** | |
+| Oldindan to‘lov foizi | `<select>`, faqat `prepaid` | **`5% / 10% / 15% / 20% / 30%`** — qat’iy tanlov, erkin matn yo‘q (`PrepaidPercentField`) |
+| Oldindan to‘langan summa | `number` | faqat `prepaid`; placeholder: **`Masalan, 500000`** |
+| Hint (prepaid) | **`Kiritilgan summa saqlangach kassadan chiqim (xarajat) sifatida yoziladi.`** | |
 | Hint (unpaid) | **`To‘lanmagan import summasi kassadan chiqim sifatida yoziladi.`** | |
 | Status | `<select>` | faqat `order_status_manage`: Yangi, Tasdiqlandi, Etkazuvchiga yuborildi, Qabul qilindi, Bekor qilindi — **guruh tahririda barcha sibling qatorlarga** qo‘llanadi |
 | Qabul qilingan (asosiy qator) | `number` | faqat ko‘p qatorli tahrir + Management — **`received_qty` faqat ochilgan qator** (`item.id`) uchun PATCH |
@@ -1932,7 +1982,7 @@ USD tanlanganda: **`FxRatePanel`** (`compact`) — Import editor ichida kurs.
 | Mavjud import (guruh) — saqlash | Har bir **mavjud** qator: `PATCH /orders/zakaz/{zakazId}/`; har bir **yangi** qator: `POST /orders/zakaz/` **`import_batch`** bilan (guruhdan ajralmasligi uchun) |
 | Mavjud import (yagona, backorder, order) | `PATCH /orders/zakaz/{id}/` |
 
-**Guruh tahririda qisman to‘lov (`partial`):** frontend `splitPartialPayment(totalPaid, lineTotals)` — proporsional taqsimlash, yaxlitlash qoldig‘i oxirgi qatorga. Har bir PATCH alohida o‘z `paid_amount` ni oladi; umumiy `common` payload dan `paid_amount` / `payment_status` / `currency` olib tashlanadi (dublikatsiya oldini olish).
+**Guruh tahririda oldindan to‘lov (`prepaid`):** frontend `splitPartialPayment(totalPaid, lineTotals)` — nomi eski (`partial`) davridan qolgan, funksiya o‘zi o‘zgarmagan, endi `prepaid` uchun ishlatiladi — proporsional taqsimlash, yaxlitlash qoldig‘i oxirgi qatorga. Har bir PATCH alohida o‘z `paid_amount` ni oladi; umumiy `common` payload dan `paid_amount` / `payment_status` / `currency` olib tashlanadi (dublikatsiya oldini olish).
 
 **Guruh tahririda status:** `status` va `asos` o‘zgarsa — **barcha** sibling qatorlar PATCH payloadiga qo‘shiladi (faqat ochilgan qator emas).
 
@@ -1949,7 +1999,7 @@ Operator (`prices_manage` yo‘q): payload dan `unit_price`, `currency`, `paymen
 | `batchLoading` | Tahrirda sibling qatorlar yuklanayotganda `true`; `Saqlash` disabled |
 | `importBatchId` | `GET .../batch/` javobidan `import_batch` UUID |
 | `importRows[]` | Har qator: `key`, `zakazId?`, `source`, `product`, `quantity`, `unit_price`, `manual` |
-| `splitPartialPayment()` | Qisman to‘lovni qatorlar bo‘yicha taqsimlash (oxirgi qatorga qoldiq) |
+| `splitPartialPayment()` | Oldindan to‘lovni qatorlar bo‘yicha taqsimlash (oxirgi qatorga qoldiq) — nomi tarixiy, `prepaid` uchun ishlatiladi |
 | `zakazToImportRow()` | API zakaz → modal qator formati |
 | `buildImportItem()` / `buildCommonPayload()` | Saqlash payload yig‘ish |
 | `applyPaymentPayload()` | `!showPayment` bo‘lsa to‘lov maydonlarini strip |
@@ -1963,7 +2013,7 @@ Operator (`prices_manage` yo‘q): payload dan `unit_price`, `currency`, `paymen
 - Yaratish → har doim `POST /orders/zakaz/bulk/` (`items[]` + to‘lov maydonlari).
 - Tahrir (qalamcha) → `GET /orders/zakaz/{id}/batch/` orqali guruhdagi **barcha** mahsulot qatorlari; yuklanmaguncha saqlash bloklangan.
 - Tahrir saqlash → mavjud qatorlar `PATCH`, yangi qatorlar `POST` + `import_batch`.
-- Qisman to‘lov → qatorlar bo‘yicha taqsimlangan `paid_amount`; jami 0 bo‘lsa xato.
+- Oldindan to‘lov → qatorlar bo‘yicha taqsimlangan `paid_amount`; jami 0 bo‘lsa xato.
 - Status o‘zgarishi → barcha sibling qatorlarga; `received_qty` faqat ochilgan qator uchun.
 - Ombordan tanlanganda **Narx** avtomatik `purchase_price` (`prices_manage`).
 - `serial_number` bo‘sh bo‘lsa `null` saqlanadi — avtomatik raqam **yaratilmaydi**.
@@ -2347,7 +2397,7 @@ GET /api/v1/cash/payments/?include_paid=true
 | `status` | `pending`, `partial`, `paid`, `overdue` |
 | `include_paid=true` | Barcha statuslar, shu jumladan `paid` |
 | `client` | Mijoz UUID |
-| `currency` | `UZS` yoki `USD` |
+| `currency` | `UZS`, `USD` yoki `EUR` |
 | `order`, `sale` | Bog‘langan buyurtma/sotuv ID |
 
 Frontend Kassa sahifasi: `KassaPage` — `api.kassaLedger()` + `api.paymentsSummary()`. Jadval **tushum** (sotuv/buyurtma tranzaksiyalari) va **chiqim** (import xarajatlari) harakatlarini birlashtirilgan jurnalda ko‘rsatadi.
@@ -2616,7 +2666,7 @@ Bosh sahifa `api.reports(params)` va `api.monthlyTrend(6, params)` chaqiradi. Um
 |---|---|---|
 | `date_from` | `YYYY-MM-DD` | Davr boshlanishi |
 | `date_to` | `YYYY-MM-DD` | Davr tugashi |
-| `currency` | `UZS` \| `USD` | Valyuta filtri (bo‘sh = hammasi) |
+| `currency` | `UZS` \| `USD` \| `EUR` | Valyuta filtri (bo‘sh = hammasi) |
 | `category` | int | Kategoriya ID |
 | `client` | UUID (frontend) | Mijoz ID — `/clients/` dan; backend summary/trend da `client` query qabul qiladi |
 | `supplier` | string | Yetkazuvchi (qisman mos, import/zakaz) |
@@ -2920,7 +2970,7 @@ Biznes qoida (frontend ko‘rsatish):
 | Shart. | `contract_number` | |
 | Zak. | `quantity` | |
 | Summa | `total` | `prices_view` |
-| To‘lov | `payment_status` | `unpaid` / `partial` / `paid` badge |
+| To‘lov | `payment_status` | `unpaid` / `prepaid` / `paid` badge (`IMPORT_PAYMENT_BADGES`) |
 | Qabul | `received_qty` | |
 | Etkaz. | `supplier` | |
 | Kutil. | `expected_date` | |
@@ -2942,6 +2992,103 @@ Tarix tugmasi: zakaz `history` modal.
 | `apps/orders/zakaz_payment.py` | Import (zakaz) → Expense |
 | `apps/invoices/expense_sync.py` *(yangi)* | Shartnoma (SK) faktura → Expense |
 | `apps/warehouse/stock_expense.py` *(yangi)* | Ombor kirimi (`add-stock`, mahsulot yaratish) → Expense |
+
+---
+
+## 17d. Tasdiqlash (Buxgalter o‘zgarishlari tasdig‘i) — `/api/v1/common/pending-changes/`
+
+Backend: `apps/common/approval.py` (`PendingChange` model, `ApprovalGatedMixin`, `APPROVAL_HANDLERS`/`register_handler`), `apps/common/views.py` (`PendingChangeViewSet`), `apps/common/serializers.py` (`PendingChangeSerializer`).
+
+**Qamrov** (`ApprovalGatedMixin` qo‘shilgan viewsetlar):
+
+- `apps/clients/views.py` → `ClientViewSet` (`approval_create_kind='client_create'`, `approval_update_kind='client_update'`)
+- `apps/expenses/views.py` → `ExpenseViewSet` (`approval_create_kind='expense_create'`, `approval_update_kind='expense_update'`)
+- `apps/orders/views.py` → `ZakazViewSet` (`approval_create_kind='zakaz_create'`, `approval_update_kind='zakaz_update'`) — status o‘zgarishi (`ZakazSerializer.update()` ichida) hamon faqat Management uchun ruxsat etiladi; Buxgalter tasdiqlanadigan `PATCH`da `status` yuborsa, tasdiqlash paytida **shu tekshiruv asl so‘ragan (Buxgalter) foydalanuvchi nomidan qayta ishlaydi** va rad etadi (`PendingChange.error`ga yoziladi, `pending` da qoladi) — approval orqali status-cheklovni aylanib o‘tib bo‘lmaydi.
+
+**`Order` tahrirlari bu tizimdan O‘TMAYDI (ataylab):** `OrderViewSet.create()` — multipart, FIFO bron, avtomatik backorder-Zakaz kabi murakkab side-effektlarga ega **maxsus override** — Python MRO qoidasiga ko‘ra `ApprovalGatedMixin.create()` uni hech qachon ushlab qololmaydi (subklassning o‘z metodi doim ustunlik qiladi), shuning uchun mixin qo‘shish "gate qilingandek ko‘rinib, aslida hech narsani gate qilmaslik" xavfini tug‘diradi. Bundan tashqari `OrderViewSet.permission_classes` (`IsOperatorOrManagementWrite`) hozir ham Buxgalterni yozishdan butunlay chetlab o‘tadi (o‘zgartirilmagan) — bu xavfsiz kengaytirish alohida ish (per-action permission ajratish kerak).
+
+**Qanday ishlaydi:** `request.user.requires_change_approval` (`role == ACCOUNTANT and not is_superuser`) `True` bo‘lganda, yuqoridagi viewsetlarga `POST`/`PATCH` — yozuvni **darhol saqlamaydi**: `PendingChange` yaratadi (`payload` — yuborilgan JSON, `PATCH` uchun `{object_id, data, partial}` shaklida), barcha faol Managementga `Notification` yuboradi va **`202 Accepted`** qaytaradi (oddiy `201`/`200` o‘rniga) — javob tanasi `PendingChangeSerializer` (quyida). Operator/Management/Sales uchun bu cheklov ishlamaydi — ular uchun `POST`/`PATCH` odatdagidek `201`/`200` qaytaradi. **Diqqat:** gated so‘rovda payload validatsiyasi darhol ishlamaydi (faqat navbatga qo‘yiladi) — noto‘g‘ri qiymat kiritilgan bo‘lsa, xato faqat Management tasdiqlashga uringanda (`PendingChange.error`) chiqadi, so‘ragan Buxgalterga darhol ko‘rinmaydi.
+
+| Method | Path | Query / body | Ruxsat | api.js |
+|---|---|---|---|---|
+| GET | `/common/pending-changes/` | `status` (`pending`\|`approved`\|`rejected`), `kind` | Auth — Management hammasini, boshqa (so'ragan) foydalanuvchi faqat o'zinikini (`get_queryset`) | ✅ `pendingChanges` |
+| GET | `/common/pending-changes/{id}/` | — | yuqoridagidek | — |
+| POST | `/common/pending-changes/{id}/approve/` | — | **Management** (`IsManagement`) | ✅ `pendingChangeApprove` |
+| POST | `/common/pending-changes/{id}/reject/` | `{ review_note }` | **Management** (`IsManagement`) | ✅ `pendingChangeReject` |
+
+**Javob shakli** (`PendingChangeSerializer`): `{id, kind, summary, payload, status, requested_by, requested_by_name, reviewed_by, reviewed_by_name, review_note, reviewed_at, error, created_at}`. `status`: `pending` / `approved` / `rejected`.
+
+**Tasdiqlash (`approve`):** `APPROVAL_HANDLERS[kind]` orqali ro‘yxatdan o‘tgan handler funksiyasi (`_apply_client_create`, `_apply_client_update`, `_apply_expense_create`, `_apply_expense_update`, `_apply_zakaz_create`, `_apply_zakaz_update`) chaqiriladi — `payload`dan haqiqiy `Client`/`Expense`/`Zakaz` yozuvini shu payt yaratadi/yangilaydi. `Zakaz` handlerlari `ZakazSerializer`ni asl so‘ragan foydalanuvchi nomidan (`context={'request': fake_request}`, faqat `.user` atributli yengil obyekt) qayta ishga tushiradi — shu orqali `created_by` va status-o‘zgartirish huquqi tekshiruvi to‘g‘ri odam nomidan bajariladi. Xato chiqsa (masalan validatsiya) `PendingChange.error` ga yoziladi, status `pending` da qoladi (qayta urinish uchun).
+
+**Rad etish (`reject`):** hech narsa yaratilmaydi/o'zgarmaydi, `status=rejected`, `review_note` majburiy.
+
+**Frontend:** `frontend/src/components/ApprovalsPage.jsx` — nav «Tasdiqlash» (`approvals_view` ability bilan). Management uchun barcha `pending` yozuvlarga Tasdiqlash/Rad etish tugmalari (`approvals_manage`); Accountant uchun faqat o'zi yuborgan so'rovlar va ularning holati (read-only). `api.js`: `pendingChanges(params)`, `pendingChangeApprove(id)`, `pendingChangeReject(id, reviewNote)`.
+
+---
+
+## 17e. Konfigurator — `/api/v1/configurator/`
+
+Backend: `apps/configurator/models.py` (`ServerConfiguration`, `ConfigurationItem`), `apps/configurator/views.py` (`ServerConfigurationViewSet`), `apps/configurator/serializers.py`.
+
+Bazadagi mavjud tovarlardan (`Product`) server/to‘plam yig‘ish va umumiy narxini avtomatik hisoblash — goal item 10, Admin va Sales uchun.
+
+| Method | Path | Query / body | Ruxsat | api.js |
+|---|---|---|---|---|
+| GET | `/configurator/` | `client`, `search` (`name`/`comment`), `ordering` | `IsFullAccessOrSales` — Sales faqat o'zinikini (`created_by` scoping), Operator/Accountant/Management hammasini | ✅ `configurations` |
+| GET | `/configurator/{id}/` | — | yuqoridagidek | ✅ `retrieve` |
+| POST | `/configurator/` | `{ name?, client?, comment?, items: [{product, quantity, unit_price?}] }` | yuqoridagidek | ✅ `create('/configurator/', payload)` |
+| PATCH | `/configurator/{id}/` | yuqoridagi shakl (to'liq almashtiradi — `items` yuborilsa eskilari o'chirilib qaytadan yaratiladi) | yuqoridagidek | ✅ `update('/configurator/', id, payload)` |
+| DELETE | `/configurator/{id}/` | — | Sales faqat o'zi yaratganini o'chira oladi (`perform_destroy` — boshqa Sales'niki bo'lsa `403`); Management/Operator/Accountant hammasini | ✅ `remove('/configurator/', id)` |
+
+**`items[].unit_price` ixtiyoriy** — berilmasa `ConfigurationItem.save()` mahsulotning joriy `selling_price`sini yozib qo'yadi (keyin narx o'zgarsa ham konfiguratsiyadagi qiymat o'zgarmaydi — snapshot). Javobdagi har bir qatorda `subtotal` (`unit_price × quantity`), butun konfiguratsiyada `total` (barcha qatorlar yig'indisi) — ikkalasi ham `read_only`, backend hisoblaydi.
+
+**Javob shakli** (`ServerConfigurationSerializer`, GET/list): `{id, name, client, created_by, created_by_name, comment, items: [{id, product, product_name, quantity, unit_price, subtotal}], total, created_at, updated_at}`. `POST`/`PATCH` boshqa serializer (`ServerConfigurationCreateSerializer`) qabul qiladi, lekin javobda xuddi shu (`ServerConfigurationSerializer`) shaklni qaytaradi.
+
+**Frontend:** `frontend/src/components/ConfiguratorPage.jsx` — nav «Konfigurator» (`configurator_view` ability). Ro'yxat (`DataTable`) + «Yangi konfiguratsiya» modal-forma: nomi, mijoz (ixtiyoriy), qatorlar jadvali (mahsulot `<select>`, miqdor, narx — bo'sh qoldirilsa joriy sotuv narxi ko'rsatiladi), pastda jami narx. `api.js`: `configurations(params)` + generic `create`/`update`/`remove('/configurator/', ...)`.
+
+---
+
+## 17f. Bron (Booking) — `/api/v1/orders/booking/`
+
+Backend: `apps/orders/models.py` (`Booking` — **YANGI model, mavjud `Order`/`OrderItem`dagi eski «bron» (FIFO stock-reservation) tushunchasi bilan ARALASHTIRMASLIK KERAK**), `apps/orders/views.py` (`BookingViewSet`), `apps/orders/serializers.py` (`BookingSerializer`, `BookingReassignSerializer`).
+
+Goal item 6: Sales xodimi sotuvdan oldin mahsulotni vaqtincha band qilib qo'yadi — Admin tasdiqlashi kerak, boshqa Sales xodimi bandlangan miqdordan ortiq band qila olmaydi.
+
+| Method | Path | Query / body | Ruxsat | api.js |
+|---|---|---|---|---|
+| GET | `/orders/booking/` | `product`, `status` (`pending`\|`confirmed`\|`rejected`\|`cancelled`), `sales_rep`, `search`, `ordering` | `IsFullAccessOrSales` — Sales faqat o'zinikini (`get_queryset` scoping), Operator/Accountant/Management hammasini | ✅ `bookings` |
+| GET | `/orders/booking/{id}/` | — | yuqoridagidek | ✅ `retrieve` |
+| POST | `/orders/booking/` | `{ product, quantity, client?, comment? }` | yuqoridagidek | ✅ `create('/orders/booking/', payload)` |
+| DELETE | `/orders/booking/{id}/` | — | egasi (Sales — scoping orqali faqat o'zinikini ko'radi/o'chira oladi) yoki to'liq huquqli rollar | ✅ `remove('/orders/booking/', id)` |
+| POST | `/orders/booking/{id}/confirm/` | — | **Management** (`IsManagement`) | ✅ `bookingConfirm` |
+| POST | `/orders/booking/{id}/reject/` | — | **Management** (`IsManagement`) | ✅ `bookingReject` |
+| POST | `/orders/booking/{id}/reassign/` | `{ sales_rep }` | **Management** (`IsManagement`) | ✅ `bookingReassign` |
+
+**Bandlash mexanizmi:** `POST` darhol `Stock.reserved_quantity`dan (FIFO, `OrderItem.reserve()` bilan bir xil pattern) band qiladi — hali `PENDING` holatida ham. Shu orqali boshqa Sales xodimi bir xil mahsulotni band qilishga urinsa, agar mavjud (bandlanmagan) qoldiq yetarli bo'lmasa `400` (`{quantity: "Ombordagi mavjud (bandlanmagan) qoldiq yetarli emas..."}`) — alohida "bu mahsulot bandmi" tekshiruvi shart emas, band qilingan miqdor tabiiy ravishda mavjud qoldiqni kamaytiradi.
+
+**Statuslar:** `pending` (yangi so'rov, allaqachon band qilingan) → `confirmed` (Management tasdiqladi) yoki `rejected` (Management rad etdi — bandlik **bo'shatiladi**). `cancelled` — `DELETE` (`pending` yoki `confirmed` holatidan) — bandlik **bo'shatiladi**.
+
+**Reassign (`{sales_rep}`):** faqat `pending`/`confirmed` holatidagi bronni boshqa Sales xodimiga o'tkazadi — **bandlik saqlanib qoladi**, faqat `sales_rep` FK almashadi (ombordan qayta band qilinmaydi/bo'shatilmaydi).
+
+**Javob shakli** (`BookingSerializer`): `{id, product, product_name, client, quantity, sales_rep, sales_rep_name, status, comment, decided_by, decided_at, created_at}`. `sales_rep`, `status`, `decided_by`, `decided_at` — `read_only` (create paytida `sales_rep` avtomatik `request.user`).
+
+**Bildirishnoma:** yangi bron yaratilganda barcha faol Managementga `Notification` yuboriladi (`Notification.notify_new_booking`) — `Notification` modelida yangi `booking` FK (nullable) shu bronga ishora qiladi (item 8). Frontendda `Bildirishnomalar` ro'yxatida `row.booking` bo'lgan yozuvni bosish `Bron` sahifasiga `{state: {highlightBookingId}}` bilan o'tkazadi (`navigateToPath`, `App.jsx`ning `ResourcePage`idagi maxsus holat) — `BookingPage.jsx` shu id'ni `useLocation().state`dan o'qiydi, mos qatorni ro'yxat boshiga chiqaradi va vizual belgilaydi (`is-selected` fon rangi). Agar bron topilmasa (masalan allaqachon boshqa xodimga o'tkazilgan/o'chirilgan) — tushuntiruvchi xabar ko'rsatiladi.
+
+**Frontend:** `frontend/src/components/BookingPage.jsx` — nav «Bron» (`booking_view` ability). Sales: «Yangi bron» tugmasi (mahsulot + miqdor), o'zining bronlari ro'yxati, o'zinikini bekor qilish. Management: barcha bronlar, `pending` uchun Tasdiqlash/Rad etish, `pending`/`confirmed` uchun boshqa Sales xodimiga o'tkazish (`ReassignPicker` — Sales foydalanuvchilar ro'yxati `api.users({role: 'SALES'})` orqali yuklanadi). `api.js`: `bookings(params)`, `bookingConfirm(id)`, `bookingReject(id)`, `bookingReassign(id, salesRepId)`.
+
+### Sales xodimi faoliyati (dashboard) — `GET /api/v1/reports/sales-rep-summary/`
+
+Backend: `apps/reports/views.py` (`SalesRepSummaryView`). Goal item 7 (har bir Sales'ning o'z hisoboti) va item 8 (Admin biror Sales xodimining faoliyatini batafsil ko'rishi) uchun.
+
+| Method | Path | Query / body | Ruxsat | api.js |
+|---|---|---|---|---|
+| GET | `/reports/sales-rep-summary/` | `sales_rep` (int) — faqat to'liq huquqli rollar uchun majburiy | `IsFullAccessOrSales` | ✅ `salesRepSummary(salesRepId?)` |
+
+**Sales xodimi** — `sales_rep` parametrini yubormasa ham, yuborsa ham **har doim faqat o'zini** ko'radi (parametr e'tiborga olinmaydi — boshqa Sales'ning ma'lumotini ko'rish yo'li yo'q). **Operator/Accountant/Management** — `sales_rep` **majburiy** (bo'lmasa `400`); istalgan Sales xodimini ko'rishi mumkin (`role=SALES` bo'lmagan/mavjud bo'lmagan id ham `400`).
+
+**Javob shakli:** `{sales_rep, sales_rep_name, bookings: {total, pending, confirmed, rejected, cancelled}, recent_bookings: [{id, product, quantity, status, created_at}] (oxirgi 10 ta), clients_added, configurations_created}`. Barcha sonlar shu Sales xodimining `Booking.sales_rep`/`Client.created_by`/`ServerConfiguration.created_by` bo'yicha filtrlangan real hisob-kitob (frontendda oldindan hisoblanmaydi).
+
+**Frontend:** `BookingPage.jsx` — Sales o'zi kirganda avtomatik o'z xulosasini ko'rsatadi (`metric-grid`: jami/kutilmoqda/tasdiqlangan bronlar + qo'shgan mijozlari soni). Management uchun sahifa yuqorisida «Sotuvchining faoliyatini ko'rish» `<select>` (Sales foydalanuvchilar ro'yxati) — tanlanganda o'sha xodimning xulosasi ko'rsatiladi.
 
 ---
 

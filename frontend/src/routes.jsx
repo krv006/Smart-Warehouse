@@ -1,5 +1,8 @@
 import { useLocation } from 'react-router-dom'
+import ApprovalsPage from '../components/ApprovalsPage'
+import BookingPage from '../components/BookingPage'
 import ClientDetailPage from '../components/ClientDetailPage'
+import ConfiguratorPage from '../components/ConfiguratorPage'
 import KassaPage from '../components/KassaPage'
 import SectionTabs from '../components/SectionTabs'
 import { can, isAccessiblePage } from '../lib/permissions'
@@ -92,7 +95,16 @@ export default function AppRoutes({
           <KassaPage notify={notify} session={session} reloadKey={resourceReloadKey} onDataChange={onDataChange} />
         </>
       )}
-      {routeInfo.kind !== 'client-detail' && active !== 'Bosh sahifa' && active !== 'Hisobotlar' && active !== 'Buyurtmalar' && active !== 'Kassa' && isAccessiblePage(session, active) && resources[active] && (
+      {routeInfo.kind !== 'client-detail' && active === 'Konfigurator' && can(session, 'configurator_view') && (
+        <ConfiguratorPage notify={notify} session={session} reloadKey={resourceReloadKey} />
+      )}
+      {routeInfo.kind !== 'client-detail' && active === 'Bron' && can(session, 'booking_view') && (
+        <BookingPage notify={notify} session={session} reloadKey={resourceReloadKey} />
+      )}
+      {routeInfo.kind !== 'client-detail' && active === 'Tasdiqlash' && can(session, 'approvals_view') && (
+        <ApprovalsPage notify={notify} session={session} reloadKey={resourceReloadKey} />
+      )}
+      {routeInfo.kind !== 'client-detail' && active !== 'Bosh sahifa' && active !== 'Hisobotlar' && active !== 'Buyurtmalar' && active !== 'Kassa' && active !== 'Konfigurator' && active !== 'Bron' && active !== 'Tasdiqlash' && isAccessiblePage(session, active) && resources[active] && (
         <>
           {activeGroup && (
             <SectionTabs groupKey={activeGroup} active={active} onSelect={(page) => navigateToPath(pathForPage(page))} session={session} />

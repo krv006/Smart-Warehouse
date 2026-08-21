@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet, GenericViewSet
 from rest_framework.permissions import IsAuthenticated
 
+from apps.common.approval import ApprovalGatedMixin
 from apps.common.permissions import (IsAccountantOrManagement,
                                      IsAccountantOrReadOnly,
                                      IsAccountantWithManagementRead)
@@ -56,10 +57,12 @@ class ExpenseSubTypeViewSet(CreateModelMixin, ListModelMixin,
     partial_update=extend_schema(summary="Rasxod qisman yangilash", tags=["Expenses"]),
     destroy=extend_schema(summary="Rasxod o'chirish", tags=["Expenses"]),
 )
-class ExpenseViewSet(ModelViewSet):
-    serializer_class   = ExpenseSerializer
+class ExpenseViewSet(ApprovalGatedMixin, ModelViewSet):
+    serializer_class     = ExpenseSerializer
     # Operator kirolmaydi — rasxodlarda oyliklar/summalar bor
-    permission_classes = (IsAccountantWithManagementRead,)
+    permission_classes   = (IsAccountantWithManagementRead,)
+    approval_create_kind = 'expense_create'
+    approval_update_kind = 'expense_update'
     filterset_fields   = {
         'expense_type': ['exact'],
         'sub_type':     ['exact'],

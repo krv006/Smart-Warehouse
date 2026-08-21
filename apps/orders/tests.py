@@ -339,7 +339,7 @@ class ZakazReceivedQtyGuardTests(TestCase):
         self.api.force_authenticate(self.operator)
         res = self.api.patch(
             f'{self.ZAKAZ_URL}{self.zakaz.pk}/',
-            {'payment_status': 'partial', 'paid_amount': '500000'},
+            {'payment_status': 'prepaid', 'paid_amount': '500000'},
             format='json',
         )
         self.assertEqual(res.status_code, 200, res.data)
@@ -397,7 +397,7 @@ class ZakazBulkCreateTests(TestCase):
             'supplier': 'Pay test',
             'contract_number': '88/1108',
             'contract_date': '2026-08-13',
-            'payment_status': 'partial',
+            'payment_status': 'prepaid',
             'paid_amount': '500000.00',
             'items': [
                 {'product': self.product_a.pk, 'quantity': 10,
@@ -411,11 +411,11 @@ class ZakazBulkCreateTests(TestCase):
         zakazlar = res.data['zakazlar']
         paid_sum = sum(Decimal(z['paid_amount']) for z in zakazlar)
         self.assertEqual(paid_sum, Decimal('500000.00'))
-        self.assertTrue(all(z['payment_status'] == 'partial' for z in zakazlar))
+        self.assertTrue(all(z['payment_status'] == 'prepaid' for z in zakazlar))
 
     def test_bulk_partial_payment_rounding_remainder_on_last_line(self):
         body = {
-            'payment_status': 'partial',
+            'payment_status': 'prepaid',
             'paid_amount': '100.00',
             'items': [
                 {'product': self.product_a.pk, 'quantity': 1,
@@ -461,7 +461,7 @@ class ZakazBulkCreateTests(TestCase):
 
     def test_bulk_partial_rejects_without_prices(self):
         body = {
-            'payment_status': 'partial',
+            'payment_status': 'prepaid',
             'paid_amount': '1000.00',
             'items': [
                 {'product': self.product_a.pk, 'quantity': 10,
@@ -474,7 +474,7 @@ class ZakazBulkCreateTests(TestCase):
 
     def test_bulk_partial_rejects_paid_above_total(self):
         body = {
-            'payment_status': 'partial',
+            'payment_status': 'prepaid',
             'paid_amount': '999999999.00',
             'items': [
                 {'product': self.product_a.pk, 'quantity': 2,
@@ -487,7 +487,7 @@ class ZakazBulkCreateTests(TestCase):
 
     def test_operator_bulk_strips_payment_fields(self):
         body = {
-            'payment_status': 'partial',
+            'payment_status': 'prepaid',
             'paid_amount': '500000.00',
             'items': [
                 {'product': self.product_a.pk, 'quantity': 3},
@@ -501,7 +501,7 @@ class ZakazBulkCreateTests(TestCase):
 
     def test_accountant_bulk_partial_requires_line_prices(self):
         body = {
-            'payment_status': 'partial',
+            'payment_status': 'prepaid',
             'paid_amount': '200000.00',
             'items': [
                 {'product': self.product_a.pk, 'quantity': 5,
@@ -570,23 +570,38 @@ class ZakazPartialPaymentPatchTests(TestCase):
             payment_status=Zakaz.UNPAID)
 
     def test_patch_partial_persists_and_capped(self):
+        # Accountant Zakaz PATCH endi ApprovalGatedMixin orqali navbatga
+        # tushadi (202) — Management tasdiqlagach haqiqiy yozuv yangilanadi.
         self.api.force_authenticate(self.accountant)
         res = self.api.patch(
             f'{self.ZAKAZ_URL}{self.zakaz.pk}/',
-            {'payment_status': 'partial', 'paid_amount': '500000'},
+            {'payment_status': 'prepaid', 'paid_amount': '500000'},
             format='json',
         )
-        self.assertEqual(res.status_code, 200, res.data)
-        self.assertEqual(res.data['payment_status'], 'partial')
-        self.assertEqual(Decimal(res.data['paid_amount']), Decimal('500000'))
+        self.assertEqual(res.status_code, 202, res.data)
+        pending_id = res.data['id']
 
+        self.api.force_authenticate(self.manager)
+        approve_res = self.api.post(f'/api/v1/common/pending-changes/{pending_id}/approve/')
+        self.assertEqual(approve_res.status_code, 200, approve_res.data)
+        self.zakaz.refresh_from_db()
+        self.assertEqual(self.zakaz.payment_status, 'prepaid')
+        self.assertEqual(self.zakaz.paid_amount, Decimal('500000'))
+
+        self.api.force_authenticate(self.accountant)
         over = self.api.patch(
             f'{self.ZAKAZ_URL}{self.zakaz.pk}/',
-            {'payment_status': 'partial', 'paid_amount': '999999999'},
+            {'payment_status': 'prepaid', 'paid_amount': '999999999'},
             format='json',
         )
-        self.assertEqual(over.status_code, 400, over.data)
-        self.assertIn('paid_amount', over.data)
+        self.assertEqual(over.status_code, 202, over.data)
+        over_pending_id = over.data['id']
+
+        self.api.force_authenticate(self.manager)
+        over_approve = self.api.post(f'/api/v1/common/pending-changes/{over_pending_id}/approve/')
+        self.assertEqual(over_approve.status_code, 400, over_approve.data)
+        self.zakaz.refresh_from_db()
+        self.assertEqual(self.zakaz.paid_amount, Decimal('500000'))  # o'zgarmagan
 
 
 class ZakazExpenseKassaSyncTests(TestCase):
@@ -618,7 +633,7 @@ class ZakazExpenseKassaSyncTests(TestCase):
         zakaz = Zakaz.objects.create(
             product=self.product, quantity=10, unit_price=Decimal('100000'),
             zakaz_type=Zakaz.MANUAL, status=Zakaz.NEW,
-            payment_status=Zakaz.PARTIAL, paid_amount=Decimal('300000'))
+            payment_status=Zakaz.PREPAID, paid_amount=Decimal('300000'))
         sync_zakaz_expense(zakaz, user=self.manager)
         expense = Expense.objects.get(zakaz=zakaz)
         self.assertEqual(expense.amount, Decimal('300000'))

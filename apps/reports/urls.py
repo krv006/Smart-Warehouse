@@ -4,7 +4,8 @@ from apps.reports.views import (SalesExportView, StockExportView,
                                  ImportsExportView,
                                  FinancialSummaryView, WarehouseReportView,
                                  CashReportView, ExpensesReportView,
-                                 TopProductsView, MonthlyTrendView)
+                                 TopProductsView, MonthlyTrendView,
+                                 SalesRepSummaryView)
 
 urlpatterns = [
     path('excel/sales/',    SalesExportView.as_view(),    name='report-sales-excel'),
@@ -19,4 +20,5 @@ urlpatterns = [
     path('expenses/',       ExpensesReportView.as_view(),    name='report-expenses'),
     path('top-products/',   TopProductsView.as_view(),       name='report-top-products'),
     path('monthly-trend/',  MonthlyTrendView.as_view(),      name='report-monthly-trend'),
+    path('sales-rep-summary/', SalesRepSummaryView.as_view(), name='report-sales-rep-summary'),
 ]

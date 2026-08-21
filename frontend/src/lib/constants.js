@@ -1,5 +1,5 @@
 import {
-  ChartLineUp, ClipboardText, CurrencyCircleDollar, FileText, House, Package, TrendUp, Truck, Users,
+  Bookmarks, ChartLineUp, CheckCircle, ClipboardText, CurrencyCircleDollar, FileText, House, Package, Sliders, TrendUp, Truck, Users,
 } from '@phosphor-icons/react'
 
 export const AUTO_REFRESH_MS = 30000
@@ -13,7 +13,7 @@ export const NAV_GROUPS = {
     { page: 'Qoldiqlar', label: 'Qoldiqlar', ability: 'stocks_view' },
   ],
   Moliya: [
-    { page: 'Kassa', label: 'Kassa', ability: 'cash_view' },
+    { page: 'Kassa', label: 'Buxgalteriya', ability: 'cash_view' },
     { page: 'Xarajatlar', label: 'Xarajatlar', ability: 'expenses_view' },
   ],
 }
@@ -26,7 +26,10 @@ export const SIDEBAR_NAV = [
   ['Ombor', Package, '__group_ombor__'],
   ['Mijozlar', Users, 'clients_view'],
   ['Sotuvlar', TrendUp, 'sales_view'],
+  ['Bron', Bookmarks, 'booking_view'],
   ['Moliya', CurrencyCircleDollar, '__group_moliya__'],
+  ['Konfigurator', Sliders, 'configurator_view'],
+  ['Tasdiqlash', CheckCircle, 'approvals_view'],
   ['Hisobotlar', ChartLineUp, 'reports_view'],
   ['Elektron faktura', FileText, 'einvoice_view'],
 ]

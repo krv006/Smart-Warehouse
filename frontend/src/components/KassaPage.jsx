@@ -278,6 +278,7 @@ function PaymentCreateModal({ close, done, notify }) {
               <select value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })}>
                 <option value="UZS">UZS</option>
                 <option value="USD">USD</option>
+                <option value="EUR">EUR</option>
               </select>
             </label>
             <label className="full-width">To‘lov muddati<input type="date" value={form.due_date} min={todayValue()} onChange={(e) => setForm({ ...form, due_date: e.target.value })} /></label>
@@ -541,7 +542,7 @@ export default function KassaPage({ notify, session, onDataChange, reloadKey = 0
       <div className="page-heading">
         <div>
           <p className="eyebrow">MOLIYA</p>
-          <h1>Kassa</h1>
+          <h1>Buxgalteriya</h1>
           <p className="muted">Sotuv tushumlari, import chiqimlari va kassa balansi.</p>
         </div>
         {canManage && (

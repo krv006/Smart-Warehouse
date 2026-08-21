@@ -181,7 +181,7 @@ class PartialPaymentLimitTests(TestCase):
 
     def test_bulk_rejects_paid_above_total(self):
         res = self.api.post(self.BULK_URL, {
-            'payment_status': 'partial', 'paid_amount': '500000.00',
+            'payment_status': 'prepaid', 'paid_amount': '500000.00',
             'items': [{'product': self.product.pk, 'quantity': 1,
                        'unit_price': '200000.00', 'selling_price': '250000.00'}],
         }, format='json')
@@ -193,7 +193,7 @@ class PartialPaymentLimitTests(TestCase):
                                      zakaz_type=Zakaz.MANUAL,
                                      unit_price=Decimal('200000'))
         res = self.api.patch(f'/api/v1/orders/zakaz/{zakaz.pk}/',
-                             {'payment_status': 'partial',
+                             {'payment_status': 'prepaid',
                               'paid_amount': '500000.00'}, format='json')
         self.assertEqual(res.status_code, 400, res.data)
         zakaz.refresh_from_db()
@@ -204,7 +204,7 @@ class PartialPaymentLimitTests(TestCase):
         zakaz = Zakaz.objects.create(product=self.product, quantity=1,
                                      zakaz_type=Zakaz.MANUAL)
         res = self.api.patch(f'/api/v1/orders/zakaz/{zakaz.pk}/',
-                             {'payment_status': 'partial',
+                             {'payment_status': 'prepaid',
                               'paid_amount': '500000.00'}, format='json')
         self.assertEqual(res.status_code, 400, res.data)
         zakaz.refresh_from_db()
@@ -215,7 +215,7 @@ class PartialPaymentLimitTests(TestCase):
                                      zakaz_type=Zakaz.MANUAL,
                                      unit_price=Decimal('200000'))
         res = self.api.patch(f'/api/v1/orders/zakaz/{zakaz.pk}/',
-                             {'payment_status': 'partial',
+                             {'payment_status': 'prepaid',
                               'paid_amount': '150000.00'}, format='json')
         self.assertEqual(res.status_code, 200, res.data)
         zakaz.refresh_from_db()
@@ -229,7 +229,7 @@ class PartialPaymentLimitTests(TestCase):
         zakaz = Zakaz.objects.create(product=self.product, quantity=2,
                                      zakaz_type=Zakaz.MANUAL,
                                      unit_price=Decimal('100000'),
-                                     payment_status=Zakaz.PARTIAL,
+                                     payment_status=Zakaz.PREPAID,
                                      paid_amount=Decimal('180000'))  # 200000 dan kam
         res = self.api.patch(f'/api/v1/orders/zakaz/{zakaz.pk}/',
                              {'quantity': 1}, format='json')  # jami endi 100000
@@ -243,7 +243,7 @@ class PartialPaymentLimitTests(TestCase):
         zakaz = Zakaz.objects.create(product=self.product, quantity=2,
                                      zakaz_type=Zakaz.MANUAL,
                                      unit_price=Decimal('100000'),
-                                     payment_status=Zakaz.PARTIAL,
+                                     payment_status=Zakaz.PREPAID,
                                      paid_amount=Decimal('180000'))
         res = self.api.patch(f'/api/v1/orders/zakaz/{zakaz.pk}/',
                              {'comment': 'izoh'}, format='json')
