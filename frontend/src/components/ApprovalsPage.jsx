@@ -17,6 +17,8 @@ const KIND_LABELS = {
   client_update: 'Mijoz tahriri',
   expense_create: 'Yangi xarajat',
   expense_update: 'Xarajat tahriri',
+  zakaz_create: 'Yangi kirim (zakaz)',
+  zakaz_update: 'Kirim (zakaz) tahriri',
 }
 
 function RejectPrompt({ item, close, done, notify }) {

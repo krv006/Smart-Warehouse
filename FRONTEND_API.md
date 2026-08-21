@@ -2999,14 +2999,15 @@ Tarix tugmasi: zakaz `history` modal.
 
 Backend: `apps/common/approval.py` (`PendingChange` model, `ApprovalGatedMixin`, `APPROVAL_HANDLERS`/`register_handler`), `apps/common/views.py` (`PendingChangeViewSet`), `apps/common/serializers.py` (`PendingChangeSerializer`).
 
-**Qamrov — hozircha faqat 2 xil yozuv turi bu tizimdan o‘tadi** (`ApprovalGatedMixin` faqat quyidagilarga qo‘shilgan — boshqasiga emas):
+**Qamrov** (`ApprovalGatedMixin` qo‘shilgan viewsetlar):
 
 - `apps/clients/views.py` → `ClientViewSet` (`approval_create_kind='client_create'`, `approval_update_kind='client_update'`)
 - `apps/expenses/views.py` → `ExpenseViewSet` (`approval_create_kind='expense_create'`, `approval_update_kind='expense_update'`)
+- `apps/orders/views.py` → `ZakazViewSet` (`approval_create_kind='zakaz_create'`, `approval_update_kind='zakaz_update'`) — status o‘zgarishi (`ZakazSerializer.update()` ichida) hamon faqat Management uchun ruxsat etiladi; Buxgalter tasdiqlanadigan `PATCH`da `status` yuborsa, tasdiqlash paytida **shu tekshiruv asl so‘ragan (Buxgalter) foydalanuvchi nomidan qayta ishlaydi** va rad etadi (`PendingChange.error`ga yoziladi, `pending` da qoladi) — approval orqali status-cheklovni aylanib o‘tib bo‘lmaydi.
 
-**Order/Zakaz tahrirlari bu tizimdan O‘TMAYDI** — Accountant Order/Zakaz `PATCH` qilsa darhol kuchga kiradi, tasdiqlash kutmaydi. Bu — ataylab qoldirilgan cheklov emas, balki hali **qurilmagan gap** (goal item 5 «Buxgalter qilgan o‘zgarishlari uchun doim admin dostup berishi kerak» keng talab qiladi, lekin amalda faqat Client/Expense qamrab olingan — Order/Zakaz'ning o'zi ombor/pul harakatlantiradigan murakkab side-effektlarga ega bo'lgani uchun bu ikkalasini xavfsiz approval-gate qilish alohida ish).
+**`Order` tahrirlari bu tizimdan O‘TMAYDI (ataylab):** `OrderViewSet.create()` — multipart, FIFO bron, avtomatik backorder-Zakaz kabi murakkab side-effektlarga ega **maxsus override** — Python MRO qoidasiga ko‘ra `ApprovalGatedMixin.create()` uni hech qachon ushlab qololmaydi (subklassning o‘z metodi doim ustunlik qiladi), shuning uchun mixin qo‘shish "gate qilingandek ko‘rinib, aslida hech narsani gate qilmaslik" xavfini tug‘diradi. Bundan tashqari `OrderViewSet.permission_classes` (`IsOperatorOrManagementWrite`) hozir ham Buxgalterni yozishdan butunlay chetlab o‘tadi (o‘zgartirilmagan) — bu xavfsiz kengaytirish alohida ish (per-action permission ajratish kerak).
 
-**Qanday ishlaydi:** `request.user.requires_change_approval` (`role == ACCOUNTANT and not is_superuser`) `True` bo‘lganda, `ClientViewSet`/`ExpenseViewSet`ga `POST`/`PATCH` — yozuvni **darhol saqlamaydi**: `PendingChange` yaratadi (`payload` — yuborilgan JSON, `PATCH` uchun `{object_id, data, partial}` shaklida), barcha faol Managementga `Notification` yuboradi va **`202 Accepted`** qaytaradi (oddiy `201`/`200` o‘rniga) — javob tanasi `PendingChangeSerializer` (quyida). Operator/Management/Sales uchun bu cheklov ishlamaydi — ular uchun `POST`/`PATCH` odatdagidek `201`/`200` qaytaradi.
+**Qanday ishlaydi:** `request.user.requires_change_approval` (`role == ACCOUNTANT and not is_superuser`) `True` bo‘lganda, yuqoridagi viewsetlarga `POST`/`PATCH` — yozuvni **darhol saqlamaydi**: `PendingChange` yaratadi (`payload` — yuborilgan JSON, `PATCH` uchun `{object_id, data, partial}` shaklida), barcha faol Managementga `Notification` yuboradi va **`202 Accepted`** qaytaradi (oddiy `201`/`200` o‘rniga) — javob tanasi `PendingChangeSerializer` (quyida). Operator/Management/Sales uchun bu cheklov ishlamaydi — ular uchun `POST`/`PATCH` odatdagidek `201`/`200` qaytaradi. **Diqqat:** gated so‘rovda payload validatsiyasi darhol ishlamaydi (faqat navbatga qo‘yiladi) — noto‘g‘ri qiymat kiritilgan bo‘lsa, xato faqat Management tasdiqlashga uringanda (`PendingChange.error`) chiqadi, so‘ragan Buxgalterga darhol ko‘rinmaydi.
 
 | Method | Path | Query / body | Ruxsat | api.js |
 |---|---|---|---|---|
@@ -3017,7 +3018,7 @@ Backend: `apps/common/approval.py` (`PendingChange` model, `ApprovalGatedMixin`,
 
 **Javob shakli** (`PendingChangeSerializer`): `{id, kind, summary, payload, status, requested_by, requested_by_name, reviewed_by, reviewed_by_name, review_note, reviewed_at, error, created_at}`. `status`: `pending` / `approved` / `rejected`.
 
-**Tasdiqlash (`approve`):** `APPROVAL_HANDLERS[kind]` orqali ro‘yxatdan o‘tgan handler funksiyasi (`_apply_client_create`, `_apply_client_update`, `_apply_expense_create`, `_apply_expense_update`) chaqiriladi — `payload`dan haqiqiy `Client`/`Expense` yozuvini shu payt yaratadi/yangilaydi. Xato chiqsa (masalan validatsiya) `PendingChange.error` ga yoziladi, status `pending` da qoladi (qayta urinish uchun).
+**Tasdiqlash (`approve`):** `APPROVAL_HANDLERS[kind]` orqali ro‘yxatdan o‘tgan handler funksiyasi (`_apply_client_create`, `_apply_client_update`, `_apply_expense_create`, `_apply_expense_update`, `_apply_zakaz_create`, `_apply_zakaz_update`) chaqiriladi — `payload`dan haqiqiy `Client`/`Expense`/`Zakaz` yozuvini shu payt yaratadi/yangilaydi. `Zakaz` handlerlari `ZakazSerializer`ni asl so‘ragan foydalanuvchi nomidan (`context={'request': fake_request}`, faqat `.user` atributli yengil obyekt) qayta ishga tushiradi — shu orqali `created_by` va status-o‘zgartirish huquqi tekshiruvi to‘g‘ri odam nomidan bajariladi. Xato chiqsa (masalan validatsiya) `PendingChange.error` ga yoziladi, status `pending` da qoladi (qayta urinish uchun).
 
 **Rad etish (`reject`):** hech narsa yaratilmaydi/o'zgarmaydi, `status=rejected`, `review_note` majburiy.
 
