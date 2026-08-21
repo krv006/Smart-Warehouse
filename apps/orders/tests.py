@@ -570,23 +570,38 @@ class ZakazPartialPaymentPatchTests(TestCase):
             payment_status=Zakaz.UNPAID)
 
     def test_patch_partial_persists_and_capped(self):
+        # Accountant Zakaz PATCH endi ApprovalGatedMixin orqali navbatga
+        # tushadi (202) — Management tasdiqlagach haqiqiy yozuv yangilanadi.
         self.api.force_authenticate(self.accountant)
         res = self.api.patch(
             f'{self.ZAKAZ_URL}{self.zakaz.pk}/',
             {'payment_status': 'prepaid', 'paid_amount': '500000'},
             format='json',
         )
-        self.assertEqual(res.status_code, 200, res.data)
-        self.assertEqual(res.data['payment_status'], 'prepaid')
-        self.assertEqual(Decimal(res.data['paid_amount']), Decimal('500000'))
+        self.assertEqual(res.status_code, 202, res.data)
+        pending_id = res.data['id']
 
+        self.api.force_authenticate(self.manager)
+        approve_res = self.api.post(f'/api/v1/common/pending-changes/{pending_id}/approve/')
+        self.assertEqual(approve_res.status_code, 200, approve_res.data)
+        self.zakaz.refresh_from_db()
+        self.assertEqual(self.zakaz.payment_status, 'prepaid')
+        self.assertEqual(self.zakaz.paid_amount, Decimal('500000'))
+
+        self.api.force_authenticate(self.accountant)
         over = self.api.patch(
             f'{self.ZAKAZ_URL}{self.zakaz.pk}/',
             {'payment_status': 'prepaid', 'paid_amount': '999999999'},
             format='json',
         )
-        self.assertEqual(over.status_code, 400, over.data)
-        self.assertIn('paid_amount', over.data)
+        self.assertEqual(over.status_code, 202, over.data)
+        over_pending_id = over.data['id']
+
+        self.api.force_authenticate(self.manager)
+        over_approve = self.api.post(f'/api/v1/common/pending-changes/{over_pending_id}/approve/')
+        self.assertEqual(over_approve.status_code, 400, over_approve.data)
+        self.zakaz.refresh_from_db()
+        self.assertEqual(self.zakaz.paid_amount, Decimal('500000'))  # o'zgarmagan
 
 
 class ZakazExpenseKassaSyncTests(TestCase):

@@ -190,7 +190,8 @@ class RoleMatrixTests(TestCase):
             body = dict(payload)
             body['contract_number'] = f'Z-{user.username}/2026'
             res = self.api.post('/api/v1/orders/zakaz/', body, format='json')
-            self.assertIn(res.status_code, (201, 400), (user.username, res.data))
+            # 202: Buxgalter — Admin tasdig'i navbatiga (ApprovalGatedMixin)
+            self.assertIn(res.status_code, (201, 202, 400), (user.username, res.data))
 
     # 10 — Zakaz status faqat management
     def test_rule10_zakaz_status_management_only(self):

@@ -184,3 +184,30 @@ def _apply_expense_update(payload, *, requested_by):
     serializer = ExpenseSerializer(obj, data=payload['data'], partial=payload.get('partial', True))
     serializer.is_valid(raise_exception=True)
     serializer.save()
+
+
+def _fake_request(user):
+    """ZakazSerializer.create()/update() `self.context['request'].user`ga
+    tayanadi (kim yaratdi, status o'zgartirishga huquqi bormi) — tasdiqlash
+    payti asl so'ragan (Buxgalter) foydalanuvchi nomidan qayta ishga
+    tushiriladi, hech qanday haqiqiy HTTP request yo'q."""
+    return type('FakeRequest', (), {'user': user})()
+
+
+@register_handler('zakaz_create')
+def _apply_zakaz_create(payload, *, requested_by):
+    from apps.orders.serializers import ZakazSerializer
+    serializer = ZakazSerializer(data=payload, context={'request': _fake_request(requested_by)})
+    serializer.is_valid(raise_exception=True)
+    serializer.save()
+
+
+@register_handler('zakaz_update')
+def _apply_zakaz_update(payload, *, requested_by):
+    from apps.orders.models import Zakaz
+    from apps.orders.serializers import ZakazSerializer
+    obj = Zakaz.objects.get(pk=payload['object_id'])
+    serializer = ZakazSerializer(obj, data=payload['data'], partial=payload.get('partial', True),
+                                 context={'request': _fake_request(requested_by)})
+    serializer.is_valid(raise_exception=True)
+    serializer.save()

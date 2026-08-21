@@ -34,6 +34,7 @@ def _require_action_fields(request, *, faktura_required=False):
         raise ValidationError(errors)
     return contract_number, asos, faktura
 
+from apps.common.approval import ApprovalGatedMixin
 from apps.common.permissions import (IsOperatorOrManagementWrite,
                                      IsFullAccessOrSales, IsManagement)
 from apps.orders.models import (Order, OrderHistory, Zakaz, ZakazHistory, Booking,
@@ -431,14 +432,18 @@ class OrderViewSet(CreateModelMixin, ListModelMixin,
         tags=["Zakaz"],
     ),
 )
-class ZakazViewSet(CreateModelMixin, ListModelMixin,
+class ZakazViewSet(ApprovalGatedMixin, CreateModelMixin, ListModelMixin,
                    RetrieveModelMixin, UpdateModelMixin, GenericViewSet):
     """
     Zakaz (procurement order).
     Operator: yaratadi + supplier/comment/expected_date/asos/faktura o'zgartiradi.
     Manager: status + received_qty o'zgartiradi.
+    Buxgalter (Accountant): yarata/tahrirlay oladi, lekin `requires_change_approval`
+    orqali Management tasdig'ini kutadi (`ApprovalGatedMixin`) — 202 + `PendingChange`.
     O'chirish: admin panel orqali.
     """
+    approval_create_kind = 'zakaz_create'
+    approval_update_kind = 'zakaz_update'
     queryset           = (Zakaz.objects
                           .select_related('product', 'created_by', 'order',
                                           'supplier_client')
