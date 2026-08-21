@@ -128,6 +128,8 @@ export default function BookingPage({ notify, session, reloadKey = 0 }) {
   const [creating, setCreating] = useState(false)
   const [reassigning, setReassigning] = useState(null)
   const [tick, setTick] = useState(0)
+  const [summary, setSummary] = useState(null)
+  const [summaryFor, setSummaryFor] = useState('')
   const isManagement = can(session, 'booking_manage')
 
   useEffect(() => {
@@ -153,6 +155,18 @@ export default function BookingPage({ notify, session, reloadKey = 0 }) {
     run()
     return () => { cancelled = true }
   }, [reloadKey, tick]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    let cancelled = false
+    if (!isManagement) {
+      api.salesRepSummary().then((data) => { if (!cancelled) setSummary(data) }).catch((err) => notify(err.message))
+    } else if (summaryFor) {
+      api.salesRepSummary(summaryFor).then((data) => { if (!cancelled) setSummary(data) }).catch((err) => notify(err.message))
+    } else {
+      setSummary(null)
+    }
+    return () => { cancelled = true }
+  }, [isManagement, summaryFor, tick]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const refresh = () => setTick((n) => n + 1)
 
@@ -194,19 +208,32 @@ export default function BookingPage({ notify, session, reloadKey = 0 }) {
         <button className="primary-button" onClick={() => setCreating(true)}><Plus size={18} /> Yangi bron</button>
       </div>
 
-      {!isManagement && (
+      {isManagement && (
+        <label className="sales-rep-picker">Sotuvchining faoliyatini ko‘rish
+          <select value={summaryFor} onChange={(e) => setSummaryFor(e.target.value)}>
+            <option value="">Tanlang…</option>
+            {salesUsers.map((u) => <option key={u.id} value={u.id}>{u.first_name || u.username}</option>)}
+          </select>
+        </label>
+      )}
+
+      {summary && (
         <section className="metric-grid">
           <article className="metric">
             <span className="metric-icon neutral"><Bookmarks size={22} weight="duotone" /></span>
-            <div><p>Jami bronlarim</p><h2>{items.length}</h2></div>
+            <div><p>{isManagement ? `${summary.sales_rep_name} — jami bronlar` : 'Jami bronlarim'}</p><h2>{summary.bookings.total}</h2></div>
           </article>
           <article className="metric">
             <span className="metric-icon up"><Clock size={22} weight="duotone" /></span>
-            <div><p>Kutilmoqda</p><h2>{items.filter((r) => r.status === 'pending').length}</h2></div>
+            <div><p>Kutilmoqda</p><h2>{summary.bookings.pending}</h2></div>
           </article>
           <article className="metric">
             <span className="metric-icon up"><Check size={22} weight="duotone" /></span>
-            <div><p>Tasdiqlangan</p><h2>{items.filter((r) => r.status === 'confirmed').length}</h2></div>
+            <div><p>Tasdiqlangan</p><h2>{summary.bookings.confirmed}</h2></div>
+          </article>
+          <article className="metric">
+            <span className="metric-icon neutral"><Bookmarks size={22} weight="duotone" /></span>
+            <div><p>Qo‘shgan mijozlari</p><h2>{summary.clients_added}</h2></div>
           </article>
         </section>
       )}

@@ -306,6 +306,7 @@ export const api = {
   bookingConfirm: (id) => request(`/orders/booking/${id}/confirm/`, { method: 'POST' }),
   bookingReject: (id) => request(`/orders/booking/${id}/reject/`, { method: 'POST' }),
   bookingReassign: (id, salesRepId) => request(`/orders/booking/${id}/reassign/`, { method: 'POST', body: JSON.stringify({ sales_rep: salesRepId }) }),
+  salesRepSummary: (salesRepId) => request(`/reports/sales-rep-summary/${toQuery(salesRepId ? { sales_rep: salesRepId } : {})}`),
   addStock: (id, payload) => request(`/warehouse/products/${id}/add-stock/`, { method: 'POST', body: JSON.stringify(payload) }),
   exportSales: (params = {}) => download(`/reports/excel/sales/${toQuery(params)}`, 'sotuvlar.xlsx'),
   exportStock: (params = {}) => download(`/reports/excel/stock/${toQuery(params)}`, 'ombor.xlsx'),

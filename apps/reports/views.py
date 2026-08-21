@@ -13,7 +13,7 @@ from rest_framework.views import APIView
 from apps.cash.ledger import build_ledger_entries
 from apps.cash.models import Payment, ExchangeRate, PaymentTransaction
 from apps.cash.services import get_active_mb_rate
-from apps.common.permissions import IsAccountantOrManagement
+from apps.common.permissions import IsAccountantOrManagement, IsFullAccessOrSales
 from apps.expenses.models import Expense
 from apps.orders.models import Zakaz
 from apps.reports.excel import (export_sales, export_stock,
@@ -762,3 +762,81 @@ class TopProductsView(APIView):
             })
 
         return Response(result)
+
+
+class SalesRepSummaryView(APIView):
+    """
+    Bitta Sales xodimining o'z faoliyati bo'yicha qisqa hisobot — item 7
+    (har bir sales'ning o'z dashboardi) va item 8 (Admin biror sales
+    xodimining ishini batafsil ko'ra olishi) uchun.
+
+    Sales xodimi — har doim faqat O'ZINI ko'radi (`sales_rep` query param
+    e'tiborga olinmaydi). To'liq huquqli rollar (Operator/Accountant/
+    Management) `?sales_rep=<id>` orqali istalgan Sales xodimini ko'radi;
+    parametrsiz so'rov 400 qaytaradi (ularning o'zi uchun bunday hisobot
+    ma'noga ega emas).
+    """
+    permission_classes = (IsFullAccessOrSales,)
+
+    @extend_schema(
+        summary="Sales xodimining o'z faoliyati (bron/mijoz/konfiguratsiya)",
+        parameters=[
+            OpenApiParameter('sales_rep', int,
+                              description="Faqat to'liq huquqli rollar uchun — "
+                                          "qaysi Sales xodimi ko'rsatilsin"),
+        ],
+        tags=["Reports / Summary"],
+    )
+    def get(self, request):
+        from django.contrib.auth import get_user_model
+        from apps.clients.models import Client
+        from apps.configurator.models import ServerConfiguration
+        from apps.orders.models import Booking
+        User = get_user_model()
+
+        user = request.user
+        is_sales_only = bool(getattr(user, 'is_sales', False)) and not (
+            getattr(user, 'is_operator', False)
+            or getattr(user, 'is_accountant', False)
+            or getattr(user, 'is_management', False)
+        )
+
+        if is_sales_only:
+            target = user
+        else:
+            sales_rep_id = request.query_params.get('sales_rep')
+            if not sales_rep_id:
+                return Response(
+                    {'sales_rep': "Ushbu parametr kiritilishi shart (qaysi Sales xodimi)."},
+                    status=400,
+                )
+            try:
+                target = User.objects.get(pk=sales_rep_id, role=User.SALES)
+            except (User.DoesNotExist, ValueError, TypeError):
+                return Response({'sales_rep': "Sales xodimi topilmadi."}, status=400)
+
+        bookings = Booking.objects.filter(sales_rep=target)
+        booking_counts = {
+            'total':     bookings.count(),
+            'pending':   bookings.filter(status=Booking.PENDING).count(),
+            'confirmed': bookings.filter(status=Booking.CONFIRMED).count(),
+            'rejected':  bookings.filter(status=Booking.REJECTED).count(),
+            'cancelled': bookings.filter(status=Booking.CANCELLED).count(),
+        }
+        recent_bookings = [
+            {
+                'id': b.id, 'product': b.product.name, 'quantity': b.quantity,
+                'status': b.status, 'created_at': b.created_at,
+            }
+            for b in bookings.select_related('product').order_by('-created_at')[:10]
+        ]
+
+        return Response({
+            'sales_rep':      target.id,
+            'sales_rep_name': str(target),
+            'bookings':       booking_counts,
+            'recent_bookings': recent_bookings,
+            'clients_added':  Client.objects.filter(created_by=target).count(),
+            'configurations_created':
+                ServerConfiguration.objects.filter(created_by=target).count(),
+        })

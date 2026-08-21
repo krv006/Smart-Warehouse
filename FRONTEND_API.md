@@ -532,7 +532,7 @@ Tablar `abilities` bo‘yicha yashirin (`einvoice_view`, `sales_view`, `cash_vie
 
 ## 4. Barcha endpointlar — to‘liq jadval
 
-Jami **~110** HTTP endpoint (custom actionlar bilan; avval ~95 edi — bu sessiyada Bron (7), Konfigurator (5) va Tasdiqlash (4) qo‘shildi). ✅ = `api.js` da wrapper bor.
+Jami **~111** HTTP endpoint (custom actionlar bilan; avval ~95 edi — bu sessiyada Bron (7), Konfigurator (5), Tasdiqlash (4) va Sales xodimi hisoboti (1) qo‘shildi). ✅ = `api.js` da wrapper bor.
 
 ### Auth — `/api/v1/auth/`
 
@@ -1212,7 +1212,7 @@ Frontend menyuni `abilities` bo‘yicha ko‘rsatadi. Ruxsat yo‘q menu UI’da
 | `approvals_view` *(yangi)* | Tasdiqlash sahifasi (§17d) — Accountant o'zi yuborganini, Management hammasini | Accountant, Management |
 | `approvals_manage` *(yangi)* | PendingChange tasdiqlash/rad etish | Management |
 
-**Sales'ning o'z faoliyati:** `dashboard`/`reports_view` Sales uchun ataylab `False` — bu ikkalasi ochadigan backend endpointlar (`/reports/summary/`, `/reports/cash/`, ... — barchasi `IsAccountantOrManagement`) kompaniya moliyaviy ma'lumotlarini qaytaradi, Sales'ga tegishli emas. Sales o'z faoliyatini **Bron** sahifasidagi shaxsiy statistika (jami/kutilmoqda/tasdiqlangan bronlar soni, `sales_rep`ga scoped) va **Mijozlar**/**Konfigurator** sahifalaridagi o'zi qo'shgan/yaratgan yozuvlar orqali ko'radi — bularning barchasi allaqachon queryset darajasida scoped. To'liq, alohida "Sales dashboard" backend endpointi (masalan `/reports/sales-rep-summary/`) hali qurilmagan — kelgusi ish sifatida qoldirilgan.
+**Sales'ning o'z faoliyati:** `dashboard`/`reports_view` Sales uchun ataylab `False` — bu ikkalasi ochadigan backend endpointlar (`/reports/summary/`, `/reports/cash/`, ... — barchasi `IsAccountantOrManagement`) kompaniya moliyaviy ma'lumotlarini qaytaradi, Sales'ga tegishli emas. Buning o'rniga Sales o'z faoliyatini **`GET /reports/sales-rep-summary/`** orqali ko'radi (§17f oxiri) — bronlar soni (jami/kutilmoqda/tasdiqlangan), qo'shgan mijozlari, yaratgan konfiguratsiyalari soni, hammasi `sales_rep`/`created_by` bo'yicha real scoped. Management xuddi shu endpointdan `?sales_rep=<id>` bilan istalgan Sales xodimini ko'radi (item 8).
 
 **Muhim farqlar:**
 
@@ -3075,6 +3075,20 @@ Goal item 6: Sales xodimi sotuvdan oldin mahsulotni vaqtincha band qilib qo'yadi
 **Bildirishnoma:** yangi bron yaratilganda barcha faol Managementga `Notification` yuboriladi (`Notification.notify_new_booking`) — `Notification` modelida yangi `booking` FK (nullable) shu bronga ishora qiladi (item 8). Frontendda `Bildirishnomalar` ro'yxatida `row.booking` bo'lgan yozuvni bosish `Bron` sahifasiga `{state: {highlightBookingId}}` bilan o'tkazadi (`navigateToPath`, `App.jsx`ning `ResourcePage`idagi maxsus holat) — `BookingPage.jsx` shu id'ni `useLocation().state`dan o'qiydi, mos qatorni ro'yxat boshiga chiqaradi va vizual belgilaydi (`is-selected` fon rangi). Agar bron topilmasa (masalan allaqachon boshqa xodimga o'tkazilgan/o'chirilgan) — tushuntiruvchi xabar ko'rsatiladi.
 
 **Frontend:** `frontend/src/components/BookingPage.jsx` — nav «Bron» (`booking_view` ability). Sales: «Yangi bron» tugmasi (mahsulot + miqdor), o'zining bronlari ro'yxati, o'zinikini bekor qilish. Management: barcha bronlar, `pending` uchun Tasdiqlash/Rad etish, `pending`/`confirmed` uchun boshqa Sales xodimiga o'tkazish (`ReassignPicker` — Sales foydalanuvchilar ro'yxati `api.users({role: 'SALES'})` orqali yuklanadi). `api.js`: `bookings(params)`, `bookingConfirm(id)`, `bookingReject(id)`, `bookingReassign(id, salesRepId)`.
+
+### Sales xodimi faoliyati (dashboard) — `GET /api/v1/reports/sales-rep-summary/`
+
+Backend: `apps/reports/views.py` (`SalesRepSummaryView`). Goal item 7 (har bir Sales'ning o'z hisoboti) va item 8 (Admin biror Sales xodimining faoliyatini batafsil ko'rishi) uchun.
+
+| Method | Path | Query / body | Ruxsat | api.js |
+|---|---|---|---|---|
+| GET | `/reports/sales-rep-summary/` | `sales_rep` (int) — faqat to'liq huquqli rollar uchun majburiy | `IsFullAccessOrSales` | ✅ `salesRepSummary(salesRepId?)` |
+
+**Sales xodimi** — `sales_rep` parametrini yubormasa ham, yuborsa ham **har doim faqat o'zini** ko'radi (parametr e'tiborga olinmaydi — boshqa Sales'ning ma'lumotini ko'rish yo'li yo'q). **Operator/Accountant/Management** — `sales_rep` **majburiy** (bo'lmasa `400`); istalgan Sales xodimini ko'rishi mumkin (`role=SALES` bo'lmagan/mavjud bo'lmagan id ham `400`).
+
+**Javob shakli:** `{sales_rep, sales_rep_name, bookings: {total, pending, confirmed, rejected, cancelled}, recent_bookings: [{id, product, quantity, status, created_at}] (oxirgi 10 ta), clients_added, configurations_created}`. Barcha sonlar shu Sales xodimining `Booking.sales_rep`/`Client.created_by`/`ServerConfiguration.created_by` bo'yicha filtrlangan real hisob-kitob (frontendda oldindan hisoblanmaydi).
+
+**Frontend:** `BookingPage.jsx` — Sales o'zi kirganda avtomatik o'z xulosasini ko'rsatadi (`metric-grid`: jami/kutilmoqda/tasdiqlangan bronlar + qo'shgan mijozlari soni). Management uchun sahifa yuqorisida «Sotuvchining faoliyatini ko'rish» `<select>` (Sales foydalanuvchilar ro'yxati) — tanlanganda o'sha xodimning xulosasi ko'rsatiladi.
 
 ---
 
