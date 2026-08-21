@@ -3270,9 +3270,13 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
           <div className="product-list">
             {rows.map((row, index) => (
               <div
-                className={`product-row${title === 'Shartnomalar' ? ' product-row-clickable' : ''}`}
+                className={`product-row${title === 'Shartnomalar' || (title === 'Bildirishnomalar' && row.booking) ? ' product-row-clickable' : ''}`}
                 key={row.id || index}
-                onClick={title === 'Shartnomalar' ? () => setContractDetailId(row.id) : undefined}
+                onClick={
+                  title === 'Shartnomalar' ? () => setContractDetailId(row.id)
+                    : (title === 'Bildirishnomalar' && row.booking) ? () => { handleMarkRead(row.id); navigateToPath(pathForPage('Bron')) }
+                      : undefined
+                }
                 onKeyDown={title === 'Shartnomalar' ? (event) => {
                   if (event.key === 'Enter' || event.key === ' ') {
                     event.preventDefault()
@@ -3287,10 +3291,10 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
                   <>
                     <div className="product-name">
                       <b>{row.title}</b>
-                      <small>{row.message}</small>
+                      <small>{row.message}{row.booking ? ' · Bron sahifasida ko‘rish uchun bosing' : ''}</small>
                     </div>
                     <b>{row.is_read ? 'O‘qilgan' : 'Yangi'}</b>
-                    <button className="row-action" onClick={() => handleMarkRead(row.id)}>{row.is_read ? '✓' : 'O‘qish'}</button>
+                    <button className="row-action" onClick={(e) => { e.stopPropagation(); handleMarkRead(row.id) }}>{row.is_read ? '✓' : 'O‘qish'}</button>
                   </>
                 ) : (
                   <>

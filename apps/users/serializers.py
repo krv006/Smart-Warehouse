@@ -19,7 +19,10 @@ def user_abilities(user):
     full_access = is_operator or is_management or is_accountant
 
     return {
-        'dashboard': is_accountant or is_management or is_sales,
+        # Diqqat: bu umumiy kompaniya moliyaviy dashboardi (kassa balansi,
+        # savdo tushumi) — Sales bu yerga kirmaydi, o'z faoliyatini
+        # Bron/Konfigurator/Mijozlar sahifalaridan ko'radi.
+        'dashboard': is_accountant or is_management,
         'orders_view': is_operator or is_management,
         'orders_manage': is_operator or is_management,
         'order_status_manage': is_management,
