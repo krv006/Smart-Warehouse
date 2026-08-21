@@ -944,8 +944,19 @@ function defaultGroupPage(session, groupKey) {
   return NAV_GROUPS[groupKey]?.find((tab) => can(session, tab.ability))?.page
 }
 
+// Admin (Management) uchun soddalashtirilgan navigatsiya — backend darajasida
+// hech narsa cheklanmaydi (abilities o'zgarmagan), faqat sidebar'da diqqatni
+// asosiy ishlarga (bildirishnoma, tasdiqlash, buyurtmalar) jamlaydi. Operator
+// kundalik operatsion ishni (ombor/kirim/sotuv/moliya) allaqachon to'liq
+// qamrab oladi (item 3) — Admin uchun ular sidebar'da ortiqcha shovqin.
+const MANAGEMENT_SIMPLIFIED_PAGES = new Set(['Bosh sahifa', 'Buyurtmalar', 'Bron', 'Tasdiqlash', 'Hisobotlar'])
+
 function allowedSidebar(session) {
-  return SIDEBAR_NAV.filter(([, , ability]) => canNavItem(session, ability))
+  const items = SIDEBAR_NAV.filter(([, , ability]) => canNavItem(session, ability))
+  if (session?.role === 'MANAGEMENT' && !session?.is_superuser) {
+    return items.filter(([label]) => MANAGEMENT_SIMPLIFIED_PAGES.has(label))
+  }
+  return items
 }
 
 function getPageDisplayTitle(page) {
