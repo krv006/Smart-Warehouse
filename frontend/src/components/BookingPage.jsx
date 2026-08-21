@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ArrowsLeftRight, Check, Plus, SpinnerGap, Trash, X } from '@phosphor-icons/react'
+import { ArrowsLeftRight, Bookmarks, Check, Clock, Plus, SpinnerGap, Trash, X } from '@phosphor-icons/react'
 import { api } from '../api'
 import DataTable from './DataTable'
 import StatusBadge from './StatusBadge'
@@ -190,6 +190,23 @@ export default function BookingPage({ notify, session, reloadKey = 0 }) {
         </div>
         <button className="primary-button" onClick={() => setCreating(true)}><Plus size={18} /> Yangi bron</button>
       </div>
+
+      {!isManagement && (
+        <section className="metric-grid">
+          <article className="metric">
+            <span className="metric-icon neutral"><Bookmarks size={22} weight="duotone" /></span>
+            <div><p>Jami bronlarim</p><h2>{items.length}</h2></div>
+          </article>
+          <article className="metric">
+            <span className="metric-icon up"><Clock size={22} weight="duotone" /></span>
+            <div><p>Kutilmoqda</p><h2>{items.filter((r) => r.status === 'pending').length}</h2></div>
+          </article>
+          <article className="metric">
+            <span className="metric-icon up"><Check size={22} weight="duotone" /></span>
+            <div><p>Tasdiqlangan</p><h2>{items.filter((r) => r.status === 'confirmed').length}</h2></div>
+          </article>
+        </section>
+      )}
 
       <DataTable
         columns={columns}
