@@ -1297,8 +1297,8 @@ function App() {
   const secondaryMobileNav = navItems.slice(4)
   const activeGroup = getGroupForPage(active)
   useGlobalSearchHotkey(() => setGlobalSearchOpen(true))
-  const navigateToPath = (path) => {
-    routerNavigate(path)
+  const navigateToPath = (path, options) => {
+    routerNavigate(path, options)
     setMobileMenuOpen(false)
   }
   const navigate = (label) => {
@@ -3274,7 +3274,7 @@ function ResourcePage({ title, notify, reloadKey = 0, session, onDataChange, onN
                 key={row.id || index}
                 onClick={
                   title === 'Shartnomalar' ? () => setContractDetailId(row.id)
-                    : (title === 'Bildirishnomalar' && row.booking) ? () => { handleMarkRead(row.id); navigateToPath(pathForPage('Bron')) }
+                    : (title === 'Bildirishnomalar' && row.booking) ? () => { handleMarkRead(row.id); navigateToPath(pathForPage('Bron'), { state: { highlightBookingId: row.booking } }) }
                       : undefined
                 }
                 onKeyDown={title === 'Shartnomalar' ? (event) => {

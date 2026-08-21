@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { ArrowsLeftRight, Bookmarks, Check, Clock, Plus, SpinnerGap, Trash, X } from '@phosphor-icons/react'
 import { api } from '../api'
 import DataTable from './DataTable'
@@ -118,6 +119,8 @@ function ReassignPicker({ booking, salesUsers, close, done, notify }) {
 }
 
 export default function BookingPage({ notify, session, reloadKey = 0 }) {
+  const location = useLocation()
+  const highlightBookingId = location.state?.highlightBookingId ?? null
   const [items, setItems] = useState([])
   const [products, setProducts] = useState([])
   const [salesUsers, setSalesUsers] = useState([])
@@ -208,9 +211,13 @@ export default function BookingPage({ notify, session, reloadKey = 0 }) {
         </section>
       )}
 
+      {highlightBookingId && !items.some((row) => row.id === highlightBookingId) && !loading && (
+        <p className="muted">Bildirishnomadagi bron (#{highlightBookingId}) ro‘yxatda topilmadi — allaqachon boshqa xodimga o‘tkazilgan yoki o‘chirilgan bo‘lishi mumkin.</p>
+      )}
       <DataTable
         columns={columns}
-        rows={items}
+        rows={highlightBookingId ? [...items].sort((a, b) => (a.id === highlightBookingId ? -1 : b.id === highlightBookingId ? 1 : 0)) : items}
+        rowClassName={(row) => (row.id === highlightBookingId ? 'is-selected' : '')}
         loading={loading}
         emptyLabel="Hali bron yo‘q."
         renderActions={(row) => (
